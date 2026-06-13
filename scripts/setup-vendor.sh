@@ -62,7 +62,6 @@ ensure_vendor_checkout() {
     local remote_url="$2"
     local base_revision_file="$3"
     shift 3
-    local git_configs=("$@")
 
     if [[ -e "$vendor_dir" ]]; then
         if ! is_git_checkout "$vendor_dir"; then
@@ -78,7 +77,10 @@ ensure_vendor_checkout() {
     base_revision="$(get_base_revision "$base_revision_file")"
 
     git clone --no-checkout "$remote_url" "$vendor_dir"
-    for entry in "${git_configs[@]}"; do
+    local entry
+    while [[ "$#" -gt 0 ]]; do
+        entry="$1"
+        shift
         if [[ "$entry" != *=* ]]; then
             echo "Invalid Git config entry for $vendor_dir: $entry" >&2
             exit 1
@@ -109,33 +111,40 @@ if [[ "$command_name" == "apply" || "$command_name" == "update" ]]; then
     ensure_vendor_checkout vendor/encoding_rs https://github.com/hsivonen/encoding_rs.git patches/encoding_rs/BASE_REVISION
 fi
 
-iced_update_args=()
-encoding_update_args=()
-
-if [[ "$command_name" == "update" ]]; then
-    iced_update_args=(--remote https://github.com/iced-rs/iced.git --branch master)
-    encoding_update_args=(--remote https://github.com/hsivonen/encoding_rs.git --branch main)
-fi
-
 if [[ "$command_name" == "status" && ! -e vendor/iced ]]; then
     missing_vendor_status vendor/iced patches/iced/fragile-notepad-iced.patch patches/iced/BASE_REVISION
-else
+elif [[ "$command_name" == "update" ]]; then
     "${BASH:-bash}" scripts/vendor-patch.sh "$command_name" \
         --vendor-dir vendor/iced \
         --patch patches/iced/fragile-notepad-iced.patch \
         --base-revision-file patches/iced/BASE_REVISION \
         --git-vendor \
         --git-config core.autocrlf=true \
-        "${iced_update_args[@]}"
+        --remote https://github.com/iced-rs/iced.git \
+        --branch master
+else
+    "${BASH:-bash}" scripts/vendor-patch.sh "$command_name" \
+        --vendor-dir vendor/iced \
+        --patch patches/iced/fragile-notepad-iced.patch \
+        --base-revision-file patches/iced/BASE_REVISION \
+        --git-vendor \
+        --git-config core.autocrlf=true
 fi
 
 if [[ "$command_name" == "status" && ! -e vendor/encoding_rs ]]; then
     missing_vendor_status vendor/encoding_rs patches/encoding_rs/oem-code-pages.patch patches/encoding_rs/BASE_REVISION
-else
+elif [[ "$command_name" == "update" ]]; then
     "${BASH:-bash}" scripts/vendor-patch.sh "$command_name" \
         --vendor-dir vendor/encoding_rs \
         --patch patches/encoding_rs/oem-code-pages.patch \
         --base-revision-file patches/encoding_rs/BASE_REVISION \
         --git-vendor \
-        "${encoding_update_args[@]}"
+        --remote https://github.com/hsivonen/encoding_rs.git \
+        --branch main
+else
+    "${BASH:-bash}" scripts/vendor-patch.sh "$command_name" \
+        --vendor-dir vendor/encoding_rs \
+        --patch patches/encoding_rs/oem-code-pages.patch \
+        --base-revision-file patches/encoding_rs/BASE_REVISION \
+        --git-vendor
 fi
