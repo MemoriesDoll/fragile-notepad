@@ -480,7 +480,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Character("a".into()),
             &keyboard::Key::Character("a".into()),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
@@ -500,7 +500,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Named(key::Named::ArrowLeft),
             &keyboard::Key::Named(key::Named::ArrowLeft),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
@@ -510,7 +510,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Named(key::Named::ArrowRight),
             &keyboard::Key::Named(key::Named::ArrowRight),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
@@ -520,7 +520,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Named(key::Named::ArrowLeft),
             &keyboard::Key::Named(key::Named::ArrowLeft),
-            keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT,
+            keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
             None,
             &shortcuts,
         ),
@@ -530,7 +530,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Named(key::Named::ArrowRight),
             &keyboard::Key::Named(key::Named::ArrowRight),
-            keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT,
+            keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
             None,
             &shortcuts,
         ),
@@ -580,7 +580,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Character("v".into()),
             &keyboard::Key::Character("v".into()),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
@@ -590,7 +590,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Character("d".into()),
             &keyboard::Key::Character("d".into()),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
@@ -600,7 +600,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Named(key::Named::ArrowDown),
             &keyboard::Key::Named(key::Named::ArrowDown),
-            keyboard::Modifiers::CTRL | keyboard::Modifiers::ALT,
+            keyboard::Modifiers::COMMAND | keyboard::Modifiers::ALT,
             None,
             &shortcuts,
         ),
@@ -610,7 +610,7 @@ fn editor_widget_key_action_maps_keyboard_to_app_local_actions() {
         key_action(
             &keyboard::Key::Character("L".into()),
             &keyboard::Key::Character("L".into()),
-            keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT,
+            keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
             None,
             &shortcuts,
         ),
@@ -1581,7 +1581,7 @@ fn editor_widget_key_action_maps_undo_redo_select_all_and_text_inputs() {
         key_action(
             &keyboard::Key::Character("z".into()),
             &keyboard::Key::Character("z".into()),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
@@ -1591,7 +1591,7 @@ fn editor_widget_key_action_maps_undo_redo_select_all_and_text_inputs() {
         key_action(
             &keyboard::Key::Character("y".into()),
             &keyboard::Key::Character("y".into()),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
@@ -1634,7 +1634,7 @@ fn editor_widget_key_action_uses_custom_shortcut_map() {
         key_action(
             &keyboard::Key::Character("d".into()),
             &keyboard::Key::Character("d".into()),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
@@ -1644,7 +1644,7 @@ fn editor_widget_key_action_uses_custom_shortcut_map() {
         key_action(
             &keyboard::Key::Character("l".into()),
             &keyboard::Key::Character("l".into()),
-            keyboard::Modifiers::CTRL,
+            keyboard::Modifiers::COMMAND,
             None,
             &shortcuts,
         ),
