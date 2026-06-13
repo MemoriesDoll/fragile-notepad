@@ -9,7 +9,7 @@ fn activate_macos_application() {
     use std::ffi::c_void;
     use std::os::raw::c_char;
 
-    extern "C" {
+    unsafe extern "C" {
         fn objc_getClass(name: *const c_char) -> *mut c_void;
         fn sel_registerName(name: *const c_char) -> *mut c_void;
 
