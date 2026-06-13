@@ -33,8 +33,17 @@ remote_url=""
 revision=""
 branch=""
 git_config=()
+git_config_count=0
 git_vendor=0
 force=0
+
+vendor_git() {
+    if [[ "$git_config_count" -gt 0 ]]; then
+        git -C "$vendor_dir" "${git_config[@]}" "$@"
+    else
+        git -C "$vendor_dir" "$@"
+    fi
+}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -64,6 +73,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --git-config)
             git_config+=("-c" "${2:?missing value for --git-config}")
+            git_config_count=$((git_config_count + 2))
             shift 2
             ;;
         --git-vendor)
@@ -115,7 +125,7 @@ assert_git_vendor() {
 assert_clean_vendor() {
     local status
     assert_git_vendor
-    status="$(git -C "$vendor_dir" "${git_config[@]}" status --short)"
+    status="$(vendor_git status --short)"
 
     if [[ -n "$status" && "$force" -ne 1 ]]; then
         echo "$vendor_dir has local changes:" >&2
@@ -229,7 +239,7 @@ convert_git_vendor_patch() {
 }
 
 vendor_head() {
-    git -C "$vendor_dir" "${git_config[@]}" rev-parse HEAD
+    vendor_git rev-parse HEAD
 }
 
 superproject_gitlink() {
@@ -282,25 +292,27 @@ export_patch() {
     resolved_patch_path="$(repo_path "$patch_path")"
     converted_patch="$(dirname "$resolved_patch_path")/.$(basename "$patch_path").$$.tmp"
     local -a untracked=()
+    local untracked_count=0
 
     while IFS= read -r file; do
         untracked+=("$file")
-    done < <(git -C "$vendor_dir" "${git_config[@]}" ls-files --others --exclude-standard)
+        untracked_count=$((untracked_count + 1))
+    done < <(vendor_git ls-files --others --exclude-standard)
 
     cleanup_export() {
-        if [[ "${#untracked[@]}" -gt 0 ]]; then
-            git -C "$vendor_dir" "${git_config[@]}" reset -q -- "${untracked[@]}" >/dev/null || true
+        if [[ "$untracked_count" -gt 0 ]]; then
+            vendor_git reset -q -- "${untracked[@]}" >/dev/null || true
         fi
         rm -f "$temp_patch" "$converted_patch"
         trap - RETURN
     }
     trap cleanup_export RETURN
 
-    if [[ "${#untracked[@]}" -gt 0 ]]; then
-        git -C "$vendor_dir" "${git_config[@]}" add -N -- "${untracked[@]}"
+    if [[ "$untracked_count" -gt 0 ]]; then
+        vendor_git add -N -- "${untracked[@]}"
     fi
 
-    git -C "$vendor_dir" "${git_config[@]}" diff --binary --output="$temp_patch"
+    vendor_git diff --binary --output="$temp_patch"
     convert_git_vendor_patch < "$temp_patch" > "$converted_patch"
     protect_patch_replacement "$resolved_patch_path" "$converted_patch"
     write_base_revision "$(vendor_head)"
@@ -341,18 +353,18 @@ apply_patch() {
     assert_git_vendor
     assert_clean_vendor
     resolved_patch_path="$(repo_path "$patch_path")"
-    git -C "$vendor_dir" "${git_config[@]}" apply "-p$(git_vendor_strip_count)" "$resolved_patch_path"
+    vendor_git apply "-p$(git_vendor_strip_count)" "$resolved_patch_path"
 }
 
 reverse_patch() {
     assert_vendor_dir
     assert_git_vendor
     resolved_patch_path="$(repo_path "$patch_path")"
-    git -C "$vendor_dir" "${git_config[@]}" apply -R "-p$(git_vendor_strip_count)" "$resolved_patch_path"
+    vendor_git apply -R "-p$(git_vendor_strip_count)" "$resolved_patch_path"
 }
 
 vendor_has_changes() {
-    [[ -n "$(git -C "$vendor_dir" "${git_config[@]}" status --short)" ]]
+    [[ -n "$(vendor_git status --short)" ]]
 }
 
 resolve_update_revision() {
@@ -362,14 +374,14 @@ resolve_update_revision() {
     fi
 
     if [[ -n "$remote_url" ]]; then
-        git -C "$vendor_dir" "${git_config[@]}" fetch "$remote_url" "$target_branch"
-        git -C "$vendor_dir" "${git_config[@]}" rev-parse FETCH_HEAD
+        vendor_git fetch "$remote_url" "$target_branch"
+        vendor_git rev-parse FETCH_HEAD
     else
-        git -C "$vendor_dir" "${git_config[@]}" fetch origin "$target_branch"
+        vendor_git fetch origin "$target_branch"
         if [[ "$target_branch" == "HEAD" ]]; then
-            git -C "$vendor_dir" "${git_config[@]}" rev-parse FETCH_HEAD
+            vendor_git rev-parse FETCH_HEAD
         else
-            git -C "$vendor_dir" "${git_config[@]}" rev-parse "origin/$target_branch"
+            vendor_git rev-parse "origin/$target_branch"
         fi
     fi
 }
@@ -410,7 +422,7 @@ case "$command_name" in
             echo "pin status:       ok"
         fi
         echo
-        git -C "$vendor_dir" "${git_config[@]}" status --short
+        vendor_git status --short
         ;;
     apply)
         apply_patch
@@ -429,11 +441,11 @@ case "$command_name" in
         fi
 
         if [[ -n "$remote_url" ]]; then
-            git -C "$vendor_dir" "${git_config[@]}" remote set-url origin "$remote_url"
-            git -C "$vendor_dir" "${git_config[@]}" fetch origin
+            vendor_git remote set-url origin "$remote_url"
+            vendor_git fetch origin
         fi
 
-        git -C "$vendor_dir" "${git_config[@]}" checkout "$target_revision"
+        vendor_git checkout "$target_revision"
         write_base_revision "$target_revision"
         apply_patch
         ;;
@@ -449,7 +461,7 @@ case "$command_name" in
             assert_clean_vendor
         fi
 
-        git -C "$vendor_dir" "${git_config[@]}" checkout "$target_revision"
+        vendor_git checkout "$target_revision"
         write_base_revision "$target_revision"
         apply_patch
         export_patch
