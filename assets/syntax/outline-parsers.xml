@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<outline-parsers schema-version="1">
+  <family id="brace">
+    <adapter name="rust" />
+    <adapter name="javascript" />
+    <adapter name="generic-brace" />
+    <body kind="brace" open="{" close="}" />
+  </family>
+
+  <family id="indent">
+    <adapter name="python" />
+    <adapter name="generic-indent" />
+    <body kind="indent" />
+  </family>
+
+  <family id="end-keyword">
+    <adapter name="ruby" />
+    <adapter name="generic-end-keyword" />
+    <body kind="end-keyword" end-keyword="end" />
+  </family>
+
+  <language name="Rust">
+    <token value="rs" />
+    <use-family id="brace" adapter="rust" />
+    <lexical>
+      <word-characters extra="_" unicode="true" />
+      <line-comment open="//" />
+      <block-comment open="/*" close="*/" />
+      <string open="&quot;" close="&quot;" escape="\" />
+      <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+      <raw-string kind="rust" />
+    </lexical>
+    <container kind="module" keyword="mod" name="after-keyword" body="brace" />
+    <container kind="trait" keyword="trait" name="after-keyword" body="brace" />
+    <container kind="impl" keyword="impl" name="after-keyword" body="brace" />
+    <declaration kind="function" keyword="fn" name="after-keyword" body="brace" method-containers="impl,trait" declaration-terminator=";" />
+  </language>
+
+  <language name="Python">
+    <token value="py" />
+    <token value="pyw" />
+    <use-family id="indent" adapter="python" />
+    <lexical>
+      <word-characters extra="_" unicode="true" />
+      <line-comment open="#" />
+      <string open="&quot;&quot;&quot;" close="&quot;&quot;&quot;" escape="\" />
+      <string open="&apos;&apos;&apos;" close="&apos;&apos;&apos;" escape="\" />
+      <string open="&quot;" close="&quot;" escape="\" />
+      <string open="&apos;" close="&apos;" escape="\" />
+    </lexical>
+    <container kind="class" keyword="class" name="after-keyword" body="indent" />
+    <declaration kind="function" keyword="def" name="after-keyword" body="indent" method-containers="class" />
+    <declaration kind="function" keyword="async def" name="after-keyword" body="indent" method-containers="class" />
+  </language>
+
+  <language name="JavaScript">
+    <token value="js" />
+    <token value="mjs" />
+    <token value="cjs" />
+    <token value="jsx" />
+    <token value="ts" />
+    <token value="tsx" />
+    <use-family id="brace" adapter="javascript" />
+    <lexical>
+      <word-characters extra="_$" unicode="true" />
+      <line-comment open="//" />
+      <block-comment open="/*" close="*/" />
+      <string open="&quot;" close="&quot;" escape="\" />
+      <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+      <string open="`" close="`" escape="\" />
+    </lexical>
+    <container kind="class" keyword="class" name="after-keyword" body="brace" />
+    <declaration kind="function" keyword="function" name="after-keyword" body="brace" method-containers="class" />
+  </language>
+
+  <language name="Java">
+    <token value="java" />
+    <use-family id="brace" adapter="generic-brace" />
+    <lexical>
+      <word-characters extra="_$" unicode="true" />
+      <line-comment open="//" />
+      <block-comment open="/*" close="*/" />
+      <string open="&quot;" close="&quot;" escape="\" />
+      <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+    </lexical>
+    <container kind="class" keyword="class" name="after-keyword" body="brace" />
+    <container kind="interface" keyword="interface" name="after-keyword" body="brace" />
+    <container kind="class" keyword="record" name="after-keyword" body="brace" />
+    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class,interface" declaration-terminator=";" reject-names="if,for,while,switch,catch,new,return,throw,super,this" reject-previous=".,:,=,return,throw,new,record" reject-prefixes="-&gt;" start-boundaries="{,},;,:" container-name-previous="class,interface,record" assignment-continuations="default" control-headers="for,if,else if,while,switch,catch" />
+  </language>
+
+  <language name="Kotlin">
+    <token value="kt" />
+    <token value="kts" />
+    <use-family id="brace" adapter="generic-brace" />
+    <lexical>
+      <word-characters extra="_$" unicode="true" />
+      <line-comment open="//" />
+      <block-comment open="/*" close="*/" />
+      <string open="&quot;" close="&quot;" escape="\" />
+      <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+      <string open="&quot;&quot;&quot;" close="&quot;&quot;&quot;" />
+    </lexical>
+    <container kind="class" keyword="class" name="after-keyword" body="brace" />
+    <container kind="interface" keyword="interface" name="after-keyword" body="brace" />
+    <container kind="impl" keyword="object" name="after-keyword" body="brace" />
+    <declaration kind="function" keyword="fun" name="after-keyword" body="brace" method-containers="class,interface,impl" declaration-terminator="line" />
+  </language>
+
+  <language name="C Family">
+    <token value="c" />
+    <token value="h" />
+    <token value="cpp" />
+    <token value="cc" />
+    <token value="cxx" />
+    <token value="hpp" />
+    <token value="hxx" />
+    <use-family id="brace" adapter="generic-brace" />
+    <lexical>
+      <word-characters extra="_$" unicode="true" />
+      <line-comment open="//" />
+      <block-comment open="/*" close="*/" />
+      <string open="&quot;" close="&quot;" escape="\" />
+      <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+    </lexical>
+    <container kind="namespace" keyword="namespace" name="after-keyword" body="brace" />
+    <container kind="class" keyword="class" name="after-keyword" body="brace" />
+    <container kind="class" keyword="struct" name="after-keyword" body="brace" />
+    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class" declaration-terminator=";" reject-names="if,for,while,switch,catch,sizeof,alignof,decltype,return,throw,new,delete,static_cast,dynamic_cast,reinterpret_cast,const_cast" reject-previous=".,=,return,throw,new,delete" reject-prefixes="-&gt;" require-non-container-previous="const,static,inline,virtual,explicit,operator" require-non-container-previous-kind="qualified-identifier,template-type-tail" start-boundaries="{,},;,:" operator-tokens="(),[],&lt;,&gt;,=,!,+,-,*,/,%,&amp;,|,^,~" name-prefixes="~" qualified-separators="::" compound-prefixes="operator" container-name-previous="class,struct" assignment-continuations="default,delete,0" control-headers="for,if,else if,while,switch,catch" />
+  </language>
+
+  <language name="Ruby">
+    <token value="rb" />
+    <token value="rake" />
+    <use-family id="end-keyword" adapter="ruby" />
+    <lexical>
+      <word-characters extra="_@!" unicode="true" />
+      <line-comment open="#" />
+      <string open="&quot;" close="&quot;" escape="\" />
+      <string open="&apos;" close="&apos;" escape="\" />
+    </lexical>
+    <container kind="class" keyword="class" name="after-keyword" body="end-keyword" />
+    <container kind="module" keyword="module" name="after-keyword" body="end-keyword" />
+    <declaration kind="function" keyword="def" name="after-keyword" body="end-keyword" method-containers="class,module" />
+  </language>
+</outline-parsers>

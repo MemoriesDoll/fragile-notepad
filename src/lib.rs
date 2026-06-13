@@ -1,0 +1,13 @@
+pub mod app;
+pub mod assets;
+pub mod core;
+pub mod editor;
+pub mod ipc;
+pub mod message;
+pub mod perf_trace;
+mod platform;
+pub mod search_dialog;
+pub mod services;
+pub mod settings_dialog;
+pub mod startup;
+pub mod ui;

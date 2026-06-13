@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Install Python asset tooling
+        if: runner.os == 'Windows'
+        run: python -m pip install Pillow
+
+      - name: Install Python asset tooling
+        if: runner.os != 'Windows'
+        run: python3 -m pip install Pillow
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Linux windowing dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            pkg-config \
+            xvfb
+
+      - name: Apply vendor patches
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\setup-vendor.ps1 apply -SkipSubmoduleUpdate
+
+      - name: Apply vendor patches
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/setup-vendor.sh apply --skip-submodule-update
+
+      - name: Validate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\ci.ps1
+
+      - name: Validate
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/ci.sh

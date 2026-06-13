@@ -1,0 +1,9 @@
+Tango Icon Theme assets
+
+The Tango Icon Theme is released into the public domain.
+
+Source used for these assets:
+https://www.freedesktop.org/wiki/Software/Tango/
+
+The RGBA files in this directory are generated from the downloaded 22x22 PNG
+assets for embedding with iced::widget::image.

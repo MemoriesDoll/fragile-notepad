@@ -1,0 +1,170 @@
+name: Nightly Build
+
+on:
+  schedule:
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            artifact: fragile-notepad-windows-x64
+            archive: fragile-notepad-windows-x64.zip
+          - name: linux-x64
+            os: ubuntu-latest
+            artifact: fragile-notepad-linux-x64
+            archive: fragile-notepad-linux-x64.tar.gz
+          - name: macos
+            os: macos-latest
+            artifact: fragile-notepad-macos
+            archive: fragile-notepad-macos.tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install Python asset tooling
+        if: runner.os == 'Windows'
+        run: python -m pip install Pillow
+
+      - name: Install Python asset tooling
+        if: runner.os != 'Windows'
+        run: python3 -m pip install Pillow
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Install Linux windowing dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            pkg-config
+
+      - name: Apply vendor patches
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\setup-vendor.ps1 apply -SkipSubmoduleUpdate
+
+      - name: Apply vendor patches
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/setup-vendor.sh apply --skip-submodule-update
+
+      - name: Generate embedded icon assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\generate_icon_assets.ps1
+
+      - name: Generate embedded icon assets
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/generate_icon_assets.sh
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Compress-Archive -Path target\release\fragile-notepad.exe -DestinationPath dist\${{ matrix.archive }} -Force
+
+      - name: Package Unix artifact
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/package
+          cp target/release/fragile-notepad dist/package/
+          tar -C dist/package -czf "dist/${{ matrix.archive }}" fragile-notepad
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish prerelease
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="nightly-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          title="Nightly Build $(date -u +%Y-%m-%d)"
+          notes="$(cat <<EOF
+          Automated nightly build from ${GITHUB_SHA}.
+
+          Artifacts:
+          - Windows x64 zip
+          - Linux x64 tar.gz
+          - macOS tar.gz
+          EOF
+          )"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${tag}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${tag}"
+
+          gh release create "${tag}" dist/* \
+            --title "${title}" \
+            --notes "${notes}" \
+            --prerelease \
+            --latest=false

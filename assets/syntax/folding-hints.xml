@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<folding-hints>
+  <fallback>
+    <word-characters extra="_" />
+    <line-comment open="//" />
+    <block-comment open="/*" close="*/" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+    <string open="`" close="`" escape="\" />
+  </fallback>
+
+  <language name="Rust">
+    <token value="rs" />
+    <word-characters extra="_" />
+    <line-comment open="//" />
+    <block-comment open="/*" close="*/" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+    <raw-string kind="rust" />
+    <outline kind="keyword-body" keyword="fn" name-position="after-keyword" modifiers="pub,async,const,unsafe,extern" method-containers="impl,trait" declaration-terminator=";" />
+  </language>
+
+  <language name="C Family">
+    <token value="c" />
+    <token value="h" />
+    <token value="cpp" />
+    <token value="cxx" />
+    <token value="cc" />
+    <token value="hpp" />
+    <token value="hxx" />
+    <token value="java" />
+    <token value="js" />
+    <token value="mjs" />
+    <token value="cjs" />
+    <token value="jsx" />
+    <token value="ts" />
+    <token value="mts" />
+    <token value="cts" />
+    <token value="tsx" />
+    <token value="cs" />
+    <token value="go" />
+    <token value="swift" />
+    <token value="kt" />
+    <token value="kts" />
+    <token value="scala" />
+    <token value="dart" />
+    <word-characters extra="_" />
+    <line-comment open="//" />
+    <block-comment open="/*" close="*/" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+    <string open="`" close="`" escape="\" />
+    <outline kind="keyword-body" keyword="function" name-position="after-keyword" method-containers="class,interface,impl,trait" />
+    <outline kind="keyword-body" keyword="func" name-position="after-keyword" method-containers="class,interface,impl,trait" />
+    <outline kind="keyword-body" keyword="def" name-position="after-keyword" method-containers="class,interface,impl,trait" />
+  </language>
+
+  <language name="Python">
+    <token value="py" />
+    <token value="pyw" />
+    <word-characters extra="_" />
+    <line-comment open="#" />
+    <string open="&quot;&quot;&quot;" close="&quot;&quot;&quot;" escape="\" />
+    <string open="&apos;&apos;&apos;" close="&apos;&apos;&apos;" escape="\" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="\" />
+    <outline kind="indent-keyword" keyword="def" name-position="after-keyword" method-containers="class" />
+    <outline kind="indent-keyword" keyword="async def" name-position="after-keyword" method-containers="class" />
+  </language>
+
+  <language name="Shell">
+    <token value="sh" />
+    <token value="bash" />
+    <token value="zsh" />
+    <token value="fish" />
+    <token value="ps1" />
+    <token value="psm1" />
+    <token value="psd1" />
+    <word-characters extra="_-" />
+    <line-comment open="#" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" />
+    <outline kind="keyword-body" keyword="function" name-position="after-keyword" />
+  </language>
+
+  <language name="Markup">
+    <token value="html" />
+    <token value="htm" />
+    <token value="xhtml" />
+    <token value="xml" />
+    <token value="svg" />
+    <token value="xaml" />
+    <block-comment open="&lt;!--" close="--&gt;" />
+    <string open="&quot;" close="&quot;" />
+    <string open="&apos;" close="&apos;" />
+  </language>
+
+  <language name="Stylesheets">
+    <token value="css" />
+    <token value="scss" />
+    <token value="sass" />
+    <token value="less" />
+    <line-comment open="//" />
+    <block-comment open="/*" close="*/" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="\" />
+    <outline kind="keyword-body" keyword="@function" name-position="after-keyword" />
+    <outline kind="keyword-body" keyword="@mixin" name-position="after-keyword" />
+  </language>
+
+  <language name="PHP">
+    <token value="php" />
+    <token value="phtml" />
+    <word-characters extra="_$" />
+    <line-comment open="//" />
+    <line-comment open="#" />
+    <block-comment open="/*" close="*/" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="\" />
+    <outline kind="keyword-body" keyword="function" name-position="after-keyword" method-containers="class,trait" />
+  </language>
+
+  <language name="Ruby">
+    <token value="rb" />
+    <token value="rake" />
+    <word-characters extra="_@" />
+    <line-comment open="#" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="\" />
+    <outline kind="end-keyword" keyword="def" name-position="after-keyword" method-containers="class,module" />
+  </language>
+
+  <language name="Lua">
+    <token value="lua" />
+    <line-comment open="--" />
+    <block-comment open="--[[" close="]]" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="\" />
+    <outline kind="end-keyword" keyword="function" name-position="after-keyword" />
+  </language>
+
+  <language name="SQL">
+    <token value="sql" />
+    <line-comment open="--" />
+    <block-comment open="/*" close="*/" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" escape="&apos;" />
+  </language>
+
+  <language name="Config Hash Comments">
+    <token value="toml" />
+    <token value="yaml" />
+    <token value="yml" />
+    <token value="ini" />
+    <token value="cfg" />
+    <token value="conf" />
+    <line-comment open="#" />
+    <string open="&quot;" close="&quot;" escape="\" />
+    <string open="&apos;" close="&apos;" />
+  </language>
+
+  <language name="JSON">
+    <token value="json" />
+    <token value="jsonc" />
+    <string open="&quot;" close="&quot;" escape="\" />
+  </language>
+
+  <language name="Markdown">
+    <token value="md" />
+    <token value="markdown" />
+    <block-comment open="&lt;!--" close="--&gt;" />
+    <string open="`" close="`" />
+  </language>
+</folding-hints>
