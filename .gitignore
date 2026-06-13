@@ -26,6 +26,10 @@ target/perf/
 patches/**/.backups/
 patches/.manual-backups/
 
+# Script-managed vendor checkouts
+/vendor/iced/
+/vendor/encoding_rs/
+
 # Generated icon raster assets
 assets/icons/*/rgba/
 

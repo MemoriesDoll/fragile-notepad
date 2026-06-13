@@ -107,7 +107,7 @@ is_git_vendor() {
 
 assert_git_vendor() {
     if ! is_git_vendor; then
-        echo "$vendor_dir is not a Git checkout. Vendor directories must be Git submodules or Git repositories." >&2
+        echo "$vendor_dir is not a Git checkout. Vendor directories must be Git repositories." >&2
         exit 1
     fi
 }
@@ -255,9 +255,6 @@ pin_consistency_problems() {
     if [[ -n "$gitlink" && "$gitlink" != "$head" ]]; then
         printf 'staged superproject gitlink %s does not match vendor HEAD %s\n' "$gitlink" "$head"
     fi
-    if [[ -z "$gitlink" ]]; then
-        printf 'vendor path is not staged as a gitlink in the superproject\n'
-    fi
 }
 
 warn_pin_consistency() {
@@ -272,7 +269,7 @@ warn_pin_consistency() {
     while IFS= read -r problem; do
         [[ -n "$problem" ]] && echo "warning:   $problem" >&2
     done <<< "$problems"
-    echo "warning: Stage the matching files, for example: git add $vendor_path $base_revision_file $patch_path" >&2
+    echo "warning: Stage the matching files, for example: git add $base_revision_file $patch_path" >&2
 }
 
 export_patch() {
@@ -401,7 +398,7 @@ case "$command_name" in
         if [[ -n "$gitlink" ]]; then
             echo "superproject pin: $gitlink"
         else
-            echo "superproject pin: <not staged as gitlink>"
+            echo "superproject pin: <script-managed checkout>"
         fi
         pin_problems="$(pin_consistency_problems)"
         if [[ -n "$pin_problems" ]]; then

@@ -140,7 +140,7 @@ function Test-GitVendor {
 
 function Assert-GitVendor {
     if (-not (Test-GitVendor)) {
-        throw "$VendorDir is not a Git checkout. Vendor directories must be Git submodules or Git repositories."
+        throw "$VendorDir is not a Git checkout. Vendor directories must be Git repositories."
     }
 }
 
@@ -235,9 +235,6 @@ function Test-PinConsistency {
     if ($gitlink -and $gitlink -ne $head) {
         $problems += "staged superproject gitlink $gitlink does not match vendor HEAD $head"
     }
-    if (-not $gitlink) {
-        $problems += "vendor path is not staged as a gitlink in the superproject"
-    }
 
     return $problems
 }
@@ -251,7 +248,7 @@ function Write-PinConsistencyWarning {
     $path = Get-SuperprojectVendorPath
     Write-Warning "$path is not fully reproducible yet:"
     $problems | ForEach-Object { Write-Warning "  $_" }
-    Write-Warning "Stage the matching files, for example: git add $path $BaseRevisionFile $Patch"
+    Write-Warning "Stage the matching files, for example: git add $BaseRevisionFile $Patch"
 }
 
 function Apply-Patch {
@@ -473,7 +470,7 @@ switch ($Command) {
         $configArgs = Get-GitConfigArgs
         Write-Host "vendor HEAD:      $((git -C $VendorDir @configArgs rev-parse HEAD).Trim())"
         $gitlink = Get-SuperprojectGitlink
-        Write-Host "superproject pin: $(if ($gitlink) { $gitlink } else { "<not staged as gitlink>" })"
+        Write-Host "superproject pin: $(if ($gitlink) { $gitlink } else { "<script-managed checkout>" })"
         $pinProblems = @(Test-PinConsistency)
         if ($pinProblems.Count -gt 0) {
             Write-Host "pin status:       mismatch"

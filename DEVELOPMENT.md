@@ -3,8 +3,9 @@
 ## Vendored Dependencies
 
 Fragile Notepad builds against Git checkouts under `vendor/`. Each vendor
-directory is a Git submodule pinned to an upstream revision, and project-owned
-changes are stored as patch files under `patches/`.
+directory is managed by the setup scripts and ignored by Git. Project-owned
+changes are stored as patch files under `patches/`, with the upstream base
+recorded in `BASE_REVISION`.
 
 Current vendors:
 
@@ -20,7 +21,7 @@ Current vendors:
 
 ## Clone Setup
 
-After cloning, initialize and patch the vendor checkouts:
+After cloning, bootstrap and patch the vendor checkouts:
 
 ```powershell
 .\scripts\setup-vendor.ps1 apply
@@ -90,26 +91,27 @@ bash scripts/vendor-patch.sh refresh --vendor-dir vendor/encoding_rs --patch pat
 Command behavior:
 
 - `status` prints the recorded base revision, patch path, vendor HEAD, and
-  current vendor changes. It also reports whether the recorded base revision
-  and staged superproject gitlink match the vendor HEAD. The setup wrapper keeps
-  `status` read-only and does not initialize or checkout submodules first.
-- `apply` applies the patch to a clean vendor checkout.
+  current vendor changes. It reports whether the recorded base revision matches
+  the vendor HEAD. The setup wrapper keeps `status` read-only; missing vendor
+  directories are reported without cloning.
+- `apply` clones missing vendor checkouts, checks out the recorded base
+  revision, and applies the patch to a clean vendor checkout.
 - `export` refreshes the patch from the current vendor working tree and updates
   `BASE_REVISION` to the vendor HEAD. Untracked vendor files are included as
   new-file patch hunks automatically. Existing non-empty patch files are backed
   up under `patches/**/.backups/` before replacement, and empty exports refuse
   to overwrite non-empty patches unless `-Force` / `--force` is used. After an
-  export, stage the vendor gitlink together with the patch artifacts so fresh
-  clones can reproduce the same vendor base:
+  export, stage the patch artifacts so fresh clones can reproduce the same
+  vendor base:
 
 ```powershell
-git add vendor/iced patches/iced/BASE_REVISION patches/iced/fragile-notepad-iced.patch
-git add vendor/encoding_rs patches/encoding_rs/BASE_REVISION patches/encoding_rs/oem-code-pages.patch
+git add patches/iced/BASE_REVISION patches/iced/fragile-notepad-iced.patch
+git add patches/encoding_rs/BASE_REVISION patches/encoding_rs/oem-code-pages.patch
 ```
 
 ```bash
-git add vendor/iced patches/iced/BASE_REVISION patches/iced/fragile-notepad-iced.patch
-git add vendor/encoding_rs patches/encoding_rs/BASE_REVISION patches/encoding_rs/oem-code-pages.patch
+git add patches/iced/BASE_REVISION patches/iced/fragile-notepad-iced.patch
+git add patches/encoding_rs/BASE_REVISION patches/encoding_rs/oem-code-pages.patch
 ```
 
   Re-run `.\scripts\setup-vendor.ps1 status` or `bash scripts/setup-vendor.sh
@@ -119,8 +121,8 @@ git add vendor/encoding_rs patches/encoding_rs/BASE_REVISION patches/encoding_rs
 - `update` exports the current patch, reverses it to return to a clean upstream
   base, fetches a configured upstream branch, applies the project patch on top,
   then exports the refreshed patch and `BASE_REVISION`. On a fresh clone, the
-  setup wrapper initializes missing submodules before running `update`; it does
-  not run a submodule checkout first for already-present vendor directories.
+  setup wrapper bootstraps missing vendor checkouts before running `update`; it
+  does not reset already-present vendor directories.
 
 The script refuses to apply over dirty vendor changes unless `-Force` /
 `--force` is passed. Review vendor status before exporting so unrelated local

@@ -1,6 +1,0 @@
-[submodule "vendor/iced"]
-	path = vendor/iced
-	url = https://github.com/iced-rs/iced.git
-[submodule "vendor/encoding_rs"]
-	path = vendor/encoding_rs
-	url = https://github.com/hsivonen/encoding_rs.git

@@ -15,49 +15,123 @@ if (-not $repoRoot) {
 
 Set-Location $repoRoot
 
-function Initialize-Submodules([string[]] $Paths) {
-    if ($Paths.Count -eq 0) {
+$vendors = @(
+    @{
+        VendorDir = "vendor/iced"
+        Remote = "https://github.com/iced-rs/iced.git"
+        Branch = "master"
+        Patch = "patches/iced/fragile-notepad-iced.patch"
+        BaseRevisionFile = "patches/iced/BASE_REVISION"
+        GitConfig = @("core.autocrlf=true")
+    },
+    @{
+        VendorDir = "vendor/encoding_rs"
+        Remote = "https://github.com/hsivonen/encoding_rs.git"
+        Branch = "main"
+        Patch = "patches/encoding_rs/oem-code-pages.patch"
+        BaseRevisionFile = "patches/encoding_rs/BASE_REVISION"
+        GitConfig = @()
+    }
+)
+
+function Invoke-Git {
+    param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments)
+
+    git @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "git $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Get-BaseRevision([hashtable] $Vendor) {
+    if (-not (Test-Path $Vendor.BaseRevisionFile)) {
+        throw "Base revision file not found: $($Vendor.BaseRevisionFile)"
+    }
+
+    return (Get-Content $Vendor.BaseRevisionFile -Raw).Trim()
+}
+
+function Test-GitCheckout([string] $VendorDir) {
+    return (Test-Path (Join-Path $VendorDir ".git"))
+}
+
+function Set-VendorGitConfig([hashtable] $Vendor) {
+    foreach ($entry in $Vendor.GitConfig) {
+        $parts = @($entry -split "=", 2)
+        if ($parts.Count -ne 2) {
+            throw "Invalid Git config entry for $($Vendor.VendorDir): $entry"
+        }
+
+        Invoke-Git -C $Vendor.VendorDir config $parts[0] $parts[1]
+    }
+}
+
+function Ensure-VendorCheckout([hashtable] $Vendor) {
+    if (Test-Path $Vendor.VendorDir) {
+        if (-not (Test-GitCheckout $Vendor.VendorDir)) {
+            throw "$($Vendor.VendorDir) exists but is not a Git checkout."
+        }
+
         return
     }
 
-    git submodule update --init @Paths
-    if ($LASTEXITCODE -ne 0) {
-        throw "git submodule update failed with exit code $LASTEXITCODE"
+    $parent = Split-Path $Vendor.VendorDir -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path $parent)) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
     }
+
+    $baseRevision = Get-BaseRevision $Vendor
+    Invoke-Git clone --no-checkout $Vendor.Remote $Vendor.VendorDir
+    Set-VendorGitConfig $Vendor
+    Invoke-Git -C $Vendor.VendorDir checkout $baseRevision
 }
 
-if (-not $SkipSubmoduleUpdate) {
-    if ($Command -eq "apply") {
-        Initialize-Submodules @("vendor/iced", "vendor/encoding_rs")
-    } elseif ($Command -eq "update") {
-        $missing = @("vendor/iced", "vendor/encoding_rs") | Where-Object { -not (Test-Path $_) }
-        Initialize-Submodules $missing
+function Write-MissingVendorStatus([hashtable] $Vendor) {
+    Write-Host "vendor dir:       $($Vendor.VendorDir)"
+    if (Test-Path $Vendor.BaseRevisionFile) {
+        Write-Host "recorded base:    $(Get-BaseRevision $Vendor)"
+    } else {
+        Write-Host "recorded base:    <missing>"
     }
+    Write-Host "patch:            $($Vendor.Patch)"
+    Write-Host "checkout status:  missing; run setup-vendor apply to bootstrap"
+    Write-Host ""
 }
 
-$icedArgs = @{
-    Command = $Command
-    VendorDir = "vendor/iced"
-    Patch = "patches/iced/fragile-notepad-iced.patch"
-    BaseRevisionFile = "patches/iced/BASE_REVISION"
-    GitVendor = $true
-    GitConfig = @("core.autocrlf=true")
-}
-$encodingArgs = @{
-    Command = $Command
-    VendorDir = "vendor/encoding_rs"
-    Patch = "patches/encoding_rs/oem-code-pages.patch"
-    BaseRevisionFile = "patches/encoding_rs/BASE_REVISION"
-    GitVendor = $true
-}
+function Invoke-VendorPatch([hashtable] $Vendor) {
+    $args = @{
+        Command = $Command
+        VendorDir = $Vendor.VendorDir
+        Patch = $Vendor.Patch
+        BaseRevisionFile = $Vendor.BaseRevisionFile
+        GitVendor = $true
+    }
 
-if ($Command -eq "update") {
-    $icedArgs.Remote = "https://github.com/iced-rs/iced.git"
-    $icedArgs.Branch = "master"
-    $encodingArgs.Remote = "https://github.com/hsivonen/encoding_rs.git"
-    $encodingArgs.Branch = "main"
+    if ($Vendor.GitConfig.Count -gt 0) {
+        $args.GitConfig = $Vendor.GitConfig
+    }
+
+    if ($Command -eq "update") {
+        $args.Remote = $Vendor.Remote
+        $args.Branch = $Vendor.Branch
+    }
+
+    & "$PSScriptRoot\vendor-patch.ps1" @args
 }
 
-& "$PSScriptRoot\vendor-patch.ps1" @icedArgs
+if ($SkipSubmoduleUpdate) {
+    Write-Warning "-SkipSubmoduleUpdate is deprecated; vendor checkouts are managed by this script."
+}
 
-& "$PSScriptRoot\vendor-patch.ps1" @encodingArgs
+foreach ($vendor in $vendors) {
+    if ($Command -eq "status" -and -not (Test-Path $vendor.VendorDir)) {
+        Write-MissingVendorStatus $vendor
+        continue
+    }
+
+    if ($Command -in @("apply", "update")) {
+        Ensure-VendorCheckout $vendor
+    }
+
+    Invoke-VendorPatch $vendor
+}

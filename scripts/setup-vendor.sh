@@ -35,23 +35,78 @@ done
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$repo_root"
 
-initialize_submodules() {
-    if [[ "$#" -eq 0 ]]; then
+if [[ "$skip_submodule_update" -eq 1 ]]; then
+    echo "warning: --skip-submodule-update is deprecated; vendor checkouts are managed by this script." >&2
+fi
+
+get_base_revision() {
+    local base_revision_file="$1"
+    if [[ ! -f "$base_revision_file" ]]; then
+        echo "Base revision file not found: $base_revision_file" >&2
+        exit 1
+    fi
+
+    local value
+    IFS= read -r value < "$base_revision_file" || true
+    value="${value//$'\r'/}"
+    value="${value//$'\n'/}"
+    printf '%s' "$value"
+}
+
+is_git_checkout() {
+    [[ -e "$1/.git" ]]
+}
+
+ensure_vendor_checkout() {
+    local vendor_dir="$1"
+    local remote_url="$2"
+    local base_revision_file="$3"
+    shift 3
+    local git_configs=("$@")
+
+    if [[ -e "$vendor_dir" ]]; then
+        if ! is_git_checkout "$vendor_dir"; then
+            echo "$vendor_dir exists but is not a Git checkout." >&2
+            exit 1
+        fi
+
         return
     fi
 
-    git submodule update --init "$@"
+    mkdir -p "$(dirname "$vendor_dir")"
+    local base_revision
+    base_revision="$(get_base_revision "$base_revision_file")"
+
+    git clone --no-checkout "$remote_url" "$vendor_dir"
+    for entry in "${git_configs[@]}"; do
+        if [[ "$entry" != *=* ]]; then
+            echo "Invalid Git config entry for $vendor_dir: $entry" >&2
+            exit 1
+        fi
+        git -C "$vendor_dir" config "${entry%%=*}" "${entry#*=}"
+    done
+    git -C "$vendor_dir" checkout "$base_revision"
 }
 
-if [[ "$skip_submodule_update" -ne 1 ]]; then
-    if [[ "$command_name" == "apply" ]]; then
-        initialize_submodules vendor/iced vendor/encoding_rs
-    elif [[ "$command_name" == "update" ]]; then
-        missing_submodules=()
-        [[ -e vendor/iced ]] || missing_submodules+=(vendor/iced)
-        [[ -e vendor/encoding_rs ]] || missing_submodules+=(vendor/encoding_rs)
-        initialize_submodules "${missing_submodules[@]}"
+missing_vendor_status() {
+    local vendor_dir="$1"
+    local patch_path="$2"
+    local base_revision_file="$3"
+
+    echo "vendor dir:       $vendor_dir"
+    if [[ -f "$base_revision_file" ]]; then
+        echo "recorded base:    $(get_base_revision "$base_revision_file")"
+    else
+        echo "recorded base:    <missing>"
     fi
+    echo "patch:            $patch_path"
+    echo "checkout status:  missing; run setup-vendor apply to bootstrap"
+    echo
+}
+
+if [[ "$command_name" == "apply" || "$command_name" == "update" ]]; then
+    ensure_vendor_checkout vendor/iced https://github.com/iced-rs/iced.git patches/iced/BASE_REVISION core.autocrlf=true
+    ensure_vendor_checkout vendor/encoding_rs https://github.com/hsivonen/encoding_rs.git patches/encoding_rs/BASE_REVISION
 fi
 
 iced_update_args=()
@@ -62,17 +117,25 @@ if [[ "$command_name" == "update" ]]; then
     encoding_update_args=(--remote https://github.com/hsivonen/encoding_rs.git --branch main)
 fi
 
-"${BASH:-bash}" scripts/vendor-patch.sh "$command_name" \
-    --vendor-dir vendor/iced \
-    --patch patches/iced/fragile-notepad-iced.patch \
-    --base-revision-file patches/iced/BASE_REVISION \
-    --git-vendor \
-    --git-config core.autocrlf=true \
-    "${iced_update_args[@]}"
+if [[ "$command_name" == "status" && ! -e vendor/iced ]]; then
+    missing_vendor_status vendor/iced patches/iced/fragile-notepad-iced.patch patches/iced/BASE_REVISION
+else
+    "${BASH:-bash}" scripts/vendor-patch.sh "$command_name" \
+        --vendor-dir vendor/iced \
+        --patch patches/iced/fragile-notepad-iced.patch \
+        --base-revision-file patches/iced/BASE_REVISION \
+        --git-vendor \
+        --git-config core.autocrlf=true \
+        "${iced_update_args[@]}"
+fi
 
-"${BASH:-bash}" scripts/vendor-patch.sh "$command_name" \
-    --vendor-dir vendor/encoding_rs \
-    --patch patches/encoding_rs/oem-code-pages.patch \
-    --base-revision-file patches/encoding_rs/BASE_REVISION \
-    --git-vendor \
-    "${encoding_update_args[@]}"
+if [[ "$command_name" == "status" && ! -e vendor/encoding_rs ]]; then
+    missing_vendor_status vendor/encoding_rs patches/encoding_rs/oem-code-pages.patch patches/encoding_rs/BASE_REVISION
+else
+    "${BASH:-bash}" scripts/vendor-patch.sh "$command_name" \
+        --vendor-dir vendor/encoding_rs \
+        --patch patches/encoding_rs/oem-code-pages.patch \
+        --base-revision-file patches/encoding_rs/BASE_REVISION \
+        --git-vendor \
+        "${encoding_update_args[@]}"
+fi
