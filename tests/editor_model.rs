@@ -99,7 +99,10 @@ fn editor_model_buffer_splits_cr_only_lines() {
         buffer.position_for_byte_offset("one\r".len()),
         Some(EditorPosition::new(1, 0))
     );
-    assert_eq!(buffer.byte_offset(EditorPosition::new(2, 5)), "one\rtwo\rthree".len());
+    assert_eq!(
+        buffer.byte_offset(EditorPosition::new(2, 5)),
+        "one\rtwo\rthree".len()
+    );
 }
 
 #[test]
