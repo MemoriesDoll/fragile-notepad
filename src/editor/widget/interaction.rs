@@ -322,7 +322,7 @@ where
 
 fn last_line_end_position(buffer: &EditorBuffer) -> EditorPosition {
     let line = buffer.line_count().saturating_sub(1);
-    let column = buffer.line(line).map(str::len).unwrap_or(0);
+    let column = buffer.line(line).map(|text| text.len()).unwrap_or(0);
 
     buffer.clamp_position(EditorPosition::new(line, column))
 }
@@ -363,8 +363,8 @@ where
         .viewport
         .document_line_to_visible_row(cursor.line)
         .unwrap_or(context.scroll.first_visible_row);
-    let line_text = context.buffer.line(cursor.line).unwrap_or("");
-    let line_geometry = LineGeometry::new(line_text, editor_layout.metrics, renderer);
+    let line_text = context.buffer.line(cursor.line).unwrap_or_default();
+    let line_geometry = LineGeometry::new(&line_text, editor_layout.metrics, renderer);
     let x = bounds.x
         + measured_caret_x(
             &line_geometry,

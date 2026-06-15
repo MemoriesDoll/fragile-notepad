@@ -30,11 +30,7 @@ pub fn view<'a>(
         .as_ref()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| document.title());
-    let dirty = if document.is_dirty {
-        "Modified"
-    } else {
-        "Saved"
-    };
+    let document_status = document_status_label(document, file_status);
     let line_ending = document
         .line_ending
         .map(|ending| ending.as_str().replace('\r', "CR").replace('\n', "LF"))
@@ -46,7 +42,7 @@ pub fn view<'a>(
                 .padding([3, 2])
                 .width(Fill)
                 .style(styles::status_path),
-            segment(file_status.unwrap_or(dirty), 148.0),
+            segment(document_status, 148.0),
             space::horizontal(),
             segment(
                 format!("Ln {}, Col {}", cursor.line + 1, cursor_column),
@@ -82,6 +78,18 @@ pub fn view<'a>(
     .into()
 }
 
+pub fn document_status_label<'a>(document: &Document, file_status: Option<&'a str>) -> &'a str {
+    if document.is_loading_or_indexing() {
+        "indexing"
+    } else if let Some(file_status) = file_status {
+        file_status
+    } else if document.is_dirty {
+        "Modified"
+    } else {
+        "Saved"
+    }
+}
+
 fn segment<'a>(label: impl Into<String>, width: f32) -> Element<'a, Message> {
     container(text(label.into()).size(STATUS_TEXT_SIZE))
         .padding([3, 6])
@@ -96,13 +104,15 @@ fn cursor_display_column(document: &Document, tab_width: usize) -> usize {
     document
         .buffer
         .line(document.main_selection().cursor.line)
-        .map(|line| visual_column_for(line, document.main_selection().cursor.column, tab_width) + 1)
+        .map(|line| {
+            visual_column_for(&line, document.main_selection().cursor.column, tab_width) + 1
+        })
         .unwrap_or(1)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::cursor_display_column;
+    use super::{cursor_display_column, document_status_label};
     use crate::core::{Document, DocumentId};
     use crate::editor::{EditorPosition, EditorSelection};
 
@@ -128,5 +138,23 @@ mod tests {
 
         assert_eq!(cursor_display_column(&document, 2), 3);
         assert_eq!(cursor_display_column(&document, 8), 9);
+    }
+
+    #[test]
+    fn document_status_label_shows_indexing_while_document_is_incomplete() {
+        let generation = crate::core::DocumentLoadGeneration::next();
+        let document = Document::loading(DocumentId::new(1), "loading.txt", generation);
+
+        assert_eq!(document_status_label(&document, Some("Saved")), "indexing");
+    }
+
+    #[test]
+    fn document_status_label_returns_to_file_status_after_load_completes() {
+        let document = Document::from_path(DocumentId::new(1), "loaded.txt", "text");
+
+        assert_eq!(
+            document_status_label(&document, Some("Saved elsewhere")),
+            "Saved elsewhere"
+        );
     }
 }

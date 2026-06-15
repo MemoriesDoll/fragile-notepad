@@ -460,8 +460,8 @@ fn project_linear_selection(
             line,
             start,
             end,
-            start_visual_column: visual_column_for(text, start.column, tab_width),
-            end_visual_column: visual_column_for(text, end.column, tab_width),
+            start_visual_column: visual_column_for(&text, start.column, tab_width),
+            end_visual_column: visual_column_for(&text, end.column, tab_width),
             start_virtual_column: None,
             end_virtual_column: None,
         });
@@ -490,9 +490,9 @@ fn project_rectangular_selection(
         let Some(text) = buffer.line(line) else {
             continue;
         };
-        let line_visual_width = visual_column_for(text, text.len(), tab_width);
-        let start_column = byte_column_for(text, start_visual_column, tab_width);
-        let end_column = byte_column_for(text, end_visual_column, tab_width);
+        let line_visual_width = visual_column_for(&text, text.len(), tab_width);
+        let start_column = byte_column_for(&text, start_visual_column, tab_width);
+        let end_column = byte_column_for(&text, end_visual_column, tab_width);
 
         lines.push(ProjectedSelectionLine {
             line,

@@ -135,7 +135,7 @@ fn editor_history_dirty_state_tracks_clean_text_snapshot() {
 
     let mut buffer = EditorBuffer::from_text("saved plus edits");
     assert_eq!(history.undo(&mut buffer), Some(caret(0, 5)));
-    assert!(history.is_dirty(buffer.text()));
+    assert!(history.is_dirty(&buffer.text()));
 }
 
 #[test]
@@ -220,14 +220,14 @@ fn editor_history_selection_replacement_restores_selection_and_dirty_snapshot() 
 
     assert_eq!(history.undo(&mut buffer), Some(selected));
     assert_eq!(buffer.text(), "hello");
-    assert!(!history.is_dirty(buffer.text()));
+    assert!(!history.is_dirty(&buffer.text()));
 
     assert_eq!(history.redo(&mut buffer), Some(caret(0, 2)));
     assert_eq!(buffer.text(), "hio");
-    assert!(history.is_dirty(buffer.text()));
+    assert!(history.is_dirty(&buffer.text()));
 
-    history.mark_clean(buffer.text());
-    assert!(!history.is_dirty(buffer.text()));
+    history.mark_clean(&buffer.text());
+    assert!(!history.is_dirty(&buffer.text()));
 }
 
 #[test]

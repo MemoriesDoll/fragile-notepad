@@ -64,9 +64,10 @@ pub fn previous_grapheme_position(
     position: EditorPosition,
 ) -> Option<EditorPosition> {
     let offset = buffer.byte_offset(position);
-    let offset = previous_grapheme_offset(buffer.text(), offset)?;
+    let text = buffer.text();
+    let offset = previous_grapheme_offset(&text, offset)?;
 
-    position_for_byte_offset(buffer.text(), offset)
+    position_for_byte_offset(&text, offset)
 }
 
 pub fn next_grapheme_position(
@@ -74,9 +75,10 @@ pub fn next_grapheme_position(
     position: EditorPosition,
 ) -> Option<EditorPosition> {
     let offset = buffer.byte_offset(position);
-    let offset = next_grapheme_offset(buffer.text(), offset)?;
+    let text = buffer.text();
+    let offset = next_grapheme_offset(&text, offset)?;
 
-    position_for_byte_offset(buffer.text(), offset)
+    position_for_byte_offset(&text, offset)
 }
 
 pub fn previous_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
@@ -97,7 +99,7 @@ pub fn next_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
 }
 
 pub fn line_end(buffer: &EditorBuffer, line: usize) -> EditorPosition {
-    EditorPosition::new(line, buffer.line(line).unwrap_or("").len())
+    EditorPosition::new(line, buffer.line(line).unwrap_or_default().len())
 }
 
 pub fn document_end(buffer: &EditorBuffer) -> EditorPosition {
@@ -121,7 +123,7 @@ fn previous_word_position(
     let text = buffer.text();
     let mut offset = buffer.byte_offset(position);
 
-    while let Some(previous) = previous_grapheme_offset(text, offset) {
+    while let Some(previous) = previous_grapheme_offset(&text, offset) {
         if text[previous..]
             .chars()
             .next()
@@ -133,7 +135,7 @@ fn previous_word_position(
         offset = previous;
     }
 
-    while let Some(previous) = previous_grapheme_offset(text, offset) {
+    while let Some(previous) = previous_grapheme_offset(&text, offset) {
         if !text[previous..]
             .chars()
             .next()
@@ -145,7 +147,7 @@ fn previous_word_position(
         offset = previous;
     }
 
-    position_for_byte_offset(text, offset)
+    position_for_byte_offset(&text, offset)
 }
 
 fn next_word_position(buffer: &EditorBuffer, position: EditorPosition) -> Option<EditorPosition> {
@@ -170,7 +172,7 @@ fn next_word_position(buffer: &EditorBuffer, position: EditorPosition) -> Option
         offset += ch.len_utf8();
     }
 
-    position_for_byte_offset(text, offset)
+    position_for_byte_offset(&text, offset)
 }
 
 fn previous_paragraph_position(buffer: &EditorBuffer, position: EditorPosition) -> EditorPosition {
@@ -218,5 +220,5 @@ fn next_paragraph_position(buffer: &EditorBuffer, position: EditorPosition) -> E
 }
 
 fn is_blank_line(buffer: &EditorBuffer, line: usize) -> bool {
-    buffer.line(line).unwrap_or("").trim().is_empty()
+    buffer.line(line).unwrap_or_default().trim().is_empty()
 }

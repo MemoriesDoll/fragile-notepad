@@ -9,7 +9,9 @@ pub mod shortcuts;
 pub mod workspace;
 
 pub use commands::{CoreCommand, EditorCommand, FileCommand, SearchCommand, SettingsCommand};
-pub use document::{Document, DocumentId};
+pub use document::{
+    Document, DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState,
+};
 pub use encoding::{DecodedText, EncodingError, TextEncoding, decode_bytes, encode_text};
 pub use search::{FindState, PreparedSearch, SearchError, SearchMode, SearchOptions, TextMatch};
 pub use settings::{AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode};

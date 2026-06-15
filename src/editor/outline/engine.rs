@@ -30,7 +30,7 @@ impl<'a> OutlineEngine<'a> {
     ) -> OutlineParseResult {
         self.parse(OutlineParseRequest::new(
             DocumentId::new(0),
-            Arc::new(buffer.text().to_owned()),
+            Arc::new(buffer.text()),
             syntax_token,
             0,
             self.registry_hash,

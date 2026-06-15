@@ -82,9 +82,37 @@ fn editor_model_buffer_preserves_text_and_exposes_lines_without_endings() {
     assert_eq!(buffer.text(), "one\r\ntwo\nthree");
     assert_eq!(buffer.text_for_save(), "one\r\ntwo\nthree");
     assert_eq!(buffer.line_count(), 3);
-    assert_eq!(buffer.line(0), Some("one"));
-    assert_eq!(buffer.line(1), Some("two"));
-    assert_eq!(buffer.line(2), Some("three"));
+    assert_eq!(buffer.line(0).as_deref(), Some("one"));
+    assert_eq!(buffer.line(1).as_deref(), Some("two"));
+    assert_eq!(buffer.line(2).as_deref(), Some("three"));
+}
+
+#[test]
+fn editor_model_buffer_splits_cr_only_lines() {
+    let buffer = EditorBuffer::from_text("one\rtwo\rthree");
+
+    assert_eq!(buffer.line_count(), 3);
+    assert_eq!(buffer.line(0).as_deref(), Some("one"));
+    assert_eq!(buffer.line(1).as_deref(), Some("two"));
+    assert_eq!(buffer.line(2).as_deref(), Some("three"));
+    assert_eq!(
+        buffer.position_for_byte_offset("one\r".len()),
+        Some(EditorPosition::new(1, 0))
+    );
+    assert_eq!(buffer.byte_offset(EditorPosition::new(2, 5)), "one\rtwo\rthree".len());
+}
+
+#[test]
+fn editor_model_buffer_splits_lfcr_lines() {
+    let buffer = EditorBuffer::from_text("one\n\rtwo");
+
+    assert_eq!(buffer.line_count(), 2);
+    assert_eq!(buffer.line(0).as_deref(), Some("one"));
+    assert_eq!(buffer.line(1).as_deref(), Some("two"));
+    assert_eq!(
+        buffer.position_for_byte_offset("one\n\r".len()),
+        Some(EditorPosition::new(1, 0))
+    );
 }
 
 #[test]
@@ -116,6 +144,57 @@ fn editor_model_buffer_replace_range_clamps_columns_to_utf8_char_boundaries() {
     assert_eq!(delta.before_range.start, EditorPosition::new(0, 0));
     assert_eq!(delta.before_range.end, EditorPosition::new(0, 2));
     assert_eq!(delta.before_text, "\u{00e9}");
+}
+
+#[test]
+fn editor_model_buffer_exposes_range_positions_and_chunks() {
+    let buffer = EditorBuffer::from_text("one\n\u{00e9}two\nthree");
+    let range = EditorRange::new(EditorPosition::new(1, 0), EditorPosition::new(1, 4));
+
+    assert_eq!(buffer.slice_text(range), "\u{00e9}tw");
+    assert_eq!(
+        buffer.position_for_byte_offset("one\n\u{00e9}".len()),
+        Some(EditorPosition::new(1, "\u{00e9}".len()))
+    );
+    assert_eq!(buffer.position_for_byte_offset("one\n".len() + 1), None);
+    assert_eq!(buffer.chunks().collect::<String>(), buffer.text());
+}
+
+#[test]
+fn editor_model_buffer_maps_large_unicode_byte_offsets_and_lines() {
+    let mut text = (0..2048)
+        .map(|line| format!("line-{line:04}-\u{00e9}\u{597d}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    text.push_str("\n");
+    text.push_str("tail");
+    let buffer = EditorBuffer::from_text(text.clone());
+    let target_prefix = (0..1024)
+        .map(|line| format!("line-{line:04}-\u{00e9}\u{597d}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let offset = target_prefix.len() + "\nline-1024-\u{00e9}".len();
+
+    assert_eq!(
+        buffer.position_for_byte_offset(offset),
+        Some(EditorPosition::new(1024, "line-1024-\u{00e9}".len()))
+    );
+    assert_eq!(buffer.position_for_byte_offset(offset - 1), None);
+    assert_eq!(buffer.line(2048).as_deref(), Some("tail"));
+    assert_eq!(buffer.byte_offset(EditorPosition::new(2048, 4)), text.len());
+}
+
+#[test]
+fn editor_model_buffer_preserves_trailing_empty_final_line_after_append() {
+    let mut buffer = EditorBuffer::from_text("alpha\r");
+
+    buffer.append_text("\nbeta\n");
+
+    assert_eq!(buffer.text(), "alpha\r\nbeta\n");
+    assert_eq!(buffer.line_count(), 3);
+    assert_eq!(buffer.line(0).as_deref(), Some("alpha"));
+    assert_eq!(buffer.line(1).as_deref(), Some("beta"));
+    assert_eq!(buffer.line(2).as_deref(), Some(""));
 }
 
 #[test]

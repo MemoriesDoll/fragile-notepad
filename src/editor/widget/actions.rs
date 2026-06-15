@@ -50,6 +50,28 @@ pub enum EditorAction {
     ConvertSelectionToRectangle,
 }
 
+impl EditorAction {
+    pub fn mutates_document(&self) -> bool {
+        matches!(
+            self,
+            Self::InsertText(_)
+                | Self::InsertNewline
+                | Self::Backspace
+                | Self::Delete
+                | Self::ReplaceSelection(_)
+                | Self::Indent
+                | Self::Unindent
+                | Self::DuplicateLine
+                | Self::DeleteLine
+                | Self::CutLine
+                | Self::Cut
+                | Self::Paste
+                | Self::Undo
+                | Self::Redo
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaretMotion {
     Left,

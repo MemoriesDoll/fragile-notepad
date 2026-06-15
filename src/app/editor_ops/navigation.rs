@@ -10,9 +10,8 @@ pub(in crate::app) fn go_to_matching_delimiter(document: &mut Document) {
     let Some(delimiter_match) = delimiter_match_for_selection(document) else {
         return;
     };
-    let Some(position) =
-        position_for_byte_offset(document.buffer.text(), delimiter_match.matching_delimiter)
-    else {
+    let text = document.buffer.text();
+    let Some(position) = position_for_byte_offset(&text, delimiter_match.matching_delimiter) else {
         return;
     };
 
@@ -149,10 +148,10 @@ fn select_delimiter_range(document: &mut Document) -> Option<EditorPosition> {
         .delimiter
         .max(delimiter_match.matching_delimiter)
         .saturating_add(1);
-    let start = position_for_byte_offset(document.buffer.text(), start_offset)?;
-    let end = position_for_byte_offset(document.buffer.text(), end_offset)?;
-    let matching_position =
-        position_for_byte_offset(document.buffer.text(), delimiter_match.matching_delimiter)?;
+    let text = document.buffer.text();
+    let start = position_for_byte_offset(&text, start_offset)?;
+    let end = position_for_byte_offset(&text, end_offset)?;
+    let matching_position = position_for_byte_offset(&text, delimiter_match.matching_delimiter)?;
 
     document.set_main_selection(EditorSelection::new(start, end));
     document.preferred_vertical_column = None;
@@ -164,7 +163,8 @@ fn delimiter_match_for_selection(document: &Document) -> Option<DelimiterMatch> 
         .buffer
         .byte_offset(document.main_selection().cursor);
 
-    matching_delimiter_near_caret(document.buffer.text(), caret_offset)
+    let text = document.buffer.text();
+    matching_delimiter_near_caret(&text, caret_offset)
 }
 
 pub(in crate::app) fn move_document_position(

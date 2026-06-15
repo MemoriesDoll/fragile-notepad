@@ -4,8 +4,8 @@ mod test_support {
     pub(super) use crate::core::{HardwareAccelerationMode, IndentationMode};
     pub(super) use crate::editor::{EditorAction, EditorBuffer, EditorPosition, EditorSelection};
     pub(super) use crate::message::{
-        AboutTab, ClipboardMode, DirtyCloseDecision, Menu, Message, OpenedFile, PasteRequest,
-        SaveRequest,
+        AboutTab, ClipboardMode, DirtyCloseDecision, FileLoadChunk, FileLoadFailure,
+        FileLoadFinished, Menu, Message, OpenedFile, PasteRequest, SaveRequest,
     };
     pub(super) use std::path::PathBuf;
     pub(super) use std::sync::{Arc, Mutex, MutexGuard, OnceLock};

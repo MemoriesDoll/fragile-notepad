@@ -288,7 +288,11 @@ impl App {
             | Message::NewFile
             | Message::OpenFile
             | Message::FileDropped(_, _)
+            | Message::FilePicked(_)
             | Message::FileOpened(_)
+            | Message::FileLoadProgress(_)
+            | Message::FileLoadChunk(_)
+            | Message::FileLoadFinished(_)
             | Message::SaveFile
             | Message::SaveAllFiles
             | Message::SaveFileAs
@@ -455,7 +459,8 @@ impl App {
             return;
         };
 
-        self.find.refresh_matches(document.buffer.text());
+        self.find
+            .refresh_matches_in_chunks(document.buffer.chunks());
     }
 
     fn prewarm_active_syntax_cache(&self) {
@@ -464,6 +469,10 @@ impl App {
         };
 
         if !document.uses_syntax_highlighting() {
+            return;
+        }
+
+        if !document.has_complete_text_index() {
             return;
         }
 
@@ -496,6 +505,20 @@ impl App {
             return Task::none();
         };
 
+        if !document.can_run_full_document_analysis() {
+            let metadata =
+                OutlineSnapshotMetadata::from_document(document, self.outline_registry_hash);
+            self.outline_states
+                .entry(document_id)
+                .and_modify(|state| {
+                    if !state.matches_metadata(&metadata) {
+                        *state = OutlineState::pending_metadata(metadata.clone());
+                    }
+                })
+                .or_insert_with(|| OutlineState::pending_metadata(metadata));
+            return Task::none();
+        }
+
         let request = outline_request_for_document(document, self.outline_registry_hash);
         let metadata = OutlineSnapshotMetadata::from_request(&request);
 
@@ -523,7 +546,8 @@ impl App {
             return Task::none();
         };
 
-        if !metadata.matches_document(document, self.outline_registry_hash)
+        if !document.can_run_full_document_analysis()
+            || !metadata.matches_document(document, self.outline_registry_hash)
             || !self
                 .outline_states
                 .get(&metadata.document_id)

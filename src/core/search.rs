@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ops::Range;
 
 use regex::{Regex, RegexBuilder};
@@ -87,6 +88,25 @@ impl FindState {
 
         self.matches = compute_matches_with_options(
             text,
+            &self.query,
+            SearchOptions::normal(self.case_sensitive, self.whole_word),
+        );
+        self.current_match = match (self.current_match, self.matches.is_empty()) {
+            (_, true) => None,
+            (Some(index), false) => Some(index.min(self.matches.len() - 1)),
+            (None, false) => Some(0),
+        };
+    }
+
+    pub fn refresh_matches_in_chunks<'a>(&mut self, chunks: impl IntoIterator<Item = &'a str>) {
+        if self.query.is_empty() {
+            self.matches.clear();
+            self.current_match = None;
+            return;
+        }
+
+        self.matches = compute_matches_in_chunks(
+            chunks,
             &self.query,
             SearchOptions::normal(self.case_sensitive, self.whole_word),
         );
@@ -258,6 +278,22 @@ impl PreparedSearch {
         }
     }
 
+    pub fn matches_in_chunks<'a>(
+        &self,
+        chunks: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<TextMatch> {
+        match (&self.matcher, self.options.mode) {
+            (PreparedMatcher::Literal(query), SearchMode::Normal | SearchMode::Extended) => {
+                compute_literal_matches_in_chunks(chunks, query, self.options)
+            }
+            (PreparedMatcher::Regex(_), SearchMode::Regex) => {
+                let text = chunks.into_iter().collect::<String>();
+                self.matches(&text)
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn replacement_for_match(
         &self,
         text: &str,
@@ -287,6 +323,18 @@ pub fn compute_matches_with_options(
     options: SearchOptions,
 ) -> Vec<TextMatch> {
     try_matches(text, query, options).unwrap_or_default()
+}
+
+pub fn compute_matches_in_chunks<'a>(
+    chunks: impl IntoIterator<Item = &'a str>,
+    query: &str,
+    options: SearchOptions,
+) -> Vec<TextMatch> {
+    let Ok(Some(search)) = PreparedSearch::new(query, options) else {
+        return Vec::new();
+    };
+
+    search.matches_in_chunks(chunks)
 }
 
 pub fn try_matches(
@@ -331,6 +379,64 @@ fn compute_literal_matches(text: &str, query: &str, options: SearchOptions) -> V
     }
 
     matches
+}
+
+fn compute_literal_matches_in_chunks<'a>(
+    chunks: impl IntoIterator<Item = &'a str>,
+    query: &str,
+    options: SearchOptions,
+) -> Vec<TextMatch> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let context_chars = query.chars().count().saturating_sub(1);
+    let mut matches = Vec::new();
+    let mut carry = String::new();
+    let mut absolute_offset = 0usize;
+    let mut emitted_until = 0usize;
+
+    for chunk in chunks {
+        if chunk.is_empty() {
+            continue;
+        }
+
+        let carry_len = carry.len();
+        let window_start = absolute_offset.saturating_sub(carry_len);
+        let mut window = String::with_capacity(carry_len + chunk.len());
+        window.push_str(&carry);
+        window.push_str(chunk);
+
+        for text_match in compute_literal_matches(&window, query, options) {
+            let start = window_start + text_match.start;
+            let end = window_start + text_match.end;
+            if start >= emitted_until {
+                matches.push(TextMatch::new(start, end));
+                emitted_until = end;
+            }
+        }
+
+        absolute_offset += chunk.len();
+        carry = trailing_chars(&window, context_chars);
+    }
+
+    matches
+}
+
+fn trailing_chars(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 || text.is_empty() {
+        return String::new();
+    }
+
+    let mut chars = VecDeque::with_capacity(max_chars);
+    for ch in text.chars() {
+        if chars.len() == max_chars {
+            chars.pop_front();
+        }
+        chars.push_back(ch);
+    }
+
+    chars.into_iter().collect()
 }
 
 fn compute_regex_matches(text: &str, regex: &Regex, options: SearchOptions) -> Vec<TextMatch> {

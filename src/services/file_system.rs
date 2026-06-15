@@ -1,25 +1,53 @@
 //! Async file-system helpers for UI task wiring.
 
 use crate::core::{TextEncoding, decode_bytes, encode_text};
-use crate::message::{FileError, FileOpenResult, FileSaveResult, OpenedFile};
+use crate::message::{
+    FileError, FileLoadRequest, FileOpenResult, FileResult, FileSaveResult, OpenedFile,
+};
 
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 pub type LoadedFile = OpenedFile;
-pub type FileResult<T> = Result<T, FileError>;
 
-pub fn open_file(window: &dyn iced::Window) -> impl Future<Output = FileOpenResult> + use<> {
+pub fn pick_file(window: &dyn iced::Window) -> impl Future<Output = FileResult<PathBuf>> + use<> {
     let dialog = rfd::AsyncFileDialog::new()
         .set_title("Open a text file...")
         .set_parent(&window);
 
     async move {
-        let picked_file = dialog.pick_file().await.ok_or(FileError::DialogClosed)?;
-
-        load_file(picked_file.path().to_owned()).await
+        dialog
+            .pick_file()
+            .await
+            .map(|picked_file| picked_file.path().to_owned())
+            .ok_or(FileError::DialogClosed)
     }
+}
+
+pub fn open_file(window: &dyn iced::Window) -> impl Future<Output = FileOpenResult> + use<'_> {
+    async move {
+        let path = pick_file(window).await?;
+
+        load_file(path).await
+    }
+}
+
+pub fn load_file_request(request: FileLoadRequest) -> iced::Task<crate::message::Message> {
+    iced::Task::run(
+        super::chunked_file::load_file_chunks(request),
+        |event| match event {
+            crate::message::FileLoadEvent::Progress(progress) => {
+                crate::message::Message::FileLoadProgress(progress)
+            }
+            crate::message::FileLoadEvent::Chunk(chunk) => {
+                crate::message::Message::FileLoadChunk(chunk)
+            }
+            crate::message::FileLoadEvent::Finished(result) => {
+                crate::message::Message::FileLoadFinished(result)
+            }
+        },
+    )
 }
 
 pub async fn load_file(path: PathBuf) -> FileOpenResult {

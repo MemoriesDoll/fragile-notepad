@@ -1,4 +1,4 @@
-use crate::core::document::{Document, DocumentId};
+use crate::core::document::{Document, DocumentId, DocumentLoadGeneration};
 use crate::core::encoding::DecodedText;
 
 use std::path::PathBuf;
@@ -59,6 +59,17 @@ impl Workspace {
             .push(Document::from_decoded(id, path, decoded));
         self.active_document_id = id;
         id
+    }
+
+    pub fn insert_loading_file(
+        &mut self,
+        path: impl Into<PathBuf>,
+    ) -> (DocumentId, DocumentLoadGeneration) {
+        let id = self.generate_document_id();
+        let generation = DocumentLoadGeneration::next();
+        self.documents.push(Document::loading(id, path, generation));
+        self.active_document_id = id;
+        (id, generation)
     }
 
     pub fn active_document(&self) -> Option<&Document> {

@@ -180,9 +180,13 @@ impl App {
     }
 
     fn replace_current(&mut self) -> Task<Message> {
-        let Some(text) = self.workspace.active_document().map(Document::text) else {
+        let Some(document) = self.workspace.active_document() else {
             return Task::none();
         };
+        if !document.has_complete_text_index() {
+            return Task::none();
+        }
+        let text = document.text();
 
         let Some(text_match) = self.find.current() else {
             return Task::none();
@@ -236,30 +240,26 @@ impl App {
             .clamp_range(document.main_selection().range());
 
         if !range.is_empty() {
-            let start = document.buffer.byte_offset(range.start);
-            let end = document.buffer.byte_offset(range.end);
-
-            return document.buffer.text().get(start..end).map(str::to_owned);
+            return Some(document.buffer.slice_text(range));
         }
 
         let range = word_range_at_position(&document.buffer, range.start, &document.syntax_token)?;
-        let start = document.buffer.byte_offset(range.start);
-        let end = document.buffer.byte_offset(range.end);
 
-        document.buffer.text().get(start..end).map(str::to_owned)
+        Some(document.buffer.slice_text(range))
     }
 
     fn select_active_match(&mut self, text_match: Option<crate::core::TextMatch>) {
         let Some(text_match) = text_match else {
             return;
         };
-        let Some(text) = self.workspace.active_document().map(Document::text) else {
+        let Some(document) = self.workspace.active_document() else {
             return;
         };
-        let Some(start_position) = position_for_byte_offset(&text, text_match.start) else {
+        let Some(start_position) = document.buffer.position_for_byte_offset(text_match.start)
+        else {
             return;
         };
-        let Some(end_position) = position_for_byte_offset(&text, text_match.end) else {
+        let Some(end_position) = document.buffer.position_for_byte_offset(text_match.end) else {
             return;
         };
         let document_id = self.workspace.active_document_id;
@@ -275,9 +275,13 @@ impl App {
     }
 
     fn replace_all(&mut self) -> Task<Message> {
-        let Some(text) = self.workspace.active_document().map(Document::text) else {
+        let Some(document) = self.workspace.active_document() else {
             return Task::none();
         };
+        if !document.has_complete_text_index() {
+            return Task::none();
+        }
+        let text = document.text();
 
         let matches = crate::core::search::compute_matches_with_options(
             &text,
@@ -326,9 +330,13 @@ impl App {
     }
 
     fn advanced_replace_current(&mut self) -> Task<Message> {
-        let Some(text) = self.workspace.active_document().map(Document::text) else {
+        let Some(document) = self.workspace.active_document() else {
             return Task::none();
         };
+        if !document.has_complete_text_index() {
+            return Task::none();
+        }
+        let text = document.text();
         let Some(search) = self.prepare_advanced_search() else {
             return Task::none();
         };
@@ -373,9 +381,13 @@ impl App {
         let mut changed_documents = Vec::new();
 
         for document_id in document_ids {
-            let Some(text) = self.workspace.document(document_id).map(Document::text) else {
+            let Some(document) = self.workspace.document(document_id) else {
                 continue;
             };
+            if !document.has_complete_text_index() {
+                continue;
+            }
+            let text = document.text();
             let matches = search.matches(&text);
             let mut document_changed = false;
 
@@ -457,11 +469,16 @@ impl App {
         self.find
             .set_case_sensitive(self.search_dialog.case_sensitive);
         self.find.set_whole_word(self.search_dialog.whole_word);
-        let Some(text) = self.workspace.active_document().map(Document::text) else {
+        let Some(document) = self.workspace.active_document() else {
             self.search_dialog.results.clear();
             self.search_dialog.status = String::from("No document");
             return;
         };
+        if !document.has_complete_text_index() {
+            self.search_dialog.refresh_from_documents([document]);
+            return;
+        }
+        let text = document.text();
         let matches = search.matches(&text);
 
         let text_match = next_match_after_selection(self.workspace.active_document(), &matches)

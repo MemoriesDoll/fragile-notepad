@@ -1,6 +1,239 @@
 use super::test_support::*;
 
 #[test]
+fn loading_file_is_inserted_before_chunks_finish() {
+    let mut app = App::new().0;
+    let path = PathBuf::from("large.txt");
+
+    let _ = app.update(Message::FilePicked(Ok(path.clone())));
+
+    let document = app
+        .workspace
+        .active_document()
+        .expect("loading file should be active immediately");
+
+    assert_eq!(document.path.as_deref(), Some(path.as_path()));
+    assert!(document.is_loading_or_indexing());
+    assert_eq!(document.buffer.text(), "");
+    assert!(app.is_loading);
+}
+
+#[test]
+fn stale_load_generation_is_ignored() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
+    let stale_generation = crate::core::DocumentLoadGeneration::next();
+
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation: stale_generation,
+        path: PathBuf::from("loading.txt"),
+        text: Arc::new("stale".to_owned()),
+        bytes_read: 5,
+        total_bytes: Some(5),
+    }));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.load_generation(), Some(generation));
+    assert_eq!(document.buffer.text(), "");
+}
+
+#[test]
+fn stale_load_progress_does_not_update_matching_generation_progress() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
+    let stale_generation = crate::core::DocumentLoadGeneration::next();
+
+    let _ = app.update(Message::FileLoadProgress(
+        crate::message::FileLoadProgress {
+            document_id,
+            generation,
+            path: PathBuf::from("loading.txt"),
+            bytes_read: 7,
+            total_bytes: Some(20),
+        },
+    ));
+    let _ = app.update(Message::FileLoadProgress(
+        crate::message::FileLoadProgress {
+            document_id,
+            generation: stale_generation,
+            path: PathBuf::from("loading.txt"),
+            bytes_read: 20,
+            total_bytes: Some(20),
+        },
+    ));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(
+        document.load_state,
+        crate::core::DocumentLoadState::Loading {
+            generation,
+            bytes_read: 7,
+            total_bytes: Some(20),
+        }
+    );
+}
+
+#[test]
+fn loading_preview_accumulates_chunks_for_matching_generation() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
+
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation,
+        path: PathBuf::from("loading.txt"),
+        text: Arc::new("alpha".to_owned()),
+        bytes_read: 5,
+        total_bytes: Some(11),
+    }));
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation,
+        path: PathBuf::from("loading.txt"),
+        text: Arc::new(" beta".to_owned()),
+        bytes_read: 11,
+        total_bytes: Some(11),
+    }));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.buffer.text(), "alpha beta");
+    assert!(document.is_loading_or_indexing());
+}
+
+#[test]
+fn stale_load_completion_does_not_clear_active_loading_state() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
+    let stale_generation = crate::core::DocumentLoadGeneration::next();
+    app.is_loading = true;
+
+    let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        document_id,
+        generation: stale_generation,
+        path: PathBuf::from("loading.txt"),
+        encoding: crate::core::TextEncoding::Utf8,
+        had_errors: false,
+        fallback_contents: None,
+        bytes_read: 5,
+        total_bytes: Some(5),
+    })));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.load_generation(), Some(generation));
+    assert_eq!(document.buffer.text(), "");
+    assert!(document.is_loading_or_indexing());
+    assert!(app.is_loading);
+}
+
+#[test]
+fn load_completion_for_closed_document_is_ignored_and_refreshes_loading_state() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
+    app.is_loading = true;
+
+    let _ = app.workspace.close(document_id);
+    let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        document_id,
+        generation,
+        path: PathBuf::from("loading.txt"),
+        encoding: crate::core::TextEncoding::Utf8,
+        had_errors: false,
+        fallback_contents: None,
+        bytes_read: 6,
+        total_bytes: Some(6),
+    })));
+
+    assert!(app.workspace.document(document_id).is_none());
+    assert!(!app.is_loading);
+}
+
+#[test]
+fn completion_from_closed_then_reopened_path_cannot_mutate_new_generation() {
+    let mut app = App::new().0;
+    let path = PathBuf::from("loading.txt");
+    let (closed_id, closed_generation) = app.workspace.insert_loading_file(path.clone());
+    app.is_loading = true;
+
+    let _ = app.workspace.close(closed_id);
+    let (new_id, new_generation) = app.workspace.insert_loading_file(path.clone());
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id: new_id,
+        generation: new_generation,
+        path: path.clone(),
+        text: Arc::new("new preview".to_owned()),
+        bytes_read: 11,
+        total_bytes: Some(20),
+    }));
+    let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        document_id: closed_id,
+        generation: closed_generation,
+        path,
+        encoding: crate::core::TextEncoding::Utf8,
+        had_errors: false,
+        fallback_contents: None,
+        bytes_read: 12,
+        total_bytes: Some(12),
+    })));
+
+    assert!(app.workspace.document(closed_id).is_none());
+    let document = app.workspace.document(new_id).expect("new document");
+    assert_eq!(document.text(), "new preview");
+    assert_eq!(document.load_generation(), Some(new_generation));
+    assert!(app.is_loading);
+}
+
+#[test]
+fn load_completion_applies_matching_generation_and_clears_indexing_state() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("loaded.txt");
+    app.is_loading = true;
+
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation,
+        path: PathBuf::from("loaded.txt"),
+        text: Arc::new("loaded body".to_owned()),
+        bytes_read: 11,
+        total_bytes: Some(11),
+    }));
+    let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        document_id,
+        generation,
+        path: PathBuf::from("loaded.txt"),
+        encoding: crate::core::TextEncoding::Utf8,
+        had_errors: false,
+        fallback_contents: None,
+        bytes_read: 11,
+        total_bytes: Some(11),
+    })));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.buffer.text(), "loaded body");
+    assert!(!document.is_loading_or_indexing());
+    assert!(!app.is_loading);
+}
+
+#[test]
+fn failed_load_sets_status_without_leaving_document_indexing() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("missing.txt");
+    app.is_loading = true;
+
+    let _ = app.update(Message::FileLoadFinished(Err(FileLoadFailure {
+        document_id,
+        generation,
+        path: PathBuf::from("missing.txt"),
+        error: crate::message::FileError::Io(std::io::ErrorKind::NotFound),
+    })));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert!(!document.is_loading_or_indexing());
+    assert_eq!(app.file_status.as_deref(), Some("Open failed: I/O error"));
+    assert!(!app.is_loading);
+}
+
+#[test]
 fn dropped_file_completion_opens_document_through_existing_open_path() {
     let (mut app, _) = App::new();
     let main_window = app.main_window_id.expect("main window id");
@@ -64,8 +297,14 @@ fn manual_non_plain_language_selection_survives_save_as() {
     let document_id = app.workspace.active_document_id;
 
     let _ = app.update(Message::LanguageSelected("rs".to_owned()));
+    let revision = app
+        .workspace
+        .document(document_id)
+        .expect("document")
+        .revision();
     let request = SaveRequest {
         document_id,
+        revision,
         snapshot: Arc::new(Vec::new()),
     };
     let _ = app.update(Message::FileSaved(request, Ok(PathBuf::from("README"))));
@@ -84,8 +323,14 @@ fn plain_text_language_selection_returns_to_auto_detection_on_save_as() {
     let document_id = app.workspace.active_document_id;
 
     let _ = app.update(Message::LanguageSelected("txt".to_owned()));
+    let revision = app
+        .workspace
+        .document(document_id)
+        .expect("document")
+        .revision();
     let request = SaveRequest {
         document_id,
+        revision,
         snapshot: Arc::new(Vec::new()),
     };
     let _ = app.update(Message::FileSaved(request, Ok(PathBuf::from("main.c"))));
@@ -96,6 +341,151 @@ fn plain_text_language_selection_returns_to_auto_detection_on_save_as() {
         .expect("workspace should have an active document");
 
     assert_eq!(document.syntax_token, "c");
+}
+
+#[test]
+fn save_file_is_blocked_while_document_is_loading() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
+    app.workspace.select(document_id);
+
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation,
+        path: PathBuf::from("loading.txt"),
+        text: Arc::new("partial preview".to_owned()),
+        bytes_read: 15,
+        total_bytes: Some(100),
+    }));
+    let _ = app.update(Message::SaveFile);
+
+    assert!(app.pending_save.is_none());
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Finish loading before saving.")
+    );
+}
+
+#[test]
+fn editor_mutation_is_blocked_while_document_is_loading() {
+    let mut app = App::new().0;
+    let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
+    app.workspace.select(document_id);
+    app.is_loading = true;
+
+    let _ = app.update(Message::EditorAction(
+        document_id,
+        crate::editor::EditorAction::InsertText("typed".to_owned()),
+    ));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.text(), "");
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Finish loading before editing.")
+    );
+
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation,
+        path: PathBuf::from("loading.txt"),
+        text: Arc::new("loaded".to_owned()),
+        bytes_read: 6,
+        total_bytes: Some(6),
+    }));
+    let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        document_id,
+        generation,
+        path: PathBuf::from("loading.txt"),
+        encoding: crate::core::TextEncoding::Utf8,
+        had_errors: false,
+        fallback_contents: None,
+        bytes_read: 6,
+        total_bytes: Some(6),
+    })));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.text(), "loaded");
+    assert!(!document.is_dirty);
+}
+
+#[test]
+fn save_completion_does_not_mark_clean_after_document_changes() {
+    let (mut app, _) = App::new();
+    let document_id = app.workspace.active_document_id;
+    let path = PathBuf::from("note.txt");
+
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.set_path(path.clone());
+        document.buffer = crate::editor::EditorBuffer::from_text("saved");
+        document.refresh_after_text_change();
+    }
+
+    let request = app
+        .workspace
+        .document(document_id)
+        .map(|document| SaveRequest {
+            document_id,
+            revision: document.revision(),
+            snapshot: Arc::new(document.bytes_for_save().expect("snapshot")),
+        })
+        .expect("document");
+
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.buffer = crate::editor::EditorBuffer::from_text("changed");
+        document.refresh_after_text_change();
+        document.mark_dirty();
+    }
+
+    let _ = app.update(Message::FileSaved(request, Ok(path)));
+
+    assert!(
+        app.workspace
+            .document(document_id)
+            .expect("document")
+            .is_dirty
+    );
+}
+
+#[test]
+fn save_completion_does_not_mark_clean_after_encoding_changes() {
+    let (mut app, _) = App::new();
+    let document_id = app.workspace.active_document_id;
+    let path = PathBuf::from("note.txt");
+
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.set_path(path.clone());
+        document.buffer = crate::editor::EditorBuffer::from_text("saved");
+        document.refresh_after_text_change();
+        document.mark_clean();
+    }
+
+    let request = app
+        .workspace
+        .document(document_id)
+        .map(|document| SaveRequest {
+            document_id,
+            revision: document.revision(),
+            snapshot: Arc::new(document.bytes_for_save().expect("snapshot")),
+        })
+        .expect("document");
+
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.set_encoding(crate::core::TextEncoding::Utf8Bom);
+    }
+
+    let _ = app.update(Message::FileSaved(request, Ok(path)));
+
+    assert!(
+        app.workspace
+            .document(document_id)
+            .expect("document")
+            .is_dirty
+    );
 }
 
 #[test]

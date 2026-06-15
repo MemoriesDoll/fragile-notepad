@@ -2,7 +2,9 @@ use iced::{Task, window};
 
 use crate::core::DocumentId;
 use crate::message::{
-    DirtyCloseDecision, FileError, FileOpenResult, FileSaveResult, Message, SaveRequest,
+    DirtyCloseDecision, FileError, FileLoadChunk, FileLoadFailure, FileLoadFinished,
+    FileLoadProgress, FileLoadRequest, FileOpenResult, FileResult, FileSaveResult, Message,
+    SaveRequest,
 };
 use crate::services;
 
@@ -89,13 +91,17 @@ impl App {
                     self.file_status = None;
 
                     window::oldest()
-                        .and_then(|id| window::run(id, services::open_file))
+                        .and_then(|id| window::run(id, services::pick_file))
                         .then(Task::future)
-                        .map(Message::FileOpened)
+                        .map(Message::FilePicked)
                 }
             }
             Message::FileDropped(window_id, path) => self.open_dropped_file(window_id, path),
+            Message::FilePicked(result) => self.file_picked(result),
             Message::FileOpened(result) => self.open_done(result),
+            Message::FileLoadProgress(progress) => self.load_progress(progress),
+            Message::FileLoadChunk(chunk) => self.load_chunk(chunk),
+            Message::FileLoadFinished(result) => self.load_finished(result),
             Message::SaveFile => {
                 self.active_menu = None;
                 self.file_status = None;
@@ -171,14 +177,22 @@ impl App {
     }
 
     fn open_done(&mut self, result: FileOpenResult) -> Task<Message> {
-        self.is_loading = false;
-
-        match result {
+        let task = match result {
             Ok(opened) => {
                 self.file_status = None;
-                let document_id = self
-                    .workspace
-                    .insert_decoded_file(opened.path, opened.contents.as_ref().clone());
+                let document_id =
+                    if let Some(document_id) = self.loading_document_id_for_path(&opened.path) {
+                        if let Some(document) = self.workspace.document_mut(document_id)
+                            && let Some(generation) = document.load_generation()
+                        {
+                            document.complete_loading(generation, opened.contents.as_ref().clone());
+                        }
+                        self.workspace.select(document_id);
+                        document_id
+                    } else {
+                        self.workspace
+                            .insert_decoded_file(opened.path, opened.contents.as_ref().clone())
+                    };
                 if let Some(document) = self.workspace.document_mut(document_id) {
                     document.set_decoration_settings(self.settings.decoration_settings());
                 }
@@ -190,6 +204,20 @@ impl App {
                 self.file_status = Some(format!("Open failed: {}", error.summary()));
                 Task::none()
             }
+        };
+
+        self.refresh_file_loading_state();
+        task
+    }
+
+    fn file_picked(&mut self, result: FileResult<PathBuf>) -> Task<Message> {
+        match result {
+            Ok(path) => self.start_loading_file(path),
+            Err(error) => {
+                self.file_status = Some(format!("Open failed: {}", error.summary()));
+                self.refresh_file_loading_state();
+                Task::none()
+            }
         }
     }
 
@@ -199,10 +227,106 @@ impl App {
         }
 
         self.active_menu = None;
+
+        self.start_loading_file(path)
+    }
+
+    fn start_loading_file(&mut self, path: PathBuf) -> Task<Message> {
         self.is_loading = true;
         self.file_status = None;
 
-        Task::perform(services::load_file(path), Message::FileOpened)
+        let (document_id, generation) = self.workspace.insert_loading_file(path.clone());
+        if let Some(document) = self.workspace.document_mut(document_id) {
+            document.set_decoration_settings(self.settings.decoration_settings());
+        }
+        self.refresh_find_matches();
+        self.prewarm_active_syntax_cache();
+
+        services::load_file_request(FileLoadRequest {
+            document_id,
+            generation,
+            path,
+            chunk_size: services::DEFAULT_CHUNK_SIZE,
+        })
+    }
+
+    fn load_progress(&mut self, progress: FileLoadProgress) -> Task<Message> {
+        let Some(document) = self.workspace.document_mut(progress.document_id) else {
+            return Task::none();
+        };
+
+        document.update_load_progress(
+            progress.generation,
+            progress.bytes_read,
+            progress.total_bytes,
+        );
+        Task::none()
+    }
+
+    fn load_chunk(&mut self, chunk: FileLoadChunk) -> Task<Message> {
+        let Some(document) = self.workspace.document_mut(chunk.document_id) else {
+            return Task::none();
+        };
+
+        if document.replace_loading_preview(
+            chunk.generation,
+            chunk.text.as_ref(),
+            chunk.bytes_read,
+            chunk.total_bytes,
+        ) {
+            if self.workspace.active_document_id == chunk.document_id {
+                self.refresh_find_matches();
+                self.prewarm_active_syntax_cache();
+            }
+        }
+
+        Task::none()
+    }
+
+    fn load_finished(
+        &mut self,
+        result: Result<FileLoadFinished, FileLoadFailure>,
+    ) -> Task<Message> {
+        let task = match result {
+            Ok(finished) => {
+                let Some(document) = self.workspace.document_mut(finished.document_id) else {
+                    self.refresh_file_loading_state();
+                    return Task::none();
+                };
+
+                let completed = if let Some(contents) = finished.fallback_contents {
+                    document.complete_loading(finished.generation, contents.as_ref().clone())
+                } else {
+                    document.complete_streaming_load(finished.generation, finished.encoding)
+                };
+
+                if !completed {
+                    self.refresh_file_loading_state();
+                    return Task::none();
+                }
+
+                self.file_status = None;
+                self.refresh_find_matches();
+                self.prewarm_active_syntax_cache();
+                self.schedule_outline_parse(finished.document_id)
+            }
+            Err(failure) => self.load_failed(failure),
+        };
+
+        self.refresh_file_loading_state();
+        task
+    }
+
+    fn load_failed(&mut self, failure: FileLoadFailure) -> Task<Message> {
+        let Some(document) = self.workspace.document_mut(failure.document_id) else {
+            return Task::none();
+        };
+
+        if document.fail_loading(failure.generation) {
+            self.file_status = Some(format!("Open failed: {}", failure.error.summary()));
+        }
+
+        Task::none()
     }
 
     fn save_active(&mut self, force_save_as: bool) -> Task<Message> {
@@ -250,6 +374,10 @@ impl App {
         let Some(document) = self.workspace.document(document_id) else {
             return Task::none();
         };
+        if document.is_loading_or_indexing() {
+            self.file_status = Some(String::from("Finish loading before saving."));
+            return Task::none();
+        }
         let snapshot = match document.bytes_for_save() {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -260,6 +388,7 @@ impl App {
 
         let request = SaveRequest {
             document_id: document.id,
+            revision: document.revision(),
             snapshot: Arc::new(snapshot),
         };
         self.pending_save = Some(request.clone());
@@ -299,11 +428,11 @@ impl App {
                     let before_revision = document.revision();
                     document.set_path(path);
                     syntax_changed = document.revision() != before_revision;
-
-                    if document
+                    let saved_snapshot_is_current = document
                         .bytes_for_save()
-                        .is_ok_and(|bytes| bytes == *request.snapshot)
-                    {
+                        .is_ok_and(|bytes| bytes == request.snapshot.as_ref().as_slice());
+
+                    if saved_snapshot_is_current {
                         document.mark_clean();
                     }
                 }
@@ -418,6 +547,7 @@ impl App {
         }
 
         self.workspace.close(document_id);
+        self.refresh_file_loading_state();
         self.outline_states.remove(&document_id);
 
         let active_document_id = self.workspace.active_document_id;
@@ -496,5 +626,21 @@ impl App {
 
     fn should_exit(&self) -> bool {
         self.close_goal == CloseGoal::ExitApp
+    }
+
+    fn refresh_file_loading_state(&mut self) {
+        self.is_loading = self
+            .workspace
+            .documents()
+            .iter()
+            .any(|document| document.is_loading());
+    }
+
+    fn loading_document_id_for_path(&self, path: &std::path::Path) -> Option<DocumentId> {
+        self.workspace
+            .documents()
+            .iter()
+            .find(|document| document.is_loading() && document.path.as_deref() == Some(path))
+            .map(|document| document.id)
     }
 }

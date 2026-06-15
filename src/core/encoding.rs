@@ -283,6 +283,35 @@ pub fn encode_text(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, Encodi
     }
 }
 
+pub fn encode_utf8_chunks_for_save<'a>(
+    chunks: impl IntoIterator<Item = &'a str>,
+    append_final_ending: Option<&str>,
+    with_bom: bool,
+) -> Vec<u8> {
+    let mut bytes = if with_bom {
+        UTF8_BOM_BYTES.to_vec()
+    } else {
+        Vec::new()
+    };
+
+    let mut first_chunk = true;
+    for chunk in chunks {
+        let chunk = if first_chunk {
+            first_chunk = false;
+            strip_text_bom(chunk)
+        } else {
+            chunk
+        };
+        bytes.extend_from_slice(chunk.as_bytes());
+    }
+
+    if let Some(ending) = append_final_ending {
+        bytes.extend_from_slice(ending.as_bytes());
+    }
+
+    bytes
+}
+
 pub fn strip_text_bom(text: &str) -> &str {
     text.strip_prefix(UTF8_BOM).unwrap_or(text)
 }

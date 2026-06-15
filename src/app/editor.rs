@@ -23,8 +23,13 @@ impl App {
         document_id: DocumentId,
         action: EditorAction,
     ) -> Task<Message> {
+        if self.editor_action_blocked_while_indexing(document_id, &action) {
+            self.file_status = Some(String::from("Finish loading before editing."));
+            return Task::none();
+        }
+
         let clipboard_task = self.clipboard_task(document_id, &action);
-        let entries = self.cached_outline_entries(document_id).map(Vec::from);
+        let entries = self.outline_entries_for_editor_action(document_id);
         let changed = self.apply_editor_action(document_id, action, entries.as_deref());
 
         if changed && document_id == self.workspace.active_document_id {
@@ -47,6 +52,15 @@ impl App {
             return Task::none();
         };
         let document_id = request.document_id;
+        if self
+            .workspace
+            .document(document_id)
+            .is_some_and(|document| document.is_loading_or_indexing())
+        {
+            self.file_status = Some(String::from("Finish loading before editing."));
+            return Task::none();
+        }
+
         let changed = self.apply_paste_request(&request, text.as_ref());
 
         if changed && document_id == self.workspace.active_document_id {
@@ -84,6 +98,15 @@ impl App {
     pub(super) fn update_editor_command(&mut self, message: Message) -> Task<Message> {
         self.active_menu = None;
 
+        if self
+            .workspace
+            .active_document()
+            .is_some_and(|document| document.is_loading_or_indexing())
+        {
+            self.file_status = Some(String::from("Finish loading before editing."));
+            return Task::none();
+        }
+
         let changed = match message {
             Message::Undo => self
                 .workspace
@@ -115,6 +138,10 @@ impl App {
         let Some(document) = self.workspace.active_document_mut() else {
             return false;
         };
+        if document.is_loading_or_indexing() {
+            self.file_status = Some(String::from("Finish loading before editing."));
+            return false;
+        }
 
         document.set_main_selection(EditorSelection::new(start, end));
         let changed = replace_selection(
@@ -141,6 +168,18 @@ impl App {
         self.outline_states
             .get(&document_id)
             .and_then(|state| state.current_functions(&metadata))
+    }
+
+    fn outline_entries_for_editor_action(
+        &self,
+        document_id: DocumentId,
+    ) -> Option<Vec<FunctionEntry>> {
+        let document = self.workspace.document(document_id)?;
+        if !document.can_run_full_document_analysis() {
+            return Some(Vec::new());
+        }
+
+        self.cached_outline_entries(document_id).map(Vec::from)
     }
 
     fn apply_editor_action(
@@ -325,6 +364,21 @@ impl App {
                 false
             }
         }
+    }
+
+    fn editor_action_blocked_while_indexing(
+        &self,
+        document_id: DocumentId,
+        action: &EditorAction,
+    ) -> bool {
+        let Some(document) = self.workspace.document(document_id) else {
+            return false;
+        };
+        if !document.is_loading_or_indexing() {
+            return false;
+        }
+
+        action.mutates_document()
     }
 
     fn clipboard_task(&self, document_id: DocumentId, action: &EditorAction) -> Task<Message> {

@@ -1,7 +1,7 @@
 use crate::core::{
     Document, DocumentId, PreparedSearch, SearchMode, SearchOptions, TextMatch, Workspace,
 };
-use crate::editor::{EditorSelection, position_for_byte_offset};
+use crate::editor::EditorSelection;
 use crate::message::AdvancedSearchTab;
 
 #[derive(Debug, Clone)]
@@ -114,12 +114,24 @@ impl SearchDialogState {
         }
 
         match document_results(documents, &self.query, self.options()) {
-            Ok(results) => {
+            Ok(SearchResults {
+                results,
+                incomplete_documents,
+            }) => {
                 self.results = results;
-                self.status = match self.results.len() {
+                let base_status = match self.results.len() {
                     0 => String::from("No matches"),
                     1 => String::from("1 match"),
                     count => format!("{count} matches"),
+                };
+                self.status = if incomplete_documents == 0 {
+                    base_status
+                } else if incomplete_documents == 1 {
+                    format!("{base_status} (partial; 1 document still indexing)")
+                } else {
+                    format!(
+                        "{base_status} (partial; {incomplete_documents} documents still indexing)"
+                    )
                 };
             }
             Err(error) => {
@@ -136,30 +148,40 @@ impl Default for SearchDialogState {
     }
 }
 
+struct SearchResults {
+    results: Vec<SearchResult>,
+    incomplete_documents: usize,
+}
+
 fn document_results<'a>(
     documents: impl IntoIterator<Item = &'a Document>,
     query: &str,
     options: SearchOptions,
-) -> Result<Vec<SearchResult>, crate::core::SearchError> {
+) -> Result<SearchResults, crate::core::SearchError> {
     let Some(search) = PreparedSearch::new(query, options)? else {
-        return Ok(Vec::new());
+        return Ok(SearchResults {
+            results: Vec::new(),
+            incomplete_documents: 0,
+        });
     };
     let mut results = Vec::new();
+    let mut incomplete_documents = 0;
 
     for document in documents {
-        for text_match in search.matches(document.buffer.text()) {
-            if let Some(result) = result_for_match(
-                document.id,
-                document.title(),
-                document.buffer.text(),
-                text_match,
-            ) {
+        if !document.has_complete_text_index() {
+            incomplete_documents += 1;
+        }
+        for text_match in search.matches_in_chunks(document.buffer.chunks()) {
+            if let Some(result) = result_for_match(document, text_match) {
                 results.push(result);
             }
         }
     }
 
-    Ok(results)
+    Ok(SearchResults {
+        results,
+        incomplete_documents,
+    })
 }
 
 pub fn search_error_status(error: crate::core::SearchError) -> String {
@@ -231,27 +253,14 @@ fn wildcard_match(value: &str, pattern: &str) -> bool {
     pattern_index == pattern.len()
 }
 
-fn result_for_match(
-    document_id: DocumentId,
-    document_title: String,
-    text: &str,
-    text_match: TextMatch,
-) -> Option<SearchResult> {
-    let start = position_for_byte_offset(text, text_match.start)?;
-    let end = position_for_byte_offset(text, text_match.end)?;
-    let line_start = text[..text_match.start]
-        .rfind(['\r', '\n'])
-        .map(|index| index + 1)
-        .unwrap_or(0);
-    let line_end = text[text_match.end..]
-        .find(['\r', '\n'])
-        .map(|index| text_match.end + index)
-        .unwrap_or(text.len());
-    let preview = text[line_start..line_end].trim().to_owned();
+fn result_for_match(document: &Document, text_match: TextMatch) -> Option<SearchResult> {
+    let start = document.buffer.position_for_byte_offset(text_match.start)?;
+    let end = document.buffer.position_for_byte_offset(text_match.end)?;
+    let preview = document.buffer.line(start.line)?.trim().to_owned();
 
     Some(SearchResult {
-        document_id,
-        document_title,
+        document_id: document.id,
+        document_title: document.title(),
         selection: EditorSelection::new(start, end),
         preview,
     })
@@ -260,7 +269,7 @@ fn result_for_match(
 #[cfg(test)]
 mod tests {
     use super::{SearchDialogState, include_filter_matches};
-    use crate::core::{Document, DocumentId, SearchMode};
+    use crate::core::{Document, DocumentId, DocumentIndexState, SearchMode};
     use crate::editor::{EditorPosition, EditorSelection};
 
     #[test]
@@ -320,5 +329,21 @@ mod tests {
 
         assert!(dialog.results.is_empty());
         assert!(dialog.status.starts_with("Invalid regex:"));
+    }
+
+    #[test]
+    fn search_status_reports_partial_results_for_indexing_documents() {
+        let mut document = Document::from_path(DocumentId::new(6), "notes.txt", "alpha beta");
+        document.index_state = DocumentIndexState::Pending {
+            generation: crate::core::DocumentLoadGeneration::next(),
+        };
+        let mut dialog = SearchDialogState::new();
+
+        dialog.set_query("alpha");
+        dialog.refresh_from_documents([&document]);
+
+        assert_eq!(dialog.results.len(), 1);
+        assert!(dialog.status.contains("partial"));
+        assert!(dialog.status.contains("still indexing"));
     }
 }

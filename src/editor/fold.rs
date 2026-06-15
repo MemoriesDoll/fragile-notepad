@@ -198,7 +198,7 @@ fn indentation_folds(buffer: &EditorBuffer, indent_width: usize) -> Vec<FoldRang
             continue;
         }
 
-        let indent = indentation_width(line, indent_width);
+        let indent = indentation_width(&line, indent_width);
         let mut has_deeper_line = false;
         let mut end_line = start_line;
 
@@ -211,7 +211,7 @@ fn indentation_folds(buffer: &EditorBuffer, indent_width: usize) -> Vec<FoldRang
                 continue;
             }
 
-            let next_indent = indentation_width(next_line, indent_width);
+            let next_indent = indentation_width(&next_line, indent_width);
 
             if next_indent > indent {
                 has_deeper_line = true;
@@ -266,7 +266,7 @@ fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {
 
                     if let Some((hashes, raw_string_len)) = hints
                         .raw_strings
-                        .then(|| raw_string_start(line, index))
+                        .then(|| raw_string_start(&line, index))
                         .flatten()
                     {
                         syntax = BraceSyntax::RawString { hashes };
@@ -274,7 +274,7 @@ fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {
                         continue;
                     }
 
-                    if let Some(delimiter) = quoted_string_delimiter(line, index, hints) {
+                    if let Some(delimiter) = quoted_string_delimiter(&line, index, hints) {
                         syntax = BraceSyntax::QuotedString {
                             close: delimiter.close.clone(),
                             escape: delimiter.escape,
@@ -289,7 +289,7 @@ fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {
                         syntax = BraceSyntax::Code;
                         index += close.len();
                     } else {
-                        index += next_char_len(line, index);
+                        index += next_char_len(&line, index);
                     }
                     continue;
                 }
@@ -317,15 +317,15 @@ fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {
                         syntax = BraceSyntax::Code;
                     }
 
-                    index += next_char_len(line, index);
+                    index += next_char_len(&line, index);
                     continue;
                 }
                 BraceSyntax::RawString { hashes } => {
-                    if raw_string_end(line, index, hashes).is_some() {
+                    if raw_string_end(&line, index, hashes).is_some() {
                         syntax = BraceSyntax::Code;
                         index += hashes + 1;
                     } else {
-                        index += next_char_len(line, index);
+                        index += next_char_len(&line, index);
                     }
                     continue;
                 }

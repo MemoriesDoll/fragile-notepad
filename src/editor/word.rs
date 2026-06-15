@@ -56,12 +56,12 @@ fn word_range_with_characters(
 ) -> Option<EditorRange> {
     let text = buffer.text();
     let offset = word_offset_at_position(buffer, position, word_characters)?;
-    let start = word_start_offset(text, offset, word_characters);
-    let end = word_end_offset(text, offset, word_characters);
+    let start = word_start_offset(&text, offset, word_characters);
+    let end = word_end_offset(&text, offset, word_characters);
 
     Some(EditorRange::new(
-        position_for_byte_offset(text, start)?,
-        position_for_byte_offset(text, end)?,
+        position_for_byte_offset(&text, start)?,
+        position_for_byte_offset(&text, end)?,
     ))
 }
 
@@ -84,13 +84,13 @@ fn word_offset_at_position(
 
     let line_end = EditorPosition::new(
         position.line,
-        buffer.line(position.line).unwrap_or("").len(),
+        buffer.line(position.line).unwrap_or_default().len(),
     );
     if position != line_end {
         return None;
     }
 
-    let previous = previous_char_offset(text, offset)?;
+    let previous = previous_char_offset(&text, offset)?;
     text[previous..]
         .chars()
         .next()

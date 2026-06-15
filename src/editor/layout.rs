@@ -175,7 +175,7 @@ pub fn hit_test(
         .max(0.0) as usize;
     let column = buffer
         .line(line)
-        .map(|text| byte_column_for(text, visual_column, decorations.settings.indent_width))
+        .map(|text| byte_column_for(&text, visual_column, decorations.settings.indent_width))
         .unwrap_or(0);
     let position = buffer.clamp_position(EditorPosition::new(line, column));
 

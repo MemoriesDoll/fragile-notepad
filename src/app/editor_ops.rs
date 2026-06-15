@@ -43,9 +43,7 @@ pub(super) fn selected_text(document: &crate::core::Document, tab_width: usize) 
         let mut lines = Vec::new();
         for line in projected {
             let range = document.buffer.clamp_range(line.range());
-            let start = document.buffer.byte_offset(range.start);
-            let end = document.buffer.byte_offset(range.end);
-            lines.push(document.buffer.text().get(start..end)?.to_owned());
+            lines.push(document.buffer.slice_text(range));
         }
 
         return Some(lines.join(&newline));
@@ -68,9 +66,7 @@ pub(super) fn selected_text(document: &crate::core::Document, tab_width: usize) 
         if range.is_empty() {
             continue;
         }
-        let start = document.buffer.byte_offset(range.start);
-        let end = document.buffer.byte_offset(range.end);
-        chunks.push(document.buffer.text().get(start..end)?.to_owned());
+        chunks.push(document.buffer.slice_text(range));
     }
 
     (!chunks.is_empty()).then(|| chunks.join(&newline))
@@ -93,9 +89,7 @@ pub(super) fn line_span_text(document: &crate::core::Document, tab_width: usize)
 
     let mut chunks = Vec::new();
     for range in ranges {
-        let start = document.buffer.byte_offset(range.start);
-        let end = document.buffer.byte_offset(range.end);
-        chunks.push(document.buffer.text().get(start..end)?.to_owned());
+        chunks.push(document.buffer.slice_text(range));
     }
 
     (!chunks.is_empty()).then(|| chunks.join(&newline))
@@ -195,14 +189,11 @@ pub(super) fn duplicate_line(document: &mut crate::core::Document) -> bool {
             .then_some(line_ending.len())
             .unwrap_or(0);
     let duplicate_end_offset = end_offset + insertion.len();
-    let Some(duplicate_start) =
-        position_for_byte_offset(document.buffer.text(), duplicate_start_offset)
-    else {
+    let text = document.buffer.text();
+    let Some(duplicate_start) = position_for_byte_offset(&text, duplicate_start_offset) else {
         return false;
     };
-    let Some(duplicate_end) =
-        position_for_byte_offset(document.buffer.text(), duplicate_end_offset)
-    else {
+    let Some(duplicate_end) = position_for_byte_offset(&text, duplicate_end_offset) else {
         return false;
     };
 
@@ -251,6 +242,7 @@ pub(super) fn backspace(document: &mut crate::core::Document, tab_width: usize) 
 
     let before_selection_set = document.selection_set().clone();
     let mut replacements = Vec::new();
+    let text = document.buffer.text();
 
     for (source_index, line) in concrete_selected_lines(document, &before_selection_set, tab_width)
         .into_iter()
@@ -258,10 +250,10 @@ pub(super) fn backspace(document: &mut crate::core::Document, tab_width: usize) 
     {
         let cursor = line.start;
         let offset = document.buffer.byte_offset(cursor);
-        let Some(start_offset) = previous_grapheme_offset(document.buffer.text(), offset) else {
+        let Some(start_offset) = previous_grapheme_offset(&text, offset) else {
             continue;
         };
-        let Some(start) = position_for_byte_offset(document.buffer.text(), start_offset) else {
+        let Some(start) = position_for_byte_offset(&text, start_offset) else {
             continue;
         };
 
@@ -283,6 +275,7 @@ pub(super) fn delete(document: &mut crate::core::Document, tab_width: usize) -> 
 
     let before_selection_set = document.selection_set().clone();
     let mut replacements = Vec::new();
+    let text = document.buffer.text();
 
     for (source_index, line) in concrete_selected_lines(document, &before_selection_set, tab_width)
         .into_iter()
@@ -290,10 +283,10 @@ pub(super) fn delete(document: &mut crate::core::Document, tab_width: usize) -> 
     {
         let cursor = line.start;
         let offset = document.buffer.byte_offset(cursor);
-        let Some(end_offset) = next_grapheme_offset(document.buffer.text(), offset) else {
+        let Some(end_offset) = next_grapheme_offset(&text, offset) else {
             continue;
         };
-        let Some(end) = position_for_byte_offset(document.buffer.text(), end_offset) else {
+        let Some(end) = position_for_byte_offset(&text, end_offset) else {
             continue;
         };
 
@@ -327,7 +320,7 @@ pub(super) fn unindent(document: &mut crate::core::Document, indentation_width: 
     );
     let start_offset = document.buffer.byte_offset(before_range.start);
     let end_offset = document.buffer.byte_offset(before_range.end);
-    let before_text = document.buffer.text().to_owned();
+    let before_text = document.buffer.text();
     let mut source_offset = start_offset;
     let mut replacement = String::with_capacity(end_offset.saturating_sub(start_offset));
 
@@ -427,7 +420,7 @@ fn unindent_removals(
 
     (first_line..=last_line)
         .map(|line| {
-            let text = buffer.line(line).unwrap_or("");
+            let text = buffer.line(line).unwrap_or_default();
 
             if text.starts_with('\t') {
                 1
@@ -556,10 +549,10 @@ pub(super) fn convert_selection_to_rectangle(
         return;
     }
 
-    let start_text = document.buffer.line(range.start.line).unwrap_or("");
-    let end_text = document.buffer.line(range.end.line).unwrap_or("");
-    let start_visual_column = visual_column_for(start_text, range.start.column, tab_width);
-    let end_visual_column = visual_column_for(end_text, range.end.column, tab_width);
+    let start_text = document.buffer.line(range.start.line).unwrap_or_default();
+    let end_text = document.buffer.line(range.end.line).unwrap_or_default();
+    let start_visual_column = visual_column_for(&start_text, range.start.column, tab_width);
+    let end_visual_column = visual_column_for(&end_text, range.end.column, tab_width);
     let rectangular = SelectionRange::rectangular(
         range.start,
         range.end,
@@ -711,7 +704,7 @@ fn apply_concrete_replacements(
     let span = EditorRange::new(first.range.start, last.range.end);
     let span_start_offset = document.buffer.byte_offset(span.start);
     let span_end_offset = document.buffer.byte_offset(span.end);
-    let before_text = document.buffer.text().to_owned();
+    let before_text = document.buffer.text();
     let Some(span_text) = before_text.get(span_start_offset..span_end_offset) else {
         return false;
     };

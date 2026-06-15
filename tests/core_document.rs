@@ -17,7 +17,7 @@ fn caret(line: usize, column: usize) -> EditorSelection {
 
 fn document_end(document: &Document) -> EditorPosition {
     let line = document.buffer.line_count().saturating_sub(1);
-    let column = document.buffer.line(line).unwrap_or("").len();
+    let column = document.buffer.line(line).unwrap_or_default().len();
 
     EditorPosition::new(line, column)
 }
@@ -233,6 +233,19 @@ fn apply_action_marks_dirty_only_for_edits() {
 }
 
 #[test]
+fn metadata_dirty_state_survives_text_refresh() {
+    let mut document = Document::from_path(DocumentId::new(18), fixture_path("note.txt"), "saved");
+    document.mark_clean();
+
+    document.set_encoding(TextEncoding::Utf8Bom);
+    assert!(document.is_dirty);
+
+    document.refresh_after_text_change();
+
+    assert!(document.is_dirty);
+}
+
+#[test]
 fn undo_restores_previous_text_and_clean_state() {
     let mut document = Document::from_path(DocumentId::new(1), fixture_path("note.txt"), "a");
 
@@ -293,6 +306,10 @@ fn text_for_save_preserves_detected_crlf_and_adds_final_line_ending() {
     assert_eq!(document.line_ending, Some(LineEnding::CrLf));
     assert_eq!(document.text(), "one\r\ntwo");
     assert_eq!(document.text_for_save(), "one\r\ntwo\r\n");
+    assert_eq!(
+        document.bytes_for_save().expect("encoded bytes"),
+        b"one\r\ntwo\r\n"
+    );
 }
 
 #[test]
@@ -369,6 +386,65 @@ fn decoded_utf16le_bom_document_saves_back_as_utf16le() {
         document.bytes_for_save().expect("encoded bytes"),
         vec![0xff, 0xfe, b'h', 0, b'i', 0]
     );
+}
+
+#[test]
+fn loading_document_text_index_gates_full_document_analysis_until_completion() {
+    let generation = fragile_notepad::core::DocumentLoadGeneration::next();
+    let mut document = Document::loading(DocumentId::new(15), fixture_path("large.rs"), generation);
+
+    assert!(!document.has_complete_text_index());
+    assert!(!document.can_run_full_document_analysis());
+    assert!(document.replace_loading_preview(generation, "fn partial() {\n", 15, None));
+    assert!(!document.has_complete_text_index());
+    assert!(document.folds.ranges().is_empty());
+
+    assert!(document.complete_loading(
+        generation,
+        decode_bytes(b"fn complete() {\n    run();\n}\n")
+    ));
+
+    assert!(document.has_complete_text_index());
+    assert!(document.can_run_full_document_analysis());
+    assert!(
+        document
+            .folds
+            .ranges()
+            .contains(&fragile_notepad::editor::FoldRange::new(0, 2))
+    );
+}
+
+#[test]
+fn utf8_chunked_save_preserves_bom_crlf_and_trailing_empty_line() {
+    let mut document = Document::from_decoded(
+        DocumentId::new(16),
+        fixture_path("large.txt"),
+        decode_bytes(b"\xef\xbb\xbfalpha\r\nbeta\r\n"),
+    );
+    document.buffer.append_text("caf\u{00e9}");
+
+    assert_eq!(document.encoding, TextEncoding::Utf8Bom);
+    assert_eq!(document.line_ending, Some(LineEnding::CrLf));
+    assert_eq!(document.buffer.line(2).as_deref(), Some("caf\u{00e9}"));
+    assert_eq!(
+        document.bytes_for_save().expect("encoded bytes"),
+        b"\xef\xbb\xbfalpha\r\nbeta\r\ncaf\xc3\xa9\r\n"
+    );
+}
+
+#[test]
+fn stale_generation_cannot_finish_or_fail_loading_document() {
+    let generation = fragile_notepad::core::DocumentLoadGeneration::next();
+    let stale_generation = fragile_notepad::core::DocumentLoadGeneration::next();
+    let mut document =
+        Document::loading(DocumentId::new(17), fixture_path("large.txt"), generation);
+
+    assert!(!document.complete_loading(stale_generation, decode_bytes(b"stale")));
+    assert_eq!(document.text(), "");
+    assert!(document.is_loading_or_indexing());
+    assert!(!document.fail_loading(stale_generation));
+    assert!(document.is_loading_or_indexing());
+    assert_eq!(document.load_generation(), Some(generation));
 }
 
 #[test]

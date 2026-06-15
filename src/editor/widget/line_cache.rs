@@ -130,10 +130,10 @@ where
         return HitTarget::Outside;
     };
 
-    let line_text = buffer.line(line).unwrap_or("");
+    let line_text = buffer.line(line).unwrap_or_default();
     let text_x = scrolled_text_origin_x(layout, decorations);
     let x = (position.x - text_x).max(0.0);
-    let column = LineGeometry::new(line_text, layout.metrics, renderer)
+    let column = LineGeometry::new(&line_text, layout.metrics, renderer)
         .byte_column_for_x(x, decorations.settings.indent_width);
 
     HitTarget::Text(buffer.clamp_position(EditorPosition::new(line, column)))

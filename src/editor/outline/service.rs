@@ -92,6 +92,16 @@ impl OutlineState {
         }
     }
 
+    pub fn pending_metadata(metadata: OutlineSnapshotMetadata) -> Self {
+        Self {
+            metadata,
+            status: OutlineStatus::Pending,
+            tree: OutlineTree::default(),
+            functions: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
     pub fn ready(result: OutlineParseResult) -> Self {
         Self {
             metadata: OutlineSnapshotMetadata::from_result(&result),
@@ -138,7 +148,7 @@ pub fn outline_request_for_document(
 ) -> OutlineParseRequest {
     OutlineParseRequest::new(
         document.id,
-        Arc::new(document.buffer.text().to_owned()),
+        Arc::new(document.buffer.text()),
         document.syntax_token.clone(),
         document.revision(),
         registry_hash,

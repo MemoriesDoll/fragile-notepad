@@ -1,6 +1,6 @@
 use fragile_notepad::core::search::{
-    FindState, PreparedSearch, SearchMode, SearchOptions, TextMatch, compute_matches, replace_all,
-    replace_current,
+    FindState, PreparedSearch, SearchMode, SearchOptions, TextMatch, compute_matches,
+    compute_matches_in_chunks, replace_all, replace_current,
 };
 
 #[test]
@@ -104,6 +104,83 @@ fn compute_matches_reports_utf8_byte_offsets_for_multiline_text() {
         compute_matches(text, "茅c", true),
         vec![TextMatch::new(4, 8)]
     );
+}
+
+#[test]
+fn compute_matches_in_chunks_finds_literal_matches_across_boundaries() {
+    let chunks = ["al", "pha beta al", "pha"];
+
+    assert_eq!(
+        compute_matches_in_chunks(chunks, "alpha", SearchOptions::normal(true, false),),
+        vec![TextMatch::new(0, 5), TextMatch::new(11, 16)]
+    );
+}
+
+#[test]
+fn compute_matches_in_chunks_handles_unicode_and_crlf_boundaries() {
+    let chunks = ["caf", "\u{00e9}\r", "\nnext caf", "\u{00e9}"];
+
+    assert_eq!(
+        compute_matches_in_chunks(chunks, "caf\u{00e9}", SearchOptions::normal(true, false),),
+        vec![
+            TextMatch::new(0, "caf\u{00e9}".len()),
+            TextMatch::new(12, 17)
+        ]
+    );
+    assert_eq!(
+        compute_matches_in_chunks(chunks, "\r\nnext", SearchOptions::normal(true, false),),
+        vec![TextMatch::new(
+            "caf\u{00e9}".len(),
+            "caf\u{00e9}\r\nnext".len()
+        )]
+    );
+}
+
+#[test]
+fn compute_matches_in_chunks_reports_only_currently_available_partial_results() {
+    let partial_chunks = ["alpha beta alp"];
+    let complete_chunks = ["alpha beta alp", "ha"];
+
+    assert_eq!(
+        compute_matches_in_chunks(partial_chunks, "alpha", SearchOptions::normal(true, false),),
+        vec![TextMatch::new(0, 5)]
+    );
+    assert_eq!(
+        compute_matches_in_chunks(complete_chunks, "alpha", SearchOptions::normal(true, false),),
+        vec![TextMatch::new(0, 5), TextMatch::new(11, 16)]
+    );
+}
+
+#[test]
+fn prepared_regex_search_still_materializes_chunked_text_for_compatibility() {
+    let search = PreparedSearch::new(
+        r"caf.",
+        SearchOptions {
+            case_sensitive: true,
+            whole_word: false,
+            mode: SearchMode::Regex,
+        },
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        search.matches_in_chunks(["ca", "f\u{00e9} cafe"]),
+        vec![
+            TextMatch::new(0, "caf\u{00e9}".len()),
+            TextMatch::new(6, 10)
+        ]
+    );
+}
+
+#[test]
+fn find_state_refresh_matches_in_chunks_preserves_navigation() {
+    let mut find = FindState::with_query("two");
+
+    find.refresh_matches_in_chunks(["one t", "wo two"]);
+
+    assert_eq!(find.current(), Some(TextMatch::new(4, 7)));
+    assert_eq!(find.next(), Some(TextMatch::new(8, 11)));
 }
 
 #[test]

@@ -1,7 +1,9 @@
 use iced::highlighter;
 use iced::widget::text_editor::LineEnding;
 
-use crate::core::encoding::{DecodedText, TextEncoding, encode_text, strip_text_bom};
+use crate::core::encoding::{
+    DecodedText, TextEncoding, encode_text, encode_utf8_chunks_for_save, strip_text_bom,
+};
 use crate::editor::{
     DecorationModel, DecorationSettings, EditorBuffer, EditorHistory, EditorPosition,
     EditorSelection, FoldModel, FoldProvider, IndentBraceFoldProvider, IndentGuide, ScrollOffset,
@@ -11,9 +13,11 @@ use crate::editor::{
 use std::cell::RefCell;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const DEFAULT_SYNTAX_TOKEN: &str = "txt";
 const DEFAULT_REVEAL_CONTEXT_ROWS: usize = 3;
+static NEXT_LOAD_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyntaxTokenSource {
@@ -40,6 +44,44 @@ impl fmt::Display for DocumentId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DocumentLoadGeneration(u64);
+
+impl DocumentLoadGeneration {
+    pub fn next() -> Self {
+        Self(NEXT_LOAD_GENERATION.fetch_add(1, Ordering::Relaxed))
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for DocumentLoadGeneration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentLoadState {
+    Complete,
+    Loading {
+        generation: DocumentLoadGeneration,
+        bytes_read: u64,
+        total_bytes: Option<u64>,
+    },
+    Failed {
+        generation: DocumentLoadGeneration,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentIndexState {
+    Complete,
+    Pending { generation: DocumentLoadGeneration },
+}
+
 #[derive(Debug, Clone)]
 pub struct Document {
     pub id: DocumentId,
@@ -59,7 +101,10 @@ pub struct Document {
     pub syntax_cache: RefCell<SyntaxLineCache>,
     pub line_ending: Option<LineEnding>,
     pub encoding: TextEncoding,
+    pub load_state: DocumentLoadState,
+    pub index_state: DocumentIndexState,
     revision: u64,
+    metadata_dirty: bool,
     syntax_token_source: SyntaxTokenSource,
 }
 
@@ -106,6 +151,29 @@ impl Document {
         document
     }
 
+    pub fn loading(
+        id: DocumentId,
+        path: impl Into<PathBuf>,
+        generation: DocumentLoadGeneration,
+    ) -> Self {
+        let path = path.into();
+        let mut document = Self::from_parts(
+            id,
+            Some(path.clone()),
+            String::new(),
+            syntax_token_for_path(&path),
+            None,
+            SyntaxTokenSource::Auto,
+        );
+        document.load_state = DocumentLoadState::Loading {
+            generation,
+            bytes_read: 0,
+            total_bytes: None,
+        };
+        document.index_state = DocumentIndexState::Pending { generation };
+        document
+    }
+
     fn from_parts(
         id: DocumentId,
         path: Option<PathBuf>,
@@ -117,7 +185,7 @@ impl Document {
         let buffer = EditorBuffer::from_text(text);
         let selection = EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0));
         let selection_set = SelectionSet::single(selection);
-        let history = EditorHistory::new(buffer.text());
+        let history = EditorHistory::new("");
         let decoration_settings = DecorationSettings::default();
         let folds = FoldModel::new(
             fold_provider(decoration_settings, &syntax_token).compute_folds(&buffer),
@@ -148,7 +216,10 @@ impl Document {
             syntax_cache: RefCell::new(SyntaxLineCache::default()),
             line_ending,
             encoding: TextEncoding::Utf8,
+            load_state: DocumentLoadState::Complete,
+            index_state: DocumentIndexState::Complete,
             revision: 0,
+            metadata_dirty: false,
             syntax_token_source,
         }
     }
@@ -174,16 +245,162 @@ impl Document {
     }
 
     pub fn mark_dirty(&mut self) {
+        self.metadata_dirty = true;
         self.is_dirty = true;
     }
 
     pub fn mark_clean(&mut self) {
-        self.history.mark_clean(self.buffer.text());
+        self.history.mark_clean("");
+        self.metadata_dirty = false;
         self.is_dirty = false;
     }
 
+    pub fn is_loading(&self) -> bool {
+        matches!(self.load_state, DocumentLoadState::Loading { .. })
+    }
+
+    pub fn is_indexing(&self) -> bool {
+        matches!(self.index_state, DocumentIndexState::Pending { .. })
+    }
+
+    pub fn is_loading_or_indexing(&self) -> bool {
+        self.is_loading() || self.is_indexing()
+    }
+
+    pub fn has_complete_text_index(&self) -> bool {
+        matches!(self.load_state, DocumentLoadState::Complete)
+            && matches!(self.index_state, DocumentIndexState::Complete)
+    }
+
+    pub fn can_run_full_document_analysis(&self) -> bool {
+        self.has_complete_text_index()
+    }
+
+    pub fn load_generation(&self) -> Option<DocumentLoadGeneration> {
+        match self.load_state {
+            DocumentLoadState::Loading { generation, .. }
+            | DocumentLoadState::Failed { generation } => Some(generation),
+            DocumentLoadState::Complete => match self.index_state {
+                DocumentIndexState::Pending { generation } => Some(generation),
+                DocumentIndexState::Complete => None,
+            },
+        }
+    }
+
+    pub fn accepts_load_generation(&self, generation: DocumentLoadGeneration) -> bool {
+        self.load_generation() == Some(generation)
+    }
+
+    pub fn update_load_progress(
+        &mut self,
+        generation: DocumentLoadGeneration,
+        bytes_read: u64,
+        total_bytes: Option<u64>,
+    ) -> bool {
+        let DocumentLoadState::Loading {
+            generation: current,
+            bytes_read: current_bytes,
+            total_bytes: current_total,
+        } = &mut self.load_state
+        else {
+            return false;
+        };
+
+        if *current != generation {
+            return false;
+        }
+
+        *current_bytes = bytes_read;
+        *current_total = total_bytes;
+        true
+    }
+
+    pub fn has_active_load(&self, generation: DocumentLoadGeneration) -> bool {
+        matches!(
+            self.load_state,
+            DocumentLoadState::Loading {
+                generation: current,
+                ..
+            } if current == generation
+        )
+    }
+
+    pub fn replace_loading_preview(
+        &mut self,
+        generation: DocumentLoadGeneration,
+        text: &str,
+        bytes_read: u64,
+        total_bytes: Option<u64>,
+    ) -> bool {
+        if !self.update_load_progress(generation, bytes_read, total_bytes) {
+            return false;
+        }
+
+        self.buffer.append_text(text);
+        self.selection = EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0));
+        self.selection_set = SelectionSet::single(self.selection);
+        self.refresh_view_models();
+        self.syntax_cache.borrow_mut().clear();
+        self.revision = self.revision.saturating_add(1);
+        true
+    }
+
+    pub fn complete_loading(
+        &mut self,
+        generation: DocumentLoadGeneration,
+        decoded: DecodedText,
+    ) -> bool {
+        if !self.has_active_load(generation) {
+            return false;
+        }
+
+        let text = strip_text_bom(&decoded.text);
+        self.buffer = EditorBuffer::from_text(text.to_owned());
+        self.selection = EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0));
+        self.selection_set = SelectionSet::single(self.selection);
+        self.history = EditorHistory::new("");
+        self.metadata_dirty = false;
+        self.is_dirty = false;
+        self.line_ending = detect_line_ending(text);
+        self.encoding = decoded.encoding;
+        self.load_state = DocumentLoadState::Complete;
+        self.index_state = DocumentIndexState::Complete;
+        self.refresh_after_text_change();
+        true
+    }
+
+    pub fn complete_streaming_load(
+        &mut self,
+        generation: DocumentLoadGeneration,
+        encoding: TextEncoding,
+    ) -> bool {
+        if !self.has_active_load(generation) {
+            return false;
+        }
+
+        self.history = EditorHistory::new("");
+        self.metadata_dirty = false;
+        self.is_dirty = false;
+        self.line_ending = self.detect_current_line_ending();
+        self.encoding = encoding;
+        self.load_state = DocumentLoadState::Complete;
+        self.index_state = DocumentIndexState::Complete;
+        self.refresh_after_text_change();
+        true
+    }
+
+    pub fn fail_loading(&mut self, generation: DocumentLoadGeneration) -> bool {
+        if !self.has_active_load(generation) {
+            return false;
+        }
+
+        self.load_state = DocumentLoadState::Failed { generation };
+        self.index_state = DocumentIndexState::Complete;
+        true
+    }
+
     pub fn text(&self) -> String {
-        self.buffer.text().to_owned()
+        self.buffer.text()
     }
 
     pub fn revision(&self) -> u64 {
@@ -191,7 +408,7 @@ impl Document {
     }
 
     pub fn text_for_save(&self) -> String {
-        let mut text = self.buffer.text().to_owned();
+        let mut text = self.buffer.text();
         let Some(line_ending) = self.line_ending else {
             return text;
         };
@@ -205,7 +422,29 @@ impl Document {
         text
     }
 
+    pub fn save_appended_line_ending(&self) -> Option<&'static str> {
+        let line_ending = self.line_ending?;
+        let ending = line_ending.as_str();
+        let mut last = None;
+        for chunk in self.buffer.chunks() {
+            last = Some(chunk);
+        }
+        let last = last?;
+
+        (!last.is_empty() && !last.ends_with(ending)).then_some(ending)
+    }
+
     pub fn bytes_for_save(&self) -> Result<Vec<u8>, crate::core::encoding::EncodingError> {
+        if matches!(self.encoding, TextEncoding::Utf8 | TextEncoding::Utf8Bom) {
+            return Ok(encode_utf8_chunks_for_save(
+                self.buffer.chunks(),
+                self.save_appended_line_ending(),
+                self.encoding == TextEncoding::Utf8Bom,
+            ));
+        }
+
+        // Non-UTF encoders operate on scalar values and may report unmappable
+        // characters, so they still materialize the compatibility string.
         encode_text(&self.text_for_save(), self.encoding)
     }
 
@@ -289,8 +528,10 @@ impl Document {
     }
 
     pub fn refresh_text_from(&mut self, first_changed_line: usize) {
-        self.folds
-            .recompute(self.fold_provider().compute_folds(&self.buffer));
+        if self.can_run_full_document_analysis() {
+            self.folds
+                .recompute(self.fold_provider().compute_folds(&self.buffer));
+        }
         self.refresh_view_models();
         self.refresh_dirty_state();
         self.syntax_cache
@@ -328,8 +569,10 @@ impl Document {
 
     pub fn set_decoration_settings(&mut self, settings: DecorationSettings) {
         self.decorations.settings = settings;
-        self.folds
-            .recompute(fold_provider(settings, &self.syntax_token).compute_folds(&self.buffer));
+        if self.can_run_full_document_analysis() {
+            self.folds
+                .recompute(fold_provider(settings, &self.syntax_token).compute_folds(&self.buffer));
+        }
         self.refresh_view_models();
     }
 
@@ -406,15 +649,67 @@ impl Document {
     }
 
     fn refresh_dirty_state(&mut self) {
-        self.is_dirty = self.history.is_dirty(self.buffer.text());
+        self.is_dirty = self.metadata_dirty || self.history.is_dirty("");
     }
 
     fn refresh_after_syntax_change(&mut self) {
         self.syntax_cache.borrow_mut().clear();
-        self.folds
-            .recompute(self.fold_provider().compute_folds(&self.buffer));
+        if self.can_run_full_document_analysis() {
+            self.folds
+                .recompute(self.fold_provider().compute_folds(&self.buffer));
+        }
         self.refresh_view_models();
         self.revision = self.revision.saturating_add(1);
+    }
+
+    fn detect_current_line_ending(&self) -> Option<LineEnding> {
+        let mut previous_was_cr = false;
+
+        for chunk in self.buffer.chunks() {
+            if chunk.is_empty() {
+                continue;
+            }
+
+            if previous_was_cr {
+                return Some(if chunk.as_bytes().first() == Some(&b'\n') {
+                    LineEnding::CrLf
+                } else {
+                    LineEnding::Cr
+                });
+            }
+
+            let bytes = chunk.as_bytes();
+            let mut index = 0;
+            while index < bytes.len() {
+                match bytes[index] {
+                    b'\r' => {
+                        if index + 1 == bytes.len() {
+                            previous_was_cr = true;
+                            break;
+                        }
+                        return Some(if bytes.get(index + 1) == Some(&b'\n') {
+                            LineEnding::CrLf
+                        } else {
+                            LineEnding::Cr
+                        });
+                    }
+                    b'\n' => {
+                        return Some(if bytes.get(index + 1) == Some(&b'\r') {
+                            LineEnding::LfCr
+                        } else {
+                            LineEnding::Lf
+                        });
+                    }
+                    _ => index += 1,
+                }
+            }
+        }
+
+        if previous_was_cr {
+            return Some(LineEnding::Cr);
+        }
+
+        None
     }
 
     fn fold_provider(&self) -> IndentBraceFoldProvider {
