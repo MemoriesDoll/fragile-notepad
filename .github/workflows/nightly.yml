@@ -12,8 +12,57 @@ permissions:
   contents: write
 
 jobs:
+  check-nightly:
+    name: Check for new commits
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.guard.outputs.should_run }}
+      reason: ${{ steps.guard.outputs.reason }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Check latest nightly tag
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
+            echo "should_run=true" >> "${GITHUB_OUTPUT}"
+            echo "reason=manual run requested" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          latest_tag="$(git for-each-ref --count=1 --sort=-creatordate --format='%(refname:short)' 'refs/tags/nightly-*')"
+
+          if [[ -z "${latest_tag}" ]]; then
+            echo "should_run=true" >> "${GITHUB_OUTPUT}"
+            echo "reason=no previous nightly tag found" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          latest_sha="$(git rev-list -n 1 "${latest_tag}")"
+
+          if [[ "${latest_sha}" == "${GITHUB_SHA}" ]]; then
+            echo "should_run=false" >> "${GITHUB_OUTPUT}"
+            echo "reason=${GITHUB_SHA} already has ${latest_tag}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "should_run=true" >> "${GITHUB_OUTPUT}"
+            echo "reason=new commit detected since ${latest_tag}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Report decision
+        run: echo "${{ steps.guard.outputs.reason }}"
+
   build:
     name: Build ${{ matrix.name }}
+    needs: check-nightly
+    if: ${{ needs.check-nightly.outputs.should_run == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -125,8 +174,10 @@ jobs:
   publish:
     name: Publish prerelease
     runs-on: ubuntu-latest
-    needs: build
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    needs:
+      - check-nightly
+      - build
+    if: ${{ needs.check-nightly.outputs.should_run == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
 
     steps:
       - name: Checkout
