@@ -14,6 +14,10 @@ impl App {
         _status: Status,
         window_id: window::Id,
     ) -> Task<Message> {
+        if let Event::Window(window::Event::FileDropped(path)) = event {
+            return self.update_file(Message::FileDropped(window_id, path));
+        }
+
         if matches!(event, Event::Window(window::Event::Focused)) {
             self.focused_window_id = Some(window_id);
         }
@@ -241,6 +245,7 @@ fn should_forward_runtime_event(event: &Event, status: Status) -> bool {
             event,
             Event::Keyboard(keyboard::Event::ModifiersChanged(_))
                 | Event::Mouse(mouse::Event::WheelScrolled { .. })
+                | Event::Window(window::Event::FileDropped(_))
         )
 }
 
@@ -264,10 +269,12 @@ fn command_or_control(modifiers: keyboard::Modifiers) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{shortcut_for_scroll, should_forward_runtime_event};
+    use super::{event_to_message, shortcut_for_scroll, should_forward_runtime_event};
     use crate::core::ShortcutCommand;
+    use crate::message::Message;
     use iced::event::Event;
-    use iced::{keyboard, mouse};
+    use iced::{keyboard, mouse, window};
+    use std::path::PathBuf;
 
     #[test]
     fn scroll_direction_maps_to_zoom_shortcuts() {
@@ -315,6 +322,27 @@ mod tests {
         assert!(!should_forward_runtime_event(
             &captured_key,
             iced::event::Status::Captured
+        ));
+    }
+
+    #[test]
+    fn file_drop_events_are_forwarded_even_when_captured() {
+        let path = PathBuf::from("dropped.txt");
+        let event = Event::Window(window::Event::FileDropped(path.clone()));
+        let window_id = window::Id::unique();
+
+        assert!(should_forward_runtime_event(
+            &event,
+            iced::event::Status::Captured
+        ));
+
+        assert!(matches!(
+            event_to_message(event, iced::event::Status::Captured, window_id),
+            Some(Message::RuntimeEvent(
+                Event::Window(window::Event::FileDropped(forwarded_path)),
+                iced::event::Status::Captured,
+                forwarded_window_id
+            )) if forwarded_path == path && forwarded_window_id == window_id
         ));
     }
 }

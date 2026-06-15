@@ -1,6 +1,64 @@
 use super::test_support::*;
 
 #[test]
+fn dropped_file_completion_opens_document_through_existing_open_path() {
+    let (mut app, _) = App::new();
+    let main_window = app.main_window_id.expect("main window id");
+    let path = PathBuf::from("dropped.txt");
+    let contents = Arc::new(crate::core::decode_bytes(b"dropped body"));
+
+    let _ = app.update(Message::FileDropped(main_window, path.clone()));
+    assert!(app.is_loading);
+
+    let _ = app.update(Message::FileOpened(Ok(OpenedFile {
+        path: path.clone(),
+        contents,
+    })));
+
+    let document = app
+        .workspace
+        .active_document()
+        .expect("dropped file should open as active document");
+
+    assert_eq!(document.path.as_deref(), Some(path.as_path()));
+    assert_eq!(document.buffer.text(), "dropped body");
+    assert!(!app.is_loading);
+}
+
+#[test]
+fn dropped_files_on_non_main_windows_are_ignored() {
+    let (mut app, _) = App::new();
+    let original_document_id = app.workspace.active_document_id;
+    let secondary_window = iced::window::Id::unique();
+
+    let _ = app.update(Message::FileDropped(
+        secondary_window,
+        PathBuf::from("ignored.txt"),
+    ));
+
+    assert_eq!(app.workspace.active_document_id, original_document_id);
+    assert_eq!(app.workspace.documents().len(), 1);
+    assert!(!app.is_loading);
+}
+
+#[test]
+fn dropped_files_still_schedule_while_a_previous_drop_is_loading() {
+    let (mut app, _) = App::new();
+    let main_window = app.main_window_id.expect("main window id");
+
+    app.file_status = Some("stale status".to_owned());
+    app.is_loading = true;
+
+    let _ = app.update(Message::FileDropped(
+        main_window,
+        PathBuf::from("second-drop.txt"),
+    ));
+
+    assert!(app.is_loading);
+    assert_eq!(app.file_status, None);
+}
+
+#[test]
 fn manual_non_plain_language_selection_survives_save_as() {
     let (mut app, _) = App::new();
     let document_id = app.workspace.active_document_id;

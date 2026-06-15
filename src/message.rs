@@ -154,6 +154,7 @@ pub enum Message {
     TabDragReleased(DocumentId),
     NewFile,
     OpenFile,
+    FileDropped(window::Id, PathBuf),
     FileOpened(FileOpenResult),
     SaveFile,
     SaveAllFiles,

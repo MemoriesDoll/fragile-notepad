@@ -287,6 +287,7 @@ impl App {
             | Message::TabDragReleased(_)
             | Message::NewFile
             | Message::OpenFile
+            | Message::FileDropped(_, _)
             | Message::FileOpened(_)
             | Message::SaveFile
             | Message::SaveAllFiles

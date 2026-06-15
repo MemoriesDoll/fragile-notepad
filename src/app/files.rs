@@ -7,6 +7,7 @@ use crate::message::{
 use crate::services;
 
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::{App, CloseGoal};
@@ -93,6 +94,7 @@ impl App {
                         .map(Message::FileOpened)
                 }
             }
+            Message::FileDropped(window_id, path) => self.open_dropped_file(window_id, path),
             Message::FileOpened(result) => self.open_done(result),
             Message::SaveFile => {
                 self.active_menu = None;
@@ -189,6 +191,18 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    fn open_dropped_file(&mut self, window_id: window::Id, path: PathBuf) -> Task<Message> {
+        if self.main_window_id != Some(window_id) {
+            return Task::none();
+        }
+
+        self.active_menu = None;
+        self.is_loading = true;
+        self.file_status = None;
+
+        Task::perform(services::load_file(path), Message::FileOpened)
     }
 
     fn save_active(&mut self, force_save_as: bool) -> Task<Message> {
