@@ -1703,6 +1703,21 @@ fn shortcut_defaults_assign_zoom_in_binding() {
 }
 
 #[test]
+fn shortcut_default_zoom_in_resolves_shifted_plus_key() {
+    let shortcuts = ShortcutMap::default();
+    let modifiers = keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT;
+
+    assert_eq!(
+        shortcuts.resolve(
+            &keyboard::Key::Character("+".into()),
+            &keyboard::Key::Character("=".into()),
+            modifiers,
+        ),
+        Some(ShortcutCommand::ZoomIn)
+    );
+}
+
+#[test]
 fn shortcut_display_is_ascii_and_exposes_icon_parts_for_ui() {
     let logo = KeyBinding::new(
         ShortcutModifiers {

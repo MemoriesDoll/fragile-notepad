@@ -765,7 +765,7 @@ fn encoding_character_sets() -> Vec<MenuNode> {
                     Message::EncodingSelected(TextEncoding::Big5),
                 ),
                 menu::item(
-                    "GB2312 (Simplified)",
+                    "GB18030 (Simplified)",
                     Message::EncodingSelected(TextEncoding::Gb18030),
                 ),
             ],

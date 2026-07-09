@@ -74,7 +74,9 @@ impl EditorSettings {
     pub const SCROLL_SPEED_STEP: f32 = 0.25;
 
     pub fn set_zoom(&mut self, zoom: f32) {
-        self.zoom = zoom.clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
+        if zoom.is_finite() {
+            self.zoom = zoom.clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
+        }
     }
 
     pub fn zoom_in(&mut self) {
@@ -90,7 +92,9 @@ impl EditorSettings {
     }
 
     pub fn set_scroll_speed(&mut self, scroll_speed: f32) {
-        self.scroll_speed = scroll_speed.clamp(Self::MIN_SCROLL_SPEED, Self::MAX_SCROLL_SPEED);
+        if scroll_speed.is_finite() {
+            self.scroll_speed = scroll_speed.clamp(Self::MIN_SCROLL_SPEED, Self::MAX_SCROLL_SPEED);
+        }
     }
 
     pub fn increase_scroll_speed(&mut self) {

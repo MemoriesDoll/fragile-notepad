@@ -212,3 +212,18 @@ fn editor_settings_invalid_values_keep_defaults_and_clamp_zoom() {
     assert!(!settings.decorations.show_spaces);
     assert!(settings.decorations.show_tabs);
 }
+
+#[test]
+fn editor_settings_reject_non_finite_numeric_values() {
+    let settings = EditorSettings::from_xml_str(
+        "\
+<fragile-notepad-settings version=\"1\">
+  <editor scroll-speed=\"NaN\" />
+  <appearance zoom=\"NaN\" />
+</fragile-notepad-settings>
+",
+    );
+
+    assert_eq!(settings.zoom, EditorSettings::DEFAULT_ZOOM);
+    assert_eq!(settings.scroll_speed, EditorSettings::DEFAULT_SCROLL_SPEED);
+}

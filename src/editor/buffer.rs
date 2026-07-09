@@ -66,6 +66,9 @@ impl EditorBuffer {
         }
 
         self.byte_to_char_boundary(byte_offset)?;
+        if self.is_inside_paired_line_ending(byte_offset) {
+            return None;
+        }
         let line = match self.line_starts.binary_search(&byte_offset) {
             Ok(line) => line,
             Err(next_line) => next_line.saturating_sub(1),
@@ -182,6 +185,23 @@ impl EditorBuffer {
         }
     }
 
+    fn is_inside_paired_line_ending(&self, byte_offset: usize) -> bool {
+        if byte_offset == 0 || byte_offset >= self.byte_len() {
+            return false;
+        }
+
+        let Ok(before_char) = self.rope.try_byte_to_char(byte_offset - 1) else {
+            return false;
+        };
+        let Ok(after_char) = self.rope.try_byte_to_char(byte_offset) else {
+            return false;
+        };
+        matches!(
+            (self.rope.char(before_char), self.rope.char(after_char)),
+            ('\r', '\n') | ('\n', '\r')
+        )
+    }
+
     fn line_content_end_char(&self, index: usize) -> usize {
         let Some(start_byte) = self.line_starts.get(index).copied() else {
             return self.rope.len_chars();
@@ -217,39 +237,47 @@ impl EditorBuffer {
     }
 
     fn rebuild_line_starts(&mut self) {
-        self.line_starts = line_starts(&self.text());
+        self.line_starts = line_starts_from_chunks(self.rope.chunks());
     }
 }
 
 fn line_starts(text: &str) -> Vec<usize> {
+    line_starts_from_chunks(std::iter::once(text))
+}
+
+fn line_starts_from_chunks<'a>(chunks: impl IntoIterator<Item = &'a str>) -> Vec<usize> {
     let mut starts = vec![0];
     let mut index = 0;
-    let bytes = text.as_bytes();
+    let mut pending_line_ending = None;
 
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
-                index += 2;
+    for chunk in chunks {
+        for byte in chunk.bytes() {
+            if let Some(previous) = pending_line_ending.take() {
+                if is_paired_line_ending(previous, byte) {
+                    index += 1;
+                    starts.push(index);
+                    continue;
+                }
+
                 starts.push(index);
             }
-            b'\n' if bytes.get(index + 1) == Some(&b'\r') => {
-                index += 2;
-                starts.push(index);
-            }
-            b'\r' | b'\n' => {
-                index += 1;
-                starts.push(index);
-            }
-            _ => {
-                let Some(ch) = text[index..].chars().next() else {
-                    break;
-                };
-                index += ch.len_utf8();
+
+            index += 1;
+            if matches!(byte, b'\r' | b'\n') {
+                pending_line_ending = Some(byte);
             }
         }
     }
 
+    if pending_line_ending.is_some() {
+        starts.push(index);
+    }
+
     starts
+}
+
+fn is_paired_line_ending(first: u8, second: u8) -> bool {
+    matches!((first, second), (b'\r', b'\n') | (b'\n', b'\r'))
 }
 
 fn previous_char_boundary_in_slice(text: ropey::RopeSlice<'_>, target: usize) -> usize {

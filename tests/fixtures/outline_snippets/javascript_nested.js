@@ -3,7 +3,7 @@ function top() {
 }
 
 class Service {
-    function load() {
+    load() {
         function local() {}
     }
 }

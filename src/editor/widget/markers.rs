@@ -4,7 +4,7 @@ use iced::{Background, Font, Rectangle};
 use crate::editor::decoration::DecorationModel;
 use crate::editor::layout::{EditorLayout, scrolled_text_origin_x, visual_column_for};
 use crate::editor::render::{
-    RowRenderPlan, WhitespaceKind, space_marker_bounds, visible_marker_columns,
+    RowRenderPlan, WhitespaceKind, space_marker_bounds, space_marker_size, visible_marker_columns,
 };
 use crate::ui::icons::hero::{self, HeroIcon};
 
@@ -148,15 +148,7 @@ fn draw_measured_row_markers<Renderer>(
             context.decorations,
         );
         match whitespace.kind {
-            WhitespaceKind::Space => draw_space_marker(
-                renderer,
-                context,
-                visual_column_for(
-                    &context.row.text,
-                    whitespace.column,
-                    context.decorations.settings.indent_width,
-                ),
-            ),
+            WhitespaceKind::Space => draw_space_marker_at_x(renderer, context, x),
             WhitespaceKind::Tab => {
                 draw_marker_icon_at_x(renderer, context, x, HeroIcon::ChevronRight)
             }
@@ -173,6 +165,29 @@ fn draw_measured_row_markers<Renderer>(
 
         draw_marker_icon_at_x(renderer, context, x, HeroIcon::ArrowTurnDownLeft);
     }
+}
+
+fn draw_space_marker_at_x<Renderer>(
+    renderer: &mut Renderer,
+    context: MarkerRenderContext<'_>,
+    x: f32,
+) where
+    Renderer: iced::advanced::Renderer,
+{
+    let metrics = context.layout.metrics;
+    let dot_size = space_marker_size(metrics);
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: Rectangle {
+                x: context.bounds.x + x + (metrics.character_width - dot_size) / 2.0,
+                y: context.bounds.y + context.row.y + (metrics.line_height - dot_size) / 2.0,
+                width: dot_size,
+                height: dot_size,
+            },
+            ..renderer::Quad::default()
+        },
+        Background::Color(context.style.whitespace_markers),
+    );
 }
 
 fn draw_marker_icon<Renderer>(

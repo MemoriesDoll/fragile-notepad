@@ -14,6 +14,16 @@ impl App {
         _status: Status,
         window_id: window::Id,
     ) -> Task<Message> {
+        if matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+        ) && self.dragged_tab.is_some()
+        {
+            self.dragged_tab = None;
+            self.hovered_drop_tab = None;
+            return Task::none();
+        }
+
         if let Event::Window(window::Event::FileDropped(path)) = event {
             return self.update_file(Message::FileDropped(window_id, path));
         }

@@ -29,6 +29,7 @@ fn stale_load_generation_is_ignored() {
         generation: stale_generation,
         path: PathBuf::from("loading.txt"),
         text: Arc::new("stale".to_owned()),
+        reset: false,
         bytes_read: 5,
         total_bytes: Some(5),
     }));
@@ -84,6 +85,7 @@ fn loading_preview_accumulates_chunks_for_matching_generation() {
         generation,
         path: PathBuf::from("loading.txt"),
         text: Arc::new("alpha".to_owned()),
+        reset: false,
         bytes_read: 5,
         total_bytes: Some(11),
     }));
@@ -92,6 +94,7 @@ fn loading_preview_accumulates_chunks_for_matching_generation() {
         generation,
         path: PathBuf::from("loading.txt"),
         text: Arc::new(" beta".to_owned()),
+        reset: false,
         bytes_read: 11,
         total_bytes: Some(11),
     }));
@@ -162,6 +165,7 @@ fn completion_from_closed_then_reopened_path_cannot_mutate_new_generation() {
         generation: new_generation,
         path: path.clone(),
         text: Arc::new("new preview".to_owned()),
+        reset: false,
         bytes_read: 11,
         total_bytes: Some(20),
     }));
@@ -194,6 +198,7 @@ fn load_completion_applies_matching_generation_and_clears_indexing_state() {
         generation,
         path: PathBuf::from("loaded.txt"),
         text: Arc::new("loaded body".to_owned()),
+        reset: false,
         bytes_read: 11,
         total_bytes: Some(11),
     }));
@@ -354,6 +359,7 @@ fn save_file_is_blocked_while_document_is_loading() {
         generation,
         path: PathBuf::from("loading.txt"),
         text: Arc::new("partial preview".to_owned()),
+        reset: false,
         bytes_read: 15,
         total_bytes: Some(100),
     }));
@@ -390,6 +396,7 @@ fn editor_mutation_is_blocked_while_document_is_loading() {
         generation,
         path: PathBuf::from("loading.txt"),
         text: Arc::new("loaded".to_owned()),
+        reset: false,
         bytes_read: 6,
         total_bytes: Some(6),
     }));

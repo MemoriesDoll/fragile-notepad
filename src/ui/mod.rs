@@ -17,13 +17,26 @@ pub mod toolbar;
 pub mod window_list_dialog;
 
 use iced::widget::{column, container, row, stack, text};
-use iced::{Element, Fill};
+use iced::{Element, Fill, Length};
 
 use crate::core::{Document, DocumentId, EditorSettings, FindState, Workspace};
 use crate::editor::OutlineState;
 use crate::message::{AboutTab, Menu, Message};
 use crate::ui::toolbar::WindowMenuState;
 use crate::ui::window_list_dialog::WindowListEntry;
+
+const FIND_PANEL_COLLAPSED_HEIGHT: f32 = 41.0;
+const FIND_PANEL_EXPANDED_HEIGHT: f32 = 76.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChromeAnimationInfo {
+    pub find_rendered_visible: bool,
+    pub find_progress: f32,
+    pub inline_replace_rendered_visible: bool,
+    pub inline_replace_progress: f32,
+    pub function_list_rendered_visible: bool,
+    pub function_list_progress: f32,
+}
 
 pub fn centered_button_content<'a>(
     content: impl Into<Element<'a, Message>>,
@@ -46,6 +59,7 @@ pub fn view<'a>(
     is_find_visible: bool,
     is_inline_replace_visible: bool,
     is_function_list_visible: bool,
+    chrome_animation: ChromeAnimationInfo,
     active_menu: Option<Menu>,
     active_menu_path: &'a [String],
     window_menu_state: WindowMenuState,
@@ -73,8 +87,20 @@ pub fn view<'a>(
     ]
     .height(Fill);
 
-    if is_find_visible {
-        workbench = workbench.push(find_panel::view(find, is_inline_replace_visible));
+    if chrome_animation.find_rendered_visible || is_find_visible {
+        let find_height = animated_find_height(chrome_animation);
+
+        workbench = workbench.push(
+            container(find_panel::view(
+                find,
+                is_inline_replace_visible,
+                chrome_animation.inline_replace_rendered_visible,
+                chrome_animation.inline_replace_progress,
+            ))
+            .height(Length::Fixed(find_height))
+            .width(Fill)
+            .clip(true),
+        );
     }
 
     let editor_surface = container(editor)
@@ -82,21 +108,28 @@ pub fn view<'a>(
         .width(Fill)
         .style(styles::editor_surface);
 
-    let main_area: Element<'a, Message> = if is_function_list_visible {
-        if let Some(document) = active_document {
-            row![
-                editor_surface,
-                function_list_panel::view(document, active_outline_state)
-            ]
-            .height(Fill)
-            .width(Fill)
-            .into()
+    let main_area: Element<'a, Message> =
+        if chrome_animation.function_list_rendered_visible || is_function_list_visible {
+            if let Some(document) = active_document {
+                let function_list_width = function_list_panel::FUNCTION_LIST_PANEL_WIDTH
+                    * chrome_animation.function_list_progress.clamp(0.0, 1.0);
+
+                row![
+                    editor_surface,
+                    container(function_list_panel::view(document, active_outline_state))
+                        .width(Length::Fixed(function_list_width))
+                        .height(Fill)
+                        .clip(true),
+                ]
+                .height(Fill)
+                .width(Fill)
+                .into()
+            } else {
+                editor_surface.into()
+            }
         } else {
             editor_surface.into()
-        }
-    } else {
-        editor_surface.into()
-    };
+        };
 
     let shell = container(workbench.push(main_area).push(status_bar::view(
         active_document,
@@ -145,4 +178,13 @@ pub fn view<'a>(
     } else {
         with_window_list
     }
+}
+
+fn animated_find_height(animation: ChromeAnimationInfo) -> f32 {
+    let find_progress = animation.find_progress.clamp(0.0, 1.0);
+    let replace_progress = animation.inline_replace_progress.clamp(0.0, 1.0);
+    let expanded_height = FIND_PANEL_COLLAPSED_HEIGHT
+        + ((FIND_PANEL_EXPANDED_HEIGHT - FIND_PANEL_COLLAPSED_HEIGHT) * replace_progress);
+
+    expanded_height * find_progress
 }

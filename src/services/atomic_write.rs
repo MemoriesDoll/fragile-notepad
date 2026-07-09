@@ -60,7 +60,18 @@ async fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
 
 #[cfg(not(windows))]
 async fn replace_file(temp_path: &Path, path: &Path) -> io::Result<()> {
-    tokio::fs::rename(temp_path, path).await
+    tokio::fs::rename(temp_path, path).await?;
+    sync_parent_dir(path).await
+}
+
+#[cfg(not(windows))]
+async fn sync_parent_dir(path: &Path) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let dir = tokio::fs::File::open(parent).await?;
+    dir.sync_all().await
 }
 
 #[cfg(windows)]

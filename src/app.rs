@@ -29,6 +29,7 @@ mod windowing;
 
 const SYNTAX_PREWARM_VISIBLE_LINES: usize = 96;
 const ABOUT_OVERLAY_ANIMATION_DURATION: Duration = Duration::from_millis(180);
+const CHROME_REVEAL_ANIMATION_DURATION: Duration = Duration::from_millis(140);
 
 static SINGLE_INSTANCE: OnceLock<PrimaryInstance> = OnceLock::new();
 
@@ -66,6 +67,7 @@ pub struct App {
     focused_window_id: Option<window::Id>,
     rendering: rendering::RenderingState,
     about_animation: AboutOverlayAnimation,
+    chrome_animation: ChromeAnimation,
     main_window_opened: bool,
     pending_startup_gpu_boost: bool,
 }
@@ -87,6 +89,28 @@ enum AboutOverlayAnimation {
         progress: f32,
     },
     Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ChromeAnimation {
+    find: RevealAnimation,
+    inline_replace: RevealAnimation,
+    function_list: RevealAnimation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RevealAnimation {
+    rendered_visible: bool,
+    target_visible: bool,
+    started_at: Option<Instant>,
+    from: f32,
+    progress: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RevealAnimationInfo {
+    rendered_visible: bool,
+    progress: f32,
 }
 
 impl App {
@@ -130,6 +154,7 @@ impl App {
             focused_window_id: Some(main_window_id),
             rendering: rendering::RenderingState::Software,
             about_animation: AboutOverlayAnimation::Idle,
+            chrome_animation: ChromeAnimation::new(),
             main_window_opened: false,
             pending_startup_gpu_boost: false,
         };
@@ -175,6 +200,7 @@ impl App {
             Message::BackendBoostRequested => self.request_gpu_boost(),
             Message::BackendBoostConfigured(result) => self.complete_backend_boost(result),
             Message::AboutAnimationFrame(at) => self.update_about_animation_frame(at),
+            Message::ChromeAnimationFrame(at) => self.update_chrome_animation_frame(at),
             Message::LanguageSelected(syntax_token) => self.update_language(syntax_token),
             Message::ToggleFunctionList => self.toggle_function_list(),
             Message::FunctionListEntrySelected(position) => {
@@ -383,6 +409,7 @@ impl App {
                 self.is_find_visible,
                 self.is_inline_replace_visible,
                 self.is_function_list_visible,
+                self.chrome_animation_info(),
                 self.active_menu,
                 &self.active_menu_path,
                 self.window_menu_state(),
@@ -434,6 +461,11 @@ impl App {
         } else {
             Subscription::none()
         };
+        let chrome_animation = if self.chrome_animation.needs_frames() {
+            window::frames().map(Message::ChromeAnimationFrame)
+        } else {
+            Subscription::none()
+        };
 
         Subscription::batch([
             single_instance_subscription(),
@@ -441,6 +473,7 @@ impl App {
             window::close_requests().map(Message::WindowCloseRequested),
             window::close_events().map(Message::WindowClosed),
             about_animation,
+            chrome_animation,
         ])
     }
 
@@ -577,6 +610,9 @@ impl App {
         self.active_menu = None;
         self.active_menu_path.clear();
         self.is_function_list_visible = !self.is_function_list_visible;
+        self.chrome_animation
+            .function_list
+            .set_visible(self.is_function_list_visible);
 
         Task::none()
     }
@@ -681,6 +717,16 @@ impl App {
         self.about_animation.into()
     }
 
+    fn chrome_animation_info(&self) -> ui::ChromeAnimationInfo {
+        self.chrome_animation.into()
+    }
+
+    fn update_chrome_animation_frame(&mut self, at: Instant) -> Task<Message> {
+        self.chrome_animation.update_frame(at);
+
+        Task::none()
+    }
+
     fn select_function_list_entry(
         &mut self,
         position: crate::editor::EditorPosition,
@@ -705,6 +751,122 @@ impl AboutOverlayAnimation {
     fn needs_frames(self) -> bool {
         matches!(self, Self::Running { progress, .. } if progress < 1.0)
     }
+}
+
+impl ChromeAnimation {
+    const fn new() -> Self {
+        Self {
+            find: RevealAnimation::hidden(),
+            inline_replace: RevealAnimation::hidden(),
+            function_list: RevealAnimation::hidden(),
+        }
+    }
+
+    fn needs_frames(self) -> bool {
+        self.find.needs_frames()
+            || self.inline_replace.needs_frames()
+            || self.function_list.needs_frames()
+    }
+
+    fn update_frame(&mut self, at: Instant) {
+        self.find.update_frame(at);
+        self.inline_replace.update_frame(at);
+        self.function_list.update_frame(at);
+    }
+}
+
+impl RevealAnimation {
+    const fn hidden() -> Self {
+        Self {
+            rendered_visible: false,
+            target_visible: false,
+            started_at: None,
+            from: 0.0,
+            progress: 0.0,
+        }
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        let target = if visible { 1.0 } else { 0.0 };
+
+        if self.target_visible == visible && (self.progress - target).abs() <= f32::EPSILON {
+            self.rendered_visible = visible;
+            self.started_at = None;
+            self.from = target;
+            return;
+        }
+
+        self.target_visible = visible;
+        self.rendered_visible = self.rendered_visible || visible || self.progress > 0.0;
+        self.started_at = None;
+        self.from = self.progress;
+    }
+
+    fn needs_frames(self) -> bool {
+        let target = if self.target_visible { 1.0 } else { 0.0 };
+
+        self.rendered_visible && (self.progress - target).abs() > f32::EPSILON
+    }
+
+    fn update_frame(&mut self, at: Instant) {
+        if !self.needs_frames() {
+            return;
+        }
+
+        let started_at = match self.started_at {
+            Some(started_at) => started_at,
+            None => {
+                self.started_at = Some(at);
+                return;
+            }
+        };
+
+        let elapsed = at.saturating_duration_since(started_at);
+        let raw = (elapsed.as_secs_f32() / CHROME_REVEAL_ANIMATION_DURATION.as_secs_f32()).min(1.0);
+        let eased = ease_out_cubic(raw);
+        let target = if self.target_visible { 1.0 } else { 0.0 };
+
+        self.progress = self.from + ((target - self.from) * eased);
+
+        if raw >= 1.0 {
+            self.progress = target;
+            self.started_at = None;
+            self.rendered_visible = self.target_visible;
+            self.from = target;
+        }
+    }
+}
+
+impl From<RevealAnimation> for RevealAnimationInfo {
+    fn from(animation: RevealAnimation) -> Self {
+        Self {
+            rendered_visible: animation.rendered_visible,
+            progress: animation.progress.clamp(0.0, 1.0),
+        }
+    }
+}
+
+impl From<ChromeAnimation> for ui::ChromeAnimationInfo {
+    fn from(animation: ChromeAnimation) -> Self {
+        let find = RevealAnimationInfo::from(animation.find);
+        let inline_replace = RevealAnimationInfo::from(animation.inline_replace);
+        let function_list = RevealAnimationInfo::from(animation.function_list);
+
+        Self {
+            find_rendered_visible: find.rendered_visible,
+            find_progress: find.progress,
+            inline_replace_rendered_visible: inline_replace.rendered_visible,
+            inline_replace_progress: inline_replace.progress,
+            function_list_rendered_visible: function_list.rendered_visible,
+            function_list_progress: function_list.progress,
+        }
+    }
+}
+
+fn ease_out_cubic(progress: f32) -> f32 {
+    let inverse = 1.0 - progress.clamp(0.0, 1.0);
+
+    1.0 - (inverse * inverse * inverse)
 }
 
 impl From<AboutOverlayAnimation> for ui::about_dialog::AboutAnimationInfo {

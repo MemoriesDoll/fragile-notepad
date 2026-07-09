@@ -395,7 +395,7 @@ fn loading_document_text_index_gates_full_document_analysis_until_completion() {
 
     assert!(!document.has_complete_text_index());
     assert!(!document.can_run_full_document_analysis());
-    assert!(document.replace_loading_preview(generation, "fn partial() {\n", 15, None));
+    assert!(document.replace_loading_preview(generation, "fn partial() {\n", false, 15, None));
     assert!(!document.has_complete_text_index());
     assert!(document.folds.ranges().is_empty());
 

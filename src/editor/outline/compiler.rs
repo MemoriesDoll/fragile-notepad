@@ -87,6 +87,7 @@ pub struct OutlineLexicalPlan {
 pub struct OutlineBlockCommentPlan {
     pub open: String,
     pub close: String,
+    pub nested: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -436,6 +437,7 @@ fn compile_lexical(lexical: &RawLexical, adapter_name: &str) -> OutlineLexicalPl
             .map(|comment| OutlineBlockCommentPlan {
                 open: comment.open.clone(),
                 close: comment.close.clone(),
+                nested: comment.nested,
             })
             .collect(),
         strings: lexical

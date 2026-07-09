@@ -1,6 +1,6 @@
 use iced::advanced::{InputMethod, Shell, input_method, mouse, text};
 use iced::keyboard;
-use iced::time::Duration;
+use iced::time::{Duration, Instant};
 use iced::{Event, Font, Pixels, Rectangle, window};
 
 use crate::core::ShortcutMap;
@@ -15,6 +15,8 @@ use super::actions::{EditorAction, key_action};
 use super::line_cache::{LineGeometry, measured_caret_x, measured_text_hit_target};
 use super::scrollbar::{scrollbar_row_for_position, vertical_scrollbar_geometry};
 use super::state::{AdvancedEditorState, CARET_BLINK_INTERVAL_MS};
+
+const FAST_SCROLL_SETTLE_MS: u64 = 120;
 
 pub(super) struct InteractionContext<'a, Message> {
     pub(super) buffer: &'a EditorBuffer,
@@ -232,6 +234,8 @@ where
             }
         }
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+            outcome.should_capture =
+                state.drag_anchor.is_some() || state.scrollbar_grab_offset_y.is_some();
             state.drag_anchor = None;
             state.scrollbar_grab_offset_y = None;
         }
@@ -244,8 +248,9 @@ where
 
             if whole_lines != 0 {
                 shell.publish((context.on_action)(EditorAction::ScrollLines(whole_lines)));
-                outcome.should_capture = true;
+                mark_scroll_fast(state, shell);
             }
+            outcome.should_capture = true;
         }
         Event::InputMethod(input_method::Event::Opened) if state.is_focused => {
             state.preedit = Some(input_method::Preedit::new());
@@ -318,6 +323,15 @@ where
     ));
 
     outcome
+}
+
+fn mark_scroll_fast<Paragraph, Message>(
+    state: &AdvancedEditorState<Paragraph>,
+    shell: &mut Shell<'_, Message>,
+) {
+    let settle_at = Instant::now() + Duration::from_millis(FAST_SCROLL_SETTLE_MS);
+    state.scroll_fast_until.set(Some(settle_at));
+    shell.request_redraw_at(settle_at);
 }
 
 fn last_line_end_position(buffer: &EditorBuffer) -> EditorPosition {

@@ -36,16 +36,22 @@ impl App {
             }
             Message::ToggleInlineReplace => {
                 self.is_inline_replace_visible = !self.is_inline_replace_visible;
+                self.chrome_animation
+                    .inline_replace
+                    .set_visible(self.is_inline_replace_visible);
                 Task::none()
             }
             Message::ShowInlineReplace => {
                 self.is_find_visible = true;
                 self.is_inline_replace_visible = true;
+                self.chrome_animation.find.set_visible(true);
+                self.chrome_animation.inline_replace.set_visible(true);
                 operation::focus(FIND_INPUT_ID)
             }
             Message::ToggleFind => self.toggle_find_panel(),
             Message::HideFind => {
                 self.is_find_visible = false;
+                self.chrome_animation.find.set_visible(false);
                 Task::none()
             }
             Message::FindNext => {
@@ -159,8 +165,12 @@ impl App {
     fn toggle_find_panel(&mut self) -> Task<Message> {
         self.active_menu = None;
         self.is_find_visible = !self.is_find_visible;
+        self.chrome_animation.find.set_visible(self.is_find_visible);
 
         if self.is_find_visible {
+            self.chrome_animation
+                .inline_replace
+                .set_visible(self.is_inline_replace_visible);
             operation::focus(FIND_INPUT_ID)
         } else {
             Task::none()

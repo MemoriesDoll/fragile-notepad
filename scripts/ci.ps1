@@ -20,4 +20,5 @@ Invoke-CiCommand cargo fmt --package fragile-notepad --check
 & .\scripts\generate_icon_assets.ps1
 Invoke-CiCommand cargo check
 Invoke-CiCommand cargo test
+Invoke-CiCommand cargo check --no-default-features
 Invoke-CiCommand cargo check --examples

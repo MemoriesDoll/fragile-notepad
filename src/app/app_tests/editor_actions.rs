@@ -444,6 +444,11 @@ fn clipboard_read_replaces_selection_and_refreshes_find_matches() {
 
     let request = PasteRequest {
         document_id,
+        revision: app
+            .workspace
+            .active_document()
+            .expect("active document")
+            .revision(),
         selection: EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 7)),
         selection_set: app
             .workspace
@@ -489,6 +494,11 @@ fn clipboard_read_replaces_original_paste_selection_after_caret_moves() {
 
     let request = PasteRequest {
         document_id,
+        revision: app
+            .workspace
+            .active_document()
+            .expect("active document")
+            .revision(),
         selection: EditorSelection::new(EditorPosition::new(0, 4), EditorPosition::new(0, 7)),
         selection_set: app
             .workspace
@@ -512,6 +522,59 @@ fn clipboard_read_replaces_original_paste_selection_after_caret_moves() {
     assert_eq!(
         document.selection,
         EditorSelection::new(EditorPosition::new(0, 7), EditorPosition::new(0, 7))
+    );
+}
+
+#[test]
+fn clipboard_read_is_ignored_after_document_changes() {
+    let (mut app, _) = App::new();
+    let document_id = app.workspace.active_document_id;
+
+    {
+        let document = app
+            .workspace
+            .active_document_mut()
+            .expect("active document");
+        document.buffer = crate::editor::EditorBuffer::from_text("abc def");
+        document.set_main_selection(EditorSelection::new(
+            EditorPosition::new(0, 4),
+            EditorPosition::new(0, 7),
+        ));
+        document.refresh_after_text_change();
+        document.mark_clean();
+    }
+
+    let request = PasteRequest {
+        document_id,
+        revision: app
+            .workspace
+            .active_document()
+            .expect("active document")
+            .revision(),
+        selection: EditorSelection::new(EditorPosition::new(0, 4), EditorPosition::new(0, 7)),
+        selection_set: app
+            .workspace
+            .active_document()
+            .expect("active document")
+            .selection_set()
+            .clone(),
+        clipboard_mode: ClipboardMode::Linear,
+    };
+
+    let _ = app.update(Message::EditorAction(
+        document_id,
+        EditorAction::InsertText("!".to_owned()),
+    ));
+    let _ = app.update(Message::ClipboardRead(
+        request,
+        Ok(Arc::new("XYZ".to_owned())),
+    ));
+
+    let document = app.workspace.active_document().expect("active document");
+    assert_eq!(document.text(), "abc !");
+    assert_eq!(
+        document.selection,
+        EditorSelection::new(EditorPosition::new(0, 5), EditorPosition::new(0, 5))
     );
 }
 

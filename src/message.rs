@@ -77,6 +77,7 @@ pub enum Message {
     BackendBoostRequested,
     BackendBoostConfigured(iced::backend::StrictHandoffOutcome),
     AboutAnimationFrame(Instant),
+    ChromeAnimationFrame(Instant),
     RuntimeEvent(event::Event, event::Status, window::Id),
     MenuToggled(Menu),
     MenuHovered(Menu),
@@ -241,6 +242,7 @@ pub enum ClipboardMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PasteRequest {
     pub document_id: DocumentId,
+    pub revision: u64,
     pub selection: EditorSelection,
     pub selection_set: SelectionSet,
     pub clipboard_mode: ClipboardMode,
@@ -296,6 +298,7 @@ pub struct FileLoadChunk {
     pub generation: DocumentLoadGeneration,
     pub path: PathBuf,
     pub text: Arc<String>,
+    pub reset: bool,
     pub bytes_read: u64,
     pub total_bytes: Option<u64>,
 }

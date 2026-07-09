@@ -495,11 +495,11 @@ pub(super) fn has_identifier_after(text: &str, offset: usize) -> bool {
 }
 
 pub(super) fn is_identifier_start(ch: char) -> bool {
-    ch == '_' || ch.is_alphabetic()
+    matches!(ch, '_' | '$' | '@') || ch.is_alphabetic()
 }
 
 pub(super) fn is_identifier_char(ch: char) -> bool {
-    ch == '_' || ch.is_alphanumeric()
+    matches!(ch, '_' | '$' | '@' | '!' | '?') || ch.is_alphanumeric()
 }
 
 pub(super) fn line_start_offset(text: &str, offset: usize) -> usize {

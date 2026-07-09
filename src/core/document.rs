@@ -329,6 +329,7 @@ impl Document {
         &mut self,
         generation: DocumentLoadGeneration,
         text: &str,
+        reset: bool,
         bytes_read: u64,
         total_bytes: Option<u64>,
     ) -> bool {
@@ -336,7 +337,11 @@ impl Document {
             return false;
         }
 
-        self.buffer.append_text(text);
+        if reset {
+            self.buffer = EditorBuffer::from_text(strip_text_bom(text).to_owned());
+        } else {
+            self.buffer.append_text(text);
+        }
         self.selection = EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0));
         self.selection_set = SelectionSet::single(self.selection);
         self.refresh_view_models();

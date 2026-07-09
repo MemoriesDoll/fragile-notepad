@@ -146,6 +146,13 @@ jobs:
         shell: bash
         run: bash scripts/generate_icon_assets.sh
 
+      - name: Validate release gates
+        run: |
+          cargo check
+          cargo test
+          cargo check --no-default-features
+          cargo check --examples
+
       - name: Build release
         run: cargo build --release
 

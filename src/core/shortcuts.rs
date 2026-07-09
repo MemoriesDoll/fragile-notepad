@@ -503,7 +503,27 @@ impl KeyBinding {
     }
 
     fn matches(self, other: Self) -> bool {
-        self.key == other.key && self.modifiers.matches(other.modifiers)
+        let key_matches = self.key == other.key
+            || matches!(
+                (self.key, other.key),
+                (
+                    ShortcutKey::Named(NamedShortcutKey::Plus),
+                    ShortcutKey::Named(NamedShortcutKey::Equals)
+                )
+            );
+        let modifiers_match = if self.key == ShortcutKey::Named(NamedShortcutKey::Plus)
+            && self.modifiers.primary
+            && !self.modifiers.shift
+            && other.modifiers.shift
+        {
+            let mut without_shift = other.modifiers;
+            without_shift.shift = false;
+            self.modifiers.matches(without_shift)
+        } else {
+            self.modifiers.matches(other.modifiers)
+        };
+
+        key_matches && modifiers_match
     }
 }
 

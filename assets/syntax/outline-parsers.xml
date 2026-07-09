@@ -25,7 +25,7 @@
     <lexical>
       <word-characters extra="_" unicode="true" />
       <line-comment open="//" />
-      <block-comment open="/*" close="*/" />
+      <block-comment open="/*" close="*/" nested="true" />
       <string open="&quot;" close="&quot;" escape="\" />
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
       <raw-string kind="rust" />
@@ -71,6 +71,7 @@
     </lexical>
     <container kind="class" keyword="class" name="after-keyword" body="brace" />
     <declaration kind="function" keyword="function" name="after-keyword" body="brace" method-containers="class" />
+    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class" reject-names="if,for,while,switch,catch,function,return,throw,new" reject-previous=".,=,return,throw,new,function" control-headers="for,if,else if,while,switch,catch" />
   </language>
 
   <language name="Java">

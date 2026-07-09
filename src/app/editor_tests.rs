@@ -46,6 +46,23 @@ fn replace_selection_records_single_edit_and_updates_selection() {
 }
 
 #[test]
+fn replace_selection_maps_many_replacement_carets_without_full_document_copy() {
+    let line_count = 1024;
+    let text = (0..line_count).map(|_| "x").collect::<Vec<_>>().join("\n");
+    let mut document = document(&text, caret(0, 1));
+    document.set_selection_set(SelectionSet::from_ranges(
+        (0..line_count).map(|line| caret(line, 1)).collect(),
+        line_count - 1,
+    ));
+
+    assert!(replace_selection(&mut document, "!", false, 4));
+
+    let expected = (0..line_count).map(|_| "x!").collect::<Vec<_>>().join("\n");
+    assert_eq!(document.text(), expected);
+    assert_eq!(document.main_selection(), caret(line_count - 1, 2));
+}
+
+#[test]
 fn backspace_removes_previous_grapheme_for_each_caret() {
     let mut document = document("alpha\nbeta", caret(1, 2));
 
@@ -83,6 +100,46 @@ fn rectangular_paste_replaces_projected_lines() {
     ));
 
     assert_eq!(document.text(), "oAe\ntBo\ntCree");
+}
+
+#[test]
+fn rectangular_paste_splits_crlf_clipboard_lines() {
+    let mut document = document("one\ntwo\nthree", caret(0, 1));
+    document.set_selection_set(SelectionSet::rectangular(
+        position(0, 1),
+        position(2, 2),
+        1,
+        2,
+    ));
+
+    assert!(paste_selection(
+        &mut document,
+        ClipboardMode::Rectangular { line_count: 3 },
+        "A\r\nB\r\nC",
+        4,
+    ));
+
+    assert_eq!(document.text(), "oAe\ntBo\ntCree");
+}
+
+#[test]
+fn rectangular_paste_preserves_trailing_crlf_as_empty_line() {
+    let mut document = document("one\ntwo\nthree", caret(0, 1));
+    document.set_selection_set(SelectionSet::rectangular(
+        position(0, 1),
+        position(2, 2),
+        1,
+        2,
+    ));
+
+    assert!(paste_selection(
+        &mut document,
+        ClipboardMode::Rectangular { line_count: 3 },
+        "A\r\nB\r\n",
+        4,
+    ));
+
+    assert_eq!(document.text(), "oAe\ntBo\ntree");
 }
 
 #[test]

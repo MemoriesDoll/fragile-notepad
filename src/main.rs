@@ -11,7 +11,11 @@ fn main() -> iced::Result {
         startup::mark_startup_started();
     }
 
-    let single_instance = SingleInstanceConfig::new("fragile-notepad");
+    let single_instance = SingleInstanceConfig::new(if startup::startup_probe_enabled() {
+        format!("fragile-notepad-startup-probe-{}", std::process::id())
+    } else {
+        String::from("fragile-notepad")
+    });
 
     match ipc::claim_or_signal(&single_instance).map_err(|error| {
         iced::Error::WindowCreationFailed(Box::new(std::io::Error::new(

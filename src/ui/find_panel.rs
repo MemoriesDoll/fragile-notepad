@@ -9,8 +9,14 @@ use crate::ui::{centered_button_content, controls, styles};
 pub const FIND_INPUT_ID: &str = "fragile-notepad-find-input";
 const BODY_TEXT_SIZE: u32 = 14;
 const SECONDARY_TEXT_SIZE: u32 = 13;
+const REPLACE_ROW_HEIGHT: f32 = 34.0;
 
-pub fn view(find: &FindState, is_replace_visible: bool) -> Element<'_, Message> {
+pub fn view(
+    find: &FindState,
+    is_replace_visible: bool,
+    is_replace_rendered_visible: bool,
+    replace_progress: f32,
+) -> Element<'_, Message> {
     let status = match (find.current_match, find.matches.len()) {
         (_, 0) if find.query.is_empty() => String::from("No query"),
         (_, 0) => String::from("No matches"),
@@ -71,30 +77,45 @@ pub fn view(find: &FindState, is_replace_visible: bool) -> Element<'_, Message> 
 
     let mut rows = column![find_row].spacing(6).padding([6, 8]).width(Fill);
 
-    if is_replace_visible {
+    if is_replace_rendered_visible {
         rows = rows.push(
-            row![
-                space::horizontal().width(28),
-                field_label("Replace"),
-                text_input("Replacement", &find.replacement)
-                    .on_input(Message::FindReplacementChanged)
-                    .padding([7, 10])
-                    .size(BODY_TEXT_SIZE)
-                    .width(FillPortion(2))
-                    .style(styles::input),
-                space::horizontal().width(86),
-                controls::command_button("Replace", SECONDARY_TEXT_SIZE, Message::ReplaceCurrent),
-                controls::primary_command_button("All", SECONDARY_TEXT_SIZE, Message::ReplaceAll),
-                controls::command_button(
-                    "Advanced",
-                    SECONDARY_TEXT_SIZE,
-                    Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::Replace),
-                ),
-                space::horizontal(),
-            ]
-            .spacing(7)
-            .align_y(Center)
-            .width(Fill),
+            container(
+                row![
+                    space::horizontal().width(28),
+                    field_label("Replace"),
+                    text_input("Replacement", &find.replacement)
+                        .on_input(Message::FindReplacementChanged)
+                        .padding([7, 10])
+                        .size(BODY_TEXT_SIZE)
+                        .width(FillPortion(2))
+                        .style(styles::input),
+                    space::horizontal().width(86),
+                    controls::command_button(
+                        "Replace",
+                        SECONDARY_TEXT_SIZE,
+                        Message::ReplaceCurrent
+                    ),
+                    controls::primary_command_button(
+                        "All",
+                        SECONDARY_TEXT_SIZE,
+                        Message::ReplaceAll
+                    ),
+                    controls::command_button(
+                        "Advanced",
+                        SECONDARY_TEXT_SIZE,
+                        Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::Replace),
+                    ),
+                    space::horizontal(),
+                ]
+                .spacing(7)
+                .align_y(Center)
+                .width(Fill),
+            )
+            .height(Length::Fixed(
+                REPLACE_ROW_HEIGHT * replace_progress.clamp(0.0, 1.0),
+            ))
+            .width(Fill)
+            .clip(true),
         );
     }
 

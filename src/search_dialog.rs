@@ -71,11 +71,13 @@ impl SearchDialogState {
     pub fn set_case_sensitive(&mut self, case_sensitive: bool) {
         self.case_sensitive = case_sensitive;
         self.results.clear();
+        self.status = search_ready_status(&self.query);
     }
 
     pub fn set_whole_word(&mut self, whole_word: bool) {
         self.whole_word = whole_word;
         self.results.clear();
+        self.status = search_ready_status(&self.query);
     }
 
     pub fn set_wrap_around(&mut self, wrap_around: bool) {
@@ -90,6 +92,7 @@ impl SearchDialogState {
     pub fn set_include_pattern(&mut self, include_pattern: impl Into<String>) {
         self.include_pattern = include_pattern.into();
         self.results.clear();
+        self.status = search_ready_status(&self.query);
     }
 
     pub fn refresh_from_workspace(&mut self, workspace: &Workspace) {
@@ -139,6 +142,14 @@ impl SearchDialogState {
                 self.status = search_error_status(error);
             }
         };
+    }
+}
+
+fn search_ready_status(query: &str) -> String {
+    if query.is_empty() {
+        String::from("No query")
+    } else {
+        String::from("Ready")
     }
 }
 

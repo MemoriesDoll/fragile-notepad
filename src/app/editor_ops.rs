@@ -647,28 +647,40 @@ pub(super) fn paste_selection(
 }
 
 fn clipboard_lines(text: &str) -> Vec<String> {
-    text.split_inclusive(['\r', '\n'])
-        .scan(String::new(), |pending_cr, chunk| {
-            if !pending_cr.is_empty() {
-                let mut line = std::mem::take(pending_cr);
-                line.push_str(chunk);
-                return Some(Some(line));
-            }
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let bytes = text.as_bytes();
+    let mut index = 0;
 
-            if chunk.ends_with('\r') && !chunk.ends_with("\r\n") {
-                pending_cr.push_str(chunk);
-                return Some(None);
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                lines.push(text[start..index].to_owned());
+                index += if bytes.get(index + 1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
+                start = index;
             }
+            b'\n' => {
+                lines.push(text[start..index].to_owned());
+                index += if bytes.get(index + 1) == Some(&b'\r') {
+                    2
+                } else {
+                    1
+                };
+                start = index;
+            }
+            _ => index += 1,
+        }
+    }
 
-            Some(Some(chunk.trim_end_matches(['\r', '\n']).to_owned()))
-        })
-        .flatten()
-        .chain(if text.ends_with(['\r', '\n']) {
-            Some(String::new())
-        } else {
-            None
-        })
-        .collect()
+    if start < text.len() || text.ends_with(['\r', '\n']) {
+        lines.push(text[start..].to_owned());
+    }
+
+    lines
 }
 
 fn apply_concrete_replacements(
@@ -724,11 +736,7 @@ fn apply_concrete_replacements(
         replacement_text.replace_range(*start..*end, &replacement.replacement);
     }
 
-    let mut final_text =
-        String::with_capacity(before_text.len() - span_text.len() + replacement_text.len());
-    final_text.push_str(&before_text[..span_start_offset]);
-    final_text.push_str(&replacement_text);
-    final_text.push_str(&before_text[span_end_offset..]);
+    let replacement_buffer = EditorBuffer::from_text(replacement_text.clone());
 
     let mut cumulative_delta = 0isize;
     let mut after_ranges_by_source = Vec::with_capacity(replacements.len());
@@ -739,7 +747,7 @@ fn apply_concrete_replacements(
         let final_end = final_start + replacement.replacement.len();
         cumulative_delta += replacement.replacement.len() as isize - original_len as isize;
         let Some(after_position) =
-            position_for_byte_offset(&final_text, span_start_offset + final_end)
+            position_in_replacement_span(span.start, &replacement_buffer, final_end)
         else {
             continue;
         };
@@ -791,6 +799,19 @@ fn apply_concrete_replacements(
 
     document.refresh_text_from(span.start.line);
     true
+}
+
+fn position_in_replacement_span(
+    span_start: EditorPosition,
+    replacement: &EditorBuffer,
+    byte_offset: usize,
+) -> Option<EditorPosition> {
+    let relative = replacement.position_for_byte_offset(byte_offset)?;
+    Some(if relative.line == 0 {
+        EditorPosition::new(span_start.line, span_start.column + relative.column)
+    } else {
+        EditorPosition::new(span_start.line + relative.line, relative.column)
+    })
 }
 
 fn after_selection_set_for_replacements(

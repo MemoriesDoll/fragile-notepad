@@ -74,7 +74,14 @@ fn declaration_events_for_rule(
     containers: &[StructuralEvent],
 ) -> Vec<DeclarationEvent> {
     if rule.scan == OutlineScanMode::Callable {
-        return callable_declaration_events_for_rule(text, mask, rule, containers);
+        let mut events = callable_declaration_events_for_rule(text, mask, rule, containers);
+        if plan.adapter_name == "javascript" {
+            events.extend(arrow_function_declaration_events_for_rule(
+                text, mask, rule, containers,
+            ));
+            events.sort_by_key(|event| (event.signature_range.start, event.signature_range.end));
+        }
+        return events;
     }
 
     let mut events = Vec::new();
@@ -130,6 +137,36 @@ fn callable_declaration_events_for_rule(
             events.push(event);
         }
         cursor = open_paren + 1;
+    }
+
+    events
+}
+
+fn arrow_function_declaration_events_for_rule(
+    text: &str,
+    mask: &OutlineCodeMask,
+    rule: &OutlineRulePlan,
+    containers: &[StructuralEvent],
+) -> Vec<DeclarationEvent> {
+    let mut events = Vec::new();
+    let statements = callable_statements(
+        text,
+        mask,
+        &rule.callable.operator_tokens,
+        &rule.callable.control_headers,
+    );
+
+    for statement in statements
+        .iter()
+        .filter(|statement| statement.is_expression_context)
+    {
+        for arrow in top_level_arrow_offsets(text, mask, statement.range) {
+            if let Some(event) =
+                arrow_function_declaration_at(text, mask, rule, containers, statement, arrow)
+            {
+                events.push(event);
+            }
+        }
     }
 
     events
@@ -260,6 +297,53 @@ fn callable_declaration_at(
         signature_range: ByteRange::new(signature_start, signature_end),
         body_range,
         terminated,
+    })
+}
+
+fn arrow_function_declaration_at(
+    text: &str,
+    mask: &OutlineCodeMask,
+    rule: &OutlineRulePlan,
+    containers: &[StructuralEvent],
+    statement: &CallableStatement,
+    arrow: usize,
+) -> Option<DeclarationEvent> {
+    let assignment = arrow_assignment_before(text, mask, statement.range.start, arrow)?;
+    let token = previous_contiguous_code_token(text, mask, assignment)?;
+    let name_range = callable_suffix_name_range(text, mask, rule, token)?;
+    let name = text.get(name_range.start..name_range.end)?;
+    if name.is_empty()
+        || rule
+            .callable
+            .reject_names
+            .iter()
+            .any(|reject| reject == name)
+    {
+        return None;
+    }
+    if callable_is_rejected_by_prefix(text, mask, rule, name_range.start) {
+        return None;
+    }
+    if !callable_has_required_non_container_previous_token(text, mask, rule, containers, name_range)
+    {
+        return None;
+    }
+
+    let body_open = next_code_token(text, mask, arrow + 2)
+        .filter(|token| token.text(text) == "{")
+        .map(|token| token.start)?;
+    if body_open >= statement.range.end {
+        return None;
+    }
+    let body_close = matching_code_brace(text, mask, body_open)?;
+
+    Some(DeclarationEvent {
+        rule: rule.clone(),
+        name: name.to_owned(),
+        name_range,
+        signature_range: ByteRange::new(statement.range.start, body_close + 1),
+        body_range: Some(ByteRange::new(body_open, body_close + 1)),
+        terminated: false,
     })
 }
 
@@ -509,6 +593,112 @@ fn callable_is_rejected_by_prefix(
         .reject_prefixes
         .iter()
         .any(|prefix| code_before_ends_with(text, mask, name_start, prefix))
+}
+
+fn arrow_assignment_before(
+    text: &str,
+    mask: &OutlineCodeMask,
+    start: usize,
+    arrow: usize,
+) -> Option<usize> {
+    let mut assignment = None;
+    let mut cursor = start;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+
+    while cursor < arrow {
+        let ch = text[cursor..].chars().next()?;
+        let len = ch.len_utf8();
+        if !mask.is_code(cursor) {
+            cursor += len;
+            continue;
+        }
+
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '=' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                if standalone_assignment_at(text, mask, cursor) {
+                    assignment = Some(cursor);
+                }
+            }
+            _ => {}
+        }
+
+        cursor += len;
+    }
+
+    assignment
+}
+
+fn standalone_assignment_at(text: &str, mask: &OutlineCodeMask, offset: usize) -> bool {
+    if text.get(offset..).is_none_or(|tail| !tail.starts_with('=')) {
+        return false;
+    }
+    if text
+        .get(offset + 1..)
+        .is_some_and(|tail| tail.starts_with(['=', '>']))
+    {
+        return false;
+    }
+
+    previous_code_char(text, mask, offset)
+        .and_then(|previous| text[previous..].chars().next())
+        .is_none_or(|ch| {
+            !matches!(
+                ch,
+                '<' | '>' | '!' | '+' | '-' | '*' | '/' | '%' | '&' | '|'
+            )
+        })
+}
+
+fn top_level_arrow_offsets(text: &str, mask: &OutlineCodeMask, range: ByteRange) -> Vec<usize> {
+    let mut arrows = Vec::new();
+    let mut cursor = range.start;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+
+    while cursor < range.end {
+        let Some(ch) = text[cursor..].chars().next() else {
+            break;
+        };
+        let len = ch.len_utf8();
+        if !mask.is_code(cursor) {
+            cursor += len;
+            continue;
+        }
+
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '=' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                let arrow_end = cursor + 2;
+                if arrow_end <= range.end
+                    && text.get(cursor..arrow_end) == Some("=>")
+                    && mask.is_code_range(cursor, arrow_end)
+                {
+                    arrows.push(cursor);
+                    cursor = arrow_end;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+
+        cursor += len;
+    }
+
+    arrows
 }
 
 fn code_before_ends_with(text: &str, mask: &OutlineCodeMask, before: usize, suffix: &str) -> bool {

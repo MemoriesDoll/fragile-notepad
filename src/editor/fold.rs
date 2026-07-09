@@ -188,9 +188,11 @@ impl FoldProvider for IndentBraceFoldProvider {
 fn indentation_folds(buffer: &EditorBuffer, indent_width: usize) -> Vec<FoldRange> {
     let line_count = buffer.line_count();
     let mut ranges = Vec::new();
+    let mut stack: Vec<IndentFoldCandidate> = Vec::new();
+    let mut previous_nonblank_line = None;
 
-    for start_line in 0..line_count {
-        let Some(line) = buffer.line(start_line) else {
+    for line_index in 0..line_count {
+        let Some(line) = buffer.line(line_index) else {
             continue;
         };
 
@@ -199,35 +201,57 @@ fn indentation_folds(buffer: &EditorBuffer, indent_width: usize) -> Vec<FoldRang
         }
 
         let indent = indentation_width(&line, indent_width);
-        let mut has_deeper_line = false;
-        let mut end_line = start_line;
-
-        for line_index in start_line + 1..line_count {
-            let Some(next_line) = buffer.line(line_index) else {
-                break;
-            };
-
-            if next_line.trim().is_empty() {
-                continue;
-            }
-
-            let next_indent = indentation_width(&next_line, indent_width);
-
-            if next_indent > indent {
-                has_deeper_line = true;
-                end_line = line_index;
-                continue;
-            }
-
-            break;
+        while stack
+            .last()
+            .is_some_and(|candidate| candidate.indent >= indent)
+        {
+            finish_indent_candidate(&mut ranges, stack.pop(), previous_nonblank_line);
         }
 
-        if has_deeper_line {
-            ranges.push(FoldRange::new(start_line, end_line));
+        if let Some(parent) = stack.last_mut()
+            && indent > parent.indent
+        {
+            parent.has_deeper_line = true;
         }
+
+        stack.push(IndentFoldCandidate {
+            line: line_index,
+            indent,
+            has_deeper_line: false,
+        });
+        previous_nonblank_line = Some(line_index);
     }
 
+    while let Some(candidate) = stack.pop() {
+        finish_indent_candidate(&mut ranges, Some(candidate), previous_nonblank_line);
+    }
+
+    ranges.sort_by_key(|range| (range.start_line, range.end_line));
     ranges
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IndentFoldCandidate {
+    line: usize,
+    indent: usize,
+    has_deeper_line: bool,
+}
+
+fn finish_indent_candidate(
+    ranges: &mut Vec<FoldRange>,
+    candidate: Option<IndentFoldCandidate>,
+    end_line: Option<usize>,
+) {
+    let Some(candidate) = candidate else {
+        return;
+    };
+    let Some(end_line) = end_line else {
+        return;
+    };
+
+    if candidate.has_deeper_line && end_line > candidate.line {
+        ranges.push(FoldRange::new(candidate.line, end_line));
+    }
 }
 
 fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {

@@ -271,6 +271,7 @@ impl App {
         if document.replace_loading_preview(
             chunk.generation,
             chunk.text.as_ref(),
+            chunk.reset,
             chunk.bytes_read,
             chunk.total_bytes,
         ) {

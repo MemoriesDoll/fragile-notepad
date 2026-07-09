@@ -413,6 +413,7 @@ impl App {
                 .document(document_id)
                 .map(|document| PasteRequest {
                     document_id,
+                    revision: document.revision(),
                     selection: document.main_selection(),
                     selection_set: document.selection_set().clone(),
                     clipboard_mode: paste_clipboard_mode(
@@ -433,6 +434,9 @@ impl App {
         let Some(document) = self.workspace.document_mut(request.document_id) else {
             return false;
         };
+        if document.revision() != request.revision {
+            return false;
+        }
 
         let tab_width = self.settings.indentation.width() as usize;
         document.set_selection_set(request.selection_set.clone());

@@ -52,7 +52,7 @@ fn discover_structure_tracks_ruby_end_keyword_containers_and_definitions() {
 
 #[test]
 fn discover_structure_tracks_javascript_function_keyword_entries() {
-    let text = "function top() {\n}\nclass Service {\n  function load() {\n  }\n}\n";
+    let text = "function top() {\n}\nclass Service {\n  load() {\n  }\n}\n";
     let structure = discover_for_syntax(text, "js");
 
     assert_eq!(structure.containers.len(), 1);

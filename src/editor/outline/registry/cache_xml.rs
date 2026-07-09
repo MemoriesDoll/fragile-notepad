@@ -234,6 +234,7 @@ fn push_lexical(xml: &mut String, lexical: &OutlineLexicalPlan) {
             &[
                 ("open", comment.open.clone()),
                 ("close", comment.close.clone()),
+                ("nested", comment.nested.to_string()),
             ],
         );
     }
@@ -529,6 +530,7 @@ fn parse_cached_lexical(node: roxmltree::Node<'_, '_>) -> Option<OutlineLexicalP
             Some(OutlineBlockCommentPlan {
                 open: child.attribute("open")?.to_owned(),
                 close: child.attribute("close")?.to_owned(),
+                nested: child.attribute("nested") == Some("true"),
             })
         })
         .collect::<Option<Vec<_>>>()?;

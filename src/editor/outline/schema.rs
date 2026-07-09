@@ -53,6 +53,7 @@ pub struct RawLexical {
 pub struct RawBlockComment {
     pub open: String,
     pub close: String,
+    pub nested: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,6 +248,7 @@ fn parse_block_comment(element: roxmltree::Node<'_, '_>) -> Option<RawBlockComme
     Some(RawBlockComment {
         open: element.attribute("open")?.to_owned(),
         close: element.attribute("close")?.to_owned(),
+        nested: element.attribute("nested") == Some("true"),
     })
 }
 

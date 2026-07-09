@@ -1,5 +1,7 @@
 use super::test_support::*;
 use iced::backend;
+use iced::event::{Event, Status};
+use iced::mouse;
 
 fn strict_handoff_result(
     completed_phase: backend::StrictHandoffPhase,
@@ -39,6 +41,26 @@ fn strict_handoff_success() -> backend::StrictHandoffOutcome {
         backend::StrictHandoffPhase::Completed,
         backend::StrictRollbackStatus::ReleasedAfterSuccess,
     )
+}
+
+#[test]
+fn runtime_left_button_release_clears_tab_drag() {
+    let (mut app, _) = App::new();
+    let document_id = app.workspace.active_document_id;
+
+    let _ = app.update(Message::TabDragStarted(document_id));
+    assert_eq!(app.dragged_tab, Some(document_id));
+    assert_eq!(app.hovered_drop_tab, Some(document_id));
+
+    let window_id = app.main_window_id.expect("main window id");
+    let _ = app.update(Message::RuntimeEvent(
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        Status::Ignored,
+        window_id,
+    ));
+
+    assert_eq!(app.dragged_tab, None);
+    assert_eq!(app.hovered_drop_tab, None);
 }
 
 fn render_backend_env_lock() -> &'static Mutex<()> {
@@ -770,6 +792,139 @@ fn about_close_resets_waiting_animation_state() {
 
     assert!(!app.is_about_visible);
     assert_eq!(app.about_animation, crate::app::AboutOverlayAnimation::Idle);
+}
+
+#[test]
+fn chrome_find_panel_reveal_runs_only_while_transitioning() {
+    let (mut app, _) = App::new();
+    let first_frame = std::time::Instant::now();
+    let later_frame = first_frame + std::time::Duration::from_secs(1);
+
+    let initial = app.chrome_animation_info();
+    assert!(!initial.find_rendered_visible);
+    assert_eq!(initial.find_progress, 0.0);
+    assert!(!app.chrome_animation.needs_frames());
+
+    let _ = app.update(Message::ToggleFind);
+
+    let opening = app.chrome_animation_info();
+    assert!(app.is_find_visible);
+    assert!(opening.find_rendered_visible);
+    assert_eq!(opening.find_progress, 0.0);
+    assert!(app.chrome_animation.needs_frames());
+
+    let _ = app.update(Message::ChromeAnimationFrame(first_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(later_frame));
+
+    let opened = app.chrome_animation_info();
+    assert!(opened.find_rendered_visible);
+    assert_eq!(opened.find_progress, 1.0);
+    assert!(!app.chrome_animation.needs_frames());
+
+    let _ = app.update(Message::HideFind);
+
+    let closing = app.chrome_animation_info();
+    assert!(!app.is_find_visible);
+    assert!(closing.find_rendered_visible);
+    assert_eq!(closing.find_progress, 1.0);
+    assert!(app.chrome_animation.needs_frames());
+
+    let _ = app.update(Message::ChromeAnimationFrame(later_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(
+        later_frame + std::time::Duration::from_secs(1),
+    ));
+
+    let closed = app.chrome_animation_info();
+    assert!(!closed.find_rendered_visible);
+    assert_eq!(closed.find_progress, 0.0);
+    assert!(!app.chrome_animation.needs_frames());
+}
+
+#[test]
+fn chrome_inline_replace_reveal_is_independent_of_find_panel_reveal() {
+    let (mut app, _) = App::new();
+    let first_frame = std::time::Instant::now();
+    let later_frame = first_frame + std::time::Duration::from_secs(1);
+
+    let _ = app.update(Message::ShowInlineReplace);
+
+    assert!(app.is_find_visible);
+    assert!(app.is_inline_replace_visible);
+    assert!(app.chrome_animation_info().find_rendered_visible);
+    assert!(app.chrome_animation_info().inline_replace_rendered_visible);
+
+    let _ = app.update(Message::ChromeAnimationFrame(first_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(later_frame));
+
+    let opened = app.chrome_animation_info();
+    assert_eq!(opened.find_progress, 1.0);
+    assert_eq!(opened.inline_replace_progress, 1.0);
+
+    let _ = app.update(Message::ToggleInlineReplace);
+
+    let closing_replace = app.chrome_animation_info();
+    assert!(app.is_find_visible);
+    assert!(!app.is_inline_replace_visible);
+    assert!(closing_replace.find_rendered_visible);
+    assert!(closing_replace.inline_replace_rendered_visible);
+    assert_eq!(closing_replace.find_progress, 1.0);
+    assert_eq!(closing_replace.inline_replace_progress, 1.0);
+    assert!(app.chrome_animation.needs_frames());
+
+    let _ = app.update(Message::ChromeAnimationFrame(later_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(
+        later_frame + std::time::Duration::from_secs(1),
+    ));
+
+    let closed_replace = app.chrome_animation_info();
+    assert!(closed_replace.find_rendered_visible);
+    assert_eq!(closed_replace.find_progress, 1.0);
+    assert!(!closed_replace.inline_replace_rendered_visible);
+    assert_eq!(closed_replace.inline_replace_progress, 0.0);
+    assert!(!app.chrome_animation.needs_frames());
+}
+
+#[test]
+fn chrome_function_list_reveal_tracks_panel_visibility() {
+    let (mut app, _) = App::new();
+    let first_frame = std::time::Instant::now();
+    let later_frame = first_frame + std::time::Duration::from_secs(1);
+
+    let _ = app.update(Message::MenuToggled(Menu::View));
+    let _ = app.update(Message::ToggleFunctionList);
+
+    let opening = app.chrome_animation_info();
+    assert_eq!(app.active_menu, None);
+    assert!(app.is_function_list_visible);
+    assert!(opening.function_list_rendered_visible);
+    assert_eq!(opening.function_list_progress, 0.0);
+    assert!(app.chrome_animation.needs_frames());
+
+    let _ = app.update(Message::ChromeAnimationFrame(first_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(later_frame));
+
+    let opened = app.chrome_animation_info();
+    assert!(opened.function_list_rendered_visible);
+    assert_eq!(opened.function_list_progress, 1.0);
+    assert!(!app.chrome_animation.needs_frames());
+
+    let _ = app.update(Message::ToggleFunctionList);
+
+    let closing = app.chrome_animation_info();
+    assert!(!app.is_function_list_visible);
+    assert!(closing.function_list_rendered_visible);
+    assert_eq!(closing.function_list_progress, 1.0);
+    assert!(app.chrome_animation.needs_frames());
+
+    let _ = app.update(Message::ChromeAnimationFrame(later_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(
+        later_frame + std::time::Duration::from_secs(1),
+    ));
+
+    let closed = app.chrome_animation_info();
+    assert!(!closed.function_list_rendered_visible);
+    assert_eq!(closed.function_list_progress, 0.0);
+    assert!(!app.chrome_animation.needs_frames());
 }
 
 #[test]

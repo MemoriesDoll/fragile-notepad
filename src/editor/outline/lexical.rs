@@ -32,7 +32,10 @@ impl OutlineCodeMask {
                     {
                         mark_range(&mut mask.code, index, index + comment.open.len(), false);
                         syntax = LexicalState::BlockComment {
+                            open: comment.open.clone(),
                             close: comment.close.clone(),
+                            nested: comment.nested,
+                            depth: 1,
                         };
                         index += comment.open.len();
                         continue;
@@ -62,9 +65,32 @@ impl OutlineCodeMask {
                     mark_range(&mut mask.code, index, index + len, true);
                     index += len;
                 }
-                LexicalState::BlockComment { close } => {
-                    let len = if text[index..].starts_with(&close) {
-                        syntax = LexicalState::Code;
+                LexicalState::BlockComment {
+                    open,
+                    close,
+                    nested,
+                    depth,
+                } => {
+                    let len = if nested && text[index..].starts_with(&open) {
+                        syntax = LexicalState::BlockComment {
+                            open: open.clone(),
+                            close: close.clone(),
+                            nested,
+                            depth: depth + 1,
+                        };
+                        open.len()
+                    } else if text[index..].starts_with(&close) {
+                        let depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            syntax = LexicalState::Code;
+                        } else {
+                            syntax = LexicalState::BlockComment {
+                                open: open.clone(),
+                                close: close.clone(),
+                                nested,
+                                depth,
+                            };
+                        }
                         close.len()
                     } else {
                         next_char_len(text, index)
@@ -132,7 +158,10 @@ impl OutlineCodeMask {
 enum LexicalState {
     Code,
     BlockComment {
+        open: String,
         close: String,
+        nested: bool,
+        depth: usize,
     },
     QuotedString {
         close: String,

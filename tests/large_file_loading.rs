@@ -25,6 +25,20 @@ fn collect_load_events(request: FileLoadRequest) -> Vec<FileLoadEvent> {
     })
 }
 
+fn preview_from_chunks(events: &[FileLoadEvent]) -> String {
+    let mut preview = String::new();
+    for event in events {
+        let FileLoadEvent::Chunk(chunk) = event else {
+            continue;
+        };
+        if chunk.reset {
+            preview.clear();
+        }
+        preview.push_str(&chunk.text);
+    }
+    preview
+}
+
 #[test]
 fn chunked_loader_streams_progress_chunks_and_final_decoded_text() {
     let path = temp_file_path("utf8-crlf-bom");
@@ -95,10 +109,10 @@ fn loading_document_applies_matching_progress_and_completion_only() {
 
     assert_eq!(document_status_label(&document, Some("Saved")), "indexing");
     assert!(document.update_load_progress(generation, 5, Some(20)));
-    assert!(!document.replace_loading_preview(stale_generation, "stale", 5, Some(5)));
+    assert!(!document.replace_loading_preview(stale_generation, "stale", false, 5, Some(5)));
     assert_eq!(document.text(), "");
-    assert!(document.replace_loading_preview(generation, "alpha\r", 6, Some(12)));
-    assert!(document.replace_loading_preview(generation, "\nbeta", 11, Some(12)));
+    assert!(document.replace_loading_preview(generation, "alpha\r", false, 6, Some(12)));
+    assert!(document.replace_loading_preview(generation, "\nbeta", false, 11, Some(12)));
     assert_eq!(document.text(), "alpha\r\nbeta");
     assert_eq!(document.buffer.line(0).as_deref(), Some("alpha"));
     assert_eq!(document.buffer.line(1).as_deref(), Some("beta"));
@@ -150,6 +164,7 @@ fn chunked_loader_finished_result_can_replace_lossy_preview() {
                 document.replace_loading_preview(
                     chunk.generation,
                     &chunk.text,
+                    chunk.reset,
                     chunk.bytes_read,
                     chunk.total_bytes,
                 );
@@ -169,7 +184,7 @@ fn chunked_loader_finished_result_can_replace_lossy_preview() {
 }
 
 #[test]
-fn chunked_loader_preserves_legacy_fallback_decoding() {
+fn chunked_loader_streams_legacy_fallback_decoding() {
     let path = temp_file_path("windows-1252");
     let bytes = b"caf\xe9".to_vec();
     fs::write(&path, &bytes).expect("write temp input");
@@ -198,18 +213,54 @@ fn chunked_loader_preserves_legacy_fallback_decoding() {
         fragile_notepad::core::TextEncoding::Windows1252
     );
     assert!(finished.had_errors);
-    assert_eq!(
-        finished
-            .fallback_contents
-            .as_ref()
-            .expect("fallback decoded contents")
-            .text,
-        "café"
-    );
+    assert!(finished.fallback_contents.is_none());
+    assert!(events.iter().any(|event| matches!(
+        event,
+        FileLoadEvent::Chunk(chunk) if chunk.reset
+    )));
+    assert_eq!(preview_from_chunks(&events), "café");
 }
 
 #[test]
-fn malformed_utf8_does_not_stream_replacement_preview_per_byte() {
+fn chunked_loader_streams_utf16le_bom_decoding() {
+    let path = temp_file_path("utf16le");
+    let text = "a😀\r\nz";
+    let mut bytes = vec![0xff, 0xfe];
+    for unit in text.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    fs::write(&path, &bytes).expect("write temp input");
+
+    let document_id = DocumentId::new(47);
+    let generation = DocumentLoadGeneration::next();
+    let events = collect_load_events(FileLoadRequest {
+        document_id,
+        generation,
+        path: path.clone(),
+        chunk_size: 3,
+    });
+
+    let _ = fs::remove_file(&path);
+
+    let finished = events
+        .iter()
+        .find_map(|event| match event {
+            FileLoadEvent::Finished(Ok(finished)) => Some(finished),
+            _ => None,
+        })
+        .expect("finished event");
+
+    assert_eq!(
+        finished.encoding,
+        fragile_notepad::core::TextEncoding::Utf16LeBom
+    );
+    assert!(!finished.had_errors);
+    assert!(finished.fallback_contents.is_none());
+    assert_eq!(preview_from_chunks(&events), text);
+}
+
+#[test]
+fn malformed_utf8_streams_reset_legacy_preview() {
     let path = temp_file_path("malformed-utf8");
     let bytes = vec![0xff; 4096];
     fs::write(&path, &bytes).expect("write temp input");
@@ -229,10 +280,7 @@ fn malformed_utf8_does_not_stream_replacement_preview_per_byte() {
         .iter()
         .filter(|event| matches!(event, FileLoadEvent::Chunk(_)))
         .count();
-    assert!(
-        chunk_count <= 1,
-        "malformed input should use a single fallback chunk, not {chunk_count} preview chunks"
-    );
+    assert!(chunk_count > 1, "legacy fallback should stream chunks");
 
     let finished = events
         .iter()
@@ -247,7 +295,8 @@ fn malformed_utf8_does_not_stream_replacement_preview_per_byte() {
         fragile_notepad::core::TextEncoding::Windows1252
     );
     assert!(finished.had_errors);
-    assert!(finished.fallback_contents.is_some());
+    assert!(finished.fallback_contents.is_none());
+    assert_eq!(preview_from_chunks(&events).chars().count(), bytes.len());
 }
 
 #[test]

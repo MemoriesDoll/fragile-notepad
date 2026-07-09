@@ -88,6 +88,23 @@ fn editor_model_buffer_preserves_text_and_exposes_lines_without_endings() {
 }
 
 #[test]
+fn editor_model_buffer_rejects_offsets_inside_paired_line_endings() {
+    let crlf = EditorBuffer::from_text("one\r\ntwo");
+    assert_eq!(
+        crlf.position_for_byte_offset(3),
+        Some(EditorPosition::new(0, 3))
+    );
+    assert_eq!(crlf.position_for_byte_offset(4), None);
+    assert_eq!(
+        crlf.position_for_byte_offset(5),
+        Some(EditorPosition::new(1, 0))
+    );
+
+    let lfcr = EditorBuffer::from_text("one\n\rtwo");
+    assert_eq!(lfcr.position_for_byte_offset(4), None);
+}
+
+#[test]
 fn editor_model_buffer_splits_cr_only_lines() {
     let buffer = EditorBuffer::from_text("one\rtwo\rthree");
 
@@ -603,6 +620,20 @@ fn editor_model_rust_outline_tracks_nested_depth_and_navigation_helpers() {
 }
 
 #[test]
+fn editor_model_rust_outline_ignores_nested_block_comments() {
+    let buffer = EditorBuffer::from_text("/* outer /* inner */ fn fake() {} */\nfn real() {}\n");
+    let outline = outline_for_syntax(&buffer, "rs");
+
+    assert_eq!(
+        outline
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["real"]
+    );
+}
+
+#[test]
 fn editor_model_rust_outline_ignores_comments_strings_and_raw_strings() {
     let buffer = EditorBuffer::from_text(
         "// fn commented() {}\n/* fn blocked() {} */\nconst TEXT: &str = \"fn stringy() {}\";\nconst RAW: &str = r#\"fn raw() {}\"#;\nfn real() {}\n",
@@ -637,7 +668,7 @@ fn editor_model_outline_detects_python_functions_and_methods() {
 #[test]
 fn editor_model_outline_detects_c_family_function_keywords() {
     let buffer = EditorBuffer::from_text(
-        "function top() {\n    return 1;\n}\nclass Service {\n    function load() {\n    }\n}\n",
+        "function top() {\n    return 1;\n}\nclass Service {\n    load() {\n    }\n}\n",
     );
     let outline = outline_for_syntax(&buffer, "js");
 
@@ -1060,7 +1091,7 @@ fn editor_model_outline_deduplicates_overlapping_python_async_rules_in_tree() {
 #[test]
 fn editor_model_outline_cascades_javascript_classes_methods_and_nested_functions() {
     let buffer = EditorBuffer::from_text(
-        "function top() {\n    function nested() {}\n}\nclass Service {\n    function load() {\n        function local() {}\n    }\n}\n",
+        "function top() {\n    function nested() {}\n}\nclass Service {\n    load() {\n        function local() {}\n    }\n}\n",
     );
     let outline = outline_for_syntax(&buffer, "js");
 
@@ -1077,6 +1108,61 @@ fn editor_model_outline_cascades_javascript_classes_methods_and_nested_functions
         ]
     );
     assert!(outline.iter().all(|entry| entry.body_range.is_some()));
+}
+
+#[test]
+fn editor_model_outline_accepts_javascript_dollar_identifiers() {
+    let buffer = EditorBuffer::from_text("function $render() {}\nclass View {\n  $mount() {}\n}\n");
+    let outline = outline_for_syntax(&buffer, "js");
+
+    assert_eq!(
+        outline
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.kind))
+            .collect::<Vec<_>>(),
+        vec![
+            ("$render", FunctionKind::Function),
+            ("$mount", FunctionKind::Method),
+        ]
+    );
+}
+
+#[test]
+fn editor_model_outline_detects_javascript_arrow_functions() {
+    let buffer = EditorBuffer::from_text(
+        "const top = () => {\n  const nested = () => {\n  };\n};\nconst withDefault = (callback = () => {}) => {\n};\nclass View {\n  load = () => {\n  };\n}\nconst expression = () => 1;\n",
+    );
+    let outline = outline_for_syntax(&buffer, "js");
+
+    assert_eq!(
+        outline
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.kind, entry.depth))
+            .collect::<Vec<_>>(),
+        vec![
+            ("top", FunctionKind::Function, 0),
+            ("nested", FunctionKind::Function, 1),
+            ("withDefault", FunctionKind::Function, 0),
+            ("load", FunctionKind::Method, 1),
+        ]
+    );
+    assert!(outline.iter().all(|entry| entry.body_range.is_some()));
+}
+
+#[test]
+fn editor_model_outline_detects_typescript_arrow_functions() {
+    let buffer =
+        EditorBuffer::from_text("const load = async (value: string): Promise<void> => {\n};\n");
+    let outline = outline_for_syntax(&buffer, "ts");
+
+    assert_eq!(
+        outline
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.kind, entry.depth))
+            .collect::<Vec<_>>(),
+        vec![("load", FunctionKind::Function, 0)]
+    );
+    assert!(outline[0].body_range.is_some());
 }
 
 #[test]
@@ -1174,6 +1260,21 @@ fn editor_model_outline_detects_ruby_end_keyword_classes_modules_and_methods() {
             EditorPosition::new(2, "    def load".len()),
             EditorPosition::new(6, 0)
         ))
+    );
+}
+
+#[test]
+fn editor_model_outline_accepts_ruby_bang_and_question_methods() {
+    let buffer =
+        EditorBuffer::from_text("class User\n  def save!\n  end\n  def ready?\n  end\nend\n");
+    let outline = outline_for_syntax(&buffer, "rb");
+
+    assert_eq!(
+        outline
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["save!", "ready?"]
     );
 }
 

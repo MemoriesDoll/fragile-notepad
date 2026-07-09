@@ -322,6 +322,13 @@ fn tiny_skia_and_wgpu_render_real_icon_consistently() {
                 panic!("tiny-skia headless renderer should be available");
             };
             let Some(gpu) = render_icon("wgpu", scale_factor, rgba) else {
+                if std::env::var_os("CI").is_some()
+                    && std::env::var_os("FRAGILE_ALLOW_WGPU_PARITY_SKIP").is_none()
+                {
+                    panic!(
+                        "wgpu headless renderer is unavailable in CI; set FRAGILE_ALLOW_WGPU_PARITY_SKIP=1 to opt out"
+                    );
+                }
                 eprintln!(
                     "skipping icon render parity test: wgpu headless renderer is unavailable"
                 );

@@ -1223,6 +1223,7 @@ fn clipboard_message_variants_cover_read_and_write_results() {
     let document_id = DocumentId::new(4);
     let request = PasteRequest {
         document_id,
+        revision: 0,
         selection: caret(0, 0),
         selection_set: SelectionSet::single(caret(0, 0)),
         clipboard_mode: ClipboardMode::Linear,
@@ -1232,6 +1233,7 @@ fn clipboard_message_variants_cover_read_and_write_results() {
         Message::ClipboardRead(request, Ok(Arc::new("pasted".to_owned()))),
         Message::ClipboardRead(paste, Ok(text))
             if paste.document_id == document_id
+                && paste.revision == 0
                 && paste.selection == caret(0, 0)
                 && paste.selection_set == SelectionSet::single(caret(0, 0))
                 && paste.clipboard_mode == ClipboardMode::Linear

@@ -1,6 +1,6 @@
 //! Chunked file loading for responsive open/drop flows.
 
-use crate::core::{TextEncoding, decode_bytes};
+use crate::core::TextEncoding;
 use crate::message::{
     FileError, FileLoadChunk, FileLoadEvent, FileLoadFailure, FileLoadFinished, FileLoadProgress,
     FileLoadRequest,
@@ -84,10 +84,16 @@ fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLo
     }
     let encoding = detect_initial_encoding(&first_read);
 
-    if matches!(encoding, TextEncoding::Utf8 | TextEncoding::Utf8Bom) {
-        load_utf8_chunks(request, sender, file, first_read, encoding, total_bytes);
-    } else {
-        load_legacy_chunks(request, sender, file, first_read, total_bytes);
+    match encoding {
+        TextEncoding::Utf8 | TextEncoding::Utf8Bom => {
+            load_utf8_chunks(request, sender, file, first_read, encoding, total_bytes);
+        }
+        TextEncoding::Utf16BeBom | TextEncoding::Utf16LeBom => {
+            load_utf16_chunks(request, sender, file, first_read, encoding, total_bytes);
+        }
+        _ => {
+            load_windows_1252_chunks(request, sender, file, first_read, total_bytes, false, false);
+        }
     }
 }
 
@@ -115,6 +121,7 @@ fn load_utf8_chunks(
             false,
             bytes_read,
             total_bytes,
+            false,
         ) {
             had_errors = true;
             load_legacy_from_start(request, sender, total_bytes, had_errors);
@@ -146,6 +153,7 @@ fn load_utf8_chunks(
         true,
         bytes_read,
         total_bytes,
+        false,
     ) {
         had_errors = true;
         load_legacy_from_start(request, sender, total_bytes, had_errors);
@@ -167,55 +175,33 @@ fn load_utf8_chunks(
     );
 }
 
-fn load_legacy_from_start(
-    request: FileLoadRequest,
-    sender: mpsc::Sender<FileLoadEvent>,
-    total_bytes: Option<u64>,
-    had_errors: bool,
-) {
-    let mut file = match File::open(&request.path) {
-        Ok(file) => file,
-        Err(error) => {
-            let mut sender = sender;
-            send_failure(&mut sender, request, FileError::Io(error.kind()));
-            return;
-        }
-    };
-
-    load_legacy_chunks_with_error_state(
-        request,
-        sender,
-        &mut file,
-        Vec::new(),
-        total_bytes,
-        had_errors,
-    );
-}
-
-fn load_legacy_chunks(
-    request: FileLoadRequest,
-    sender: mpsc::Sender<FileLoadEvent>,
-    mut file: File,
-    first_read: Vec<u8>,
-    total_bytes: Option<u64>,
-) {
-    load_legacy_chunks_with_error_state(request, sender, &mut file, first_read, total_bytes, false);
-}
-
-fn load_legacy_chunks_with_error_state(
+fn load_utf16_chunks(
     request: FileLoadRequest,
     mut sender: mpsc::Sender<FileLoadEvent>,
-    file: &mut File,
+    mut file: File,
     first_read: Vec<u8>,
+    encoding: TextEncoding,
     total_bytes: Option<u64>,
-    forced_had_errors: bool,
 ) {
     let chunk_size = request.chunk_size.max(1);
     let mut buffer = vec![0; chunk_size];
-    let mut all_bytes = first_read;
-    let mut bytes_read = all_bytes.len() as u64;
+    let mut bytes_read = first_read.len() as u64;
+    let mut decoder = Utf16ChunkDecoder::new(encoding == TextEncoding::Utf16BeBom);
+    let mut pending = strip_initial_utf16_bom(&first_read, encoding);
 
     loop {
+        let output = decoder.decode(&pending, false);
+        if !output.is_empty() {
+            send_chunk(
+                &mut sender,
+                &request,
+                output,
+                bytes_read,
+                total_bytes,
+                false,
+            );
+        }
+
         let read = match file.read(&mut buffer) {
             Ok(read) => read,
             Err(error) => {
@@ -228,28 +214,136 @@ fn load_legacy_chunks_with_error_state(
             break;
         }
 
-        let bytes = &buffer[..read];
+        pending.clear();
+        pending.extend_from_slice(&buffer[..read]);
         bytes_read += read as u64;
-        all_bytes.extend_from_slice(bytes);
     }
 
-    let contents = Arc::new(decode_bytes(&all_bytes));
-    send_chunk(
-        &mut sender,
-        &request,
-        contents.text.clone(),
-        bytes_read,
-        total_bytes,
-    );
+    let output = decoder.decode(&[], true);
+    if !output.is_empty() {
+        send_chunk(
+            &mut sender,
+            &request,
+            output,
+            bytes_read,
+            total_bytes,
+            false,
+        );
+    }
+
     send_terminal(
         &mut sender,
         FileLoadEvent::Finished(Ok(FileLoadFinished {
             document_id: request.document_id,
             generation: request.generation,
             path: request.path,
-            encoding: contents.encoding,
-            had_errors: forced_had_errors || contents.had_errors,
-            fallback_contents: Some(contents),
+            encoding,
+            had_errors: decoder.had_errors(),
+            fallback_contents: None,
+            bytes_read,
+            total_bytes,
+        })),
+    );
+}
+
+fn load_legacy_from_start(
+    request: FileLoadRequest,
+    sender: mpsc::Sender<FileLoadEvent>,
+    total_bytes: Option<u64>,
+    had_errors: bool,
+) {
+    let file = match File::open(&request.path) {
+        Ok(file) => file,
+        Err(error) => {
+            let mut sender = sender;
+            send_failure(&mut sender, request, FileError::Io(error.kind()));
+            return;
+        }
+    };
+
+    load_windows_1252_chunks(
+        request,
+        sender,
+        file,
+        Vec::new(),
+        total_bytes,
+        had_errors,
+        true,
+    );
+}
+
+fn load_windows_1252_chunks(
+    request: FileLoadRequest,
+    mut sender: mpsc::Sender<FileLoadEvent>,
+    mut file: File,
+    first_read: Vec<u8>,
+    total_bytes: Option<u64>,
+    forced_had_errors: bool,
+    reset_first_chunk: bool,
+) {
+    let chunk_size = request.chunk_size.max(1);
+    let mut buffer = vec![0; chunk_size];
+    let mut bytes_read = first_read.len() as u64;
+    let mut decoder = encoding_rs::WINDOWS_1252.new_decoder();
+    let mut pending = first_read;
+    let mut had_errors = forced_had_errors;
+    let mut reset_next_chunk = reset_first_chunk;
+
+    loop {
+        if !pending.is_empty() {
+            if send_decoded_chunk(
+                &mut sender,
+                &request,
+                &mut decoder,
+                &pending,
+                false,
+                bytes_read,
+                total_bytes,
+                reset_next_chunk,
+            ) {
+                had_errors = true;
+            }
+            reset_next_chunk = false;
+        }
+
+        let read = match file.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) => {
+                send_failure(&mut sender, request, FileError::Io(error.kind()));
+                return;
+            }
+        };
+
+        if read == 0 {
+            break;
+        }
+
+        pending.clear();
+        pending.extend_from_slice(&buffer[..read]);
+        bytes_read += read as u64;
+    }
+
+    if send_decoded_chunk(
+        &mut sender,
+        &request,
+        &mut decoder,
+        &[],
+        true,
+        bytes_read,
+        total_bytes,
+        reset_next_chunk,
+    ) {
+        had_errors = true;
+    }
+    send_terminal(
+        &mut sender,
+        FileLoadEvent::Finished(Ok(FileLoadFinished {
+            document_id: request.document_id,
+            generation: request.generation,
+            path: request.path,
+            encoding: TextEncoding::Windows1252,
+            had_errors,
+            fallback_contents: None,
             bytes_read,
             total_bytes,
         })),
@@ -279,6 +373,20 @@ fn strip_initial_bom(bytes: &[u8], encoding: TextEncoding) -> Vec<u8> {
     }
 }
 
+fn strip_initial_utf16_bom(bytes: &[u8], encoding: TextEncoding) -> Vec<u8> {
+    match encoding {
+        TextEncoding::Utf16BeBom => bytes
+            .get(UTF16BE_BOM_BYTES.len()..)
+            .unwrap_or_default()
+            .to_vec(),
+        TextEncoding::Utf16LeBom => bytes
+            .get(UTF16LE_BOM_BYTES.len()..)
+            .unwrap_or_default()
+            .to_vec(),
+        _ => bytes.to_vec(),
+    }
+}
+
 fn send_decoded_chunk(
     sender: &mut mpsc::Sender<FileLoadEvent>,
     request: &FileLoadRequest,
@@ -287,6 +395,7 @@ fn send_decoded_chunk(
     last: bool,
     bytes_read: u64,
     total_bytes: Option<u64>,
+    reset: bool,
 ) -> bool {
     let max_output = decoder
         .max_utf8_buffer_length(bytes.len())
@@ -295,10 +404,111 @@ fn send_decoded_chunk(
     let (_, _, malformed) = decoder.decode_to_string(bytes, &mut output, last);
 
     if !malformed && !output.is_empty() {
-        send_chunk(sender, request, output, bytes_read, total_bytes);
+        send_chunk(sender, request, output, bytes_read, total_bytes, reset);
     }
 
     malformed
+}
+
+struct Utf16ChunkDecoder {
+    big_endian: bool,
+    pending_byte: Option<u8>,
+    pending_high_surrogate: Option<u16>,
+    had_errors: bool,
+}
+
+impl Utf16ChunkDecoder {
+    const fn new(big_endian: bool) -> Self {
+        Self {
+            big_endian,
+            pending_byte: None,
+            pending_high_surrogate: None,
+            had_errors: false,
+        }
+    }
+
+    const fn had_errors(&self) -> bool {
+        self.had_errors
+    }
+
+    fn decode(&mut self, bytes: &[u8], last: bool) -> String {
+        let mut output = String::new();
+        let mut index = 0;
+
+        if let Some(first) = self.pending_byte.take() {
+            if let Some(second) = bytes.first().copied() {
+                self.push_unit(unit_from_bytes(first, second, self.big_endian), &mut output);
+                index = 1;
+            } else if last {
+                self.had_errors = true;
+                output.push(char::REPLACEMENT_CHARACTER);
+            } else {
+                self.pending_byte = Some(first);
+            }
+        }
+
+        while index + 1 < bytes.len() {
+            self.push_unit(
+                unit_from_bytes(bytes[index], bytes[index + 1], self.big_endian),
+                &mut output,
+            );
+            index += 2;
+        }
+
+        if index < bytes.len() {
+            if last {
+                self.had_errors = true;
+                output.push(char::REPLACEMENT_CHARACTER);
+            } else {
+                self.pending_byte = Some(bytes[index]);
+            }
+        }
+
+        if last && let Some(high) = self.pending_high_surrogate.take() {
+            self.had_errors = true;
+            let _ = high;
+            output.push(char::REPLACEMENT_CHARACTER);
+        }
+
+        output
+    }
+
+    fn push_unit(&mut self, unit: u16, output: &mut String) {
+        if let Some(high) = self.pending_high_surrogate.take() {
+            if (0xdc00..=0xdfff).contains(&unit) {
+                let high = u32::from(high) - 0xd800;
+                let low = u32::from(unit) - 0xdc00;
+                if let Some(ch) = char::from_u32(0x10000 + ((high << 10) | low)) {
+                    output.push(ch);
+                    return;
+                }
+            }
+
+            self.had_errors = true;
+            output.push(char::REPLACEMENT_CHARACTER);
+        }
+
+        match unit {
+            0xd800..=0xdbff => self.pending_high_surrogate = Some(unit),
+            0xdc00..=0xdfff => {
+                self.had_errors = true;
+                output.push(char::REPLACEMENT_CHARACTER);
+            }
+            _ => {
+                if let Some(ch) = char::from_u32(u32::from(unit)) {
+                    output.push(ch);
+                }
+            }
+        }
+    }
+}
+
+fn unit_from_bytes(first: u8, second: u8, big_endian: bool) -> u16 {
+    if big_endian {
+        u16::from_be_bytes([first, second])
+    } else {
+        u16::from_le_bytes([first, second])
+    }
 }
 
 fn send_chunk(
@@ -307,12 +517,14 @@ fn send_chunk(
     text: String,
     bytes_read: u64,
     total_bytes: Option<u64>,
+    reset: bool,
 ) {
     let _ = block_on(sender.send(FileLoadEvent::Chunk(FileLoadChunk {
         document_id: request.document_id,
         generation: request.generation,
         path: request.path.clone(),
         text: Arc::new(text),
+        reset,
         bytes_read,
         total_bytes,
     })));

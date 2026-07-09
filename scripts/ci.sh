@@ -14,4 +14,5 @@ else
     cargo test
 fi
 
+cargo check --no-default-features
 cargo check --examples
