@@ -801,6 +801,13 @@ fn editor_action_variants_cover_document_level_flow_contract() {
     assert_eq!(EditorAction::DeleteLine, EditorAction::DeleteLine);
     assert_eq!(EditorAction::CopyLine, EditorAction::CopyLine);
     assert_eq!(EditorAction::CutLine, EditorAction::CutLine);
+    assert_eq!(EditorAction::Uppercase, EditorAction::Uppercase);
+    assert_eq!(EditorAction::Lowercase, EditorAction::Lowercase);
+    assert_eq!(
+        EditorAction::TrimTrailingSpaces,
+        EditorAction::TrimTrailingSpaces
+    );
+    assert_eq!(EditorAction::JoinLines, EditorAction::JoinLines);
     assert_eq!(EditorAction::NextFunction, EditorAction::NextFunction);
     assert_eq!(
         EditorAction::PreviousFunction,
@@ -1588,6 +1595,145 @@ fn cut_line_with_selection_deletes_touched_lines_and_undo_restores_selection() {
             cursor: EditorPosition {
                 line: 1,
                 column: 2,
+            },
+        }",
+    );
+}
+
+#[test]
+fn uppercase_selection_transforms_selected_text_and_undo_restores() {
+    let (mut app, _) = App::new();
+
+    let _ = app.update(Message::FileOpened(Ok(opened_file(
+        "notes.txt",
+        "one Two\nmix",
+    ))));
+    let _ = app.update(Message::EditorAction(
+        DocumentId::new(2),
+        EditorAction::SelectRegion(selection(position(0, 4), position(1, 3))),
+    ));
+    let _ = app.update(Message::Uppercase);
+
+    assert_debug_contains(&active_document_debug(&app), "text: \"one TWO\\nMIX\"");
+
+    let _ = app.update(Message::Undo);
+
+    let debug = active_document_debug(&app);
+    assert_debug_contains(&debug, "text: \"one Two\\nmix\"");
+    assert_debug_contains(
+        &debug,
+        "selection: EditorSelection {
+            anchor: EditorPosition {
+                line: 0,
+                column: 4,
+            },
+            cursor: EditorPosition {
+                line: 1,
+                column: 3,
+            },
+        }",
+    );
+}
+
+#[test]
+fn lowercase_without_selection_is_no_op() {
+    let (mut app, _) = App::new();
+
+    let _ = app.update(Message::FileOpened(Ok(opened_file(
+        "notes.txt",
+        "LOUD\nText",
+    ))));
+    let _ = app.update(Message::EditorAction(
+        DocumentId::new(2),
+        EditorAction::PlaceCaret(position(0, 2)),
+    ));
+    let _ = app.update(Message::Lowercase);
+
+    let debug = active_document_debug(&app);
+    assert_debug_contains(&debug, "text: \"LOUD\\nText\"");
+    assert_debug_contains(
+        &debug,
+        "selection: EditorSelection {
+            anchor: EditorPosition {
+                line: 0,
+                column: 2,
+            },
+            cursor: EditorPosition {
+                line: 0,
+                column: 2,
+            },
+        }",
+    );
+}
+
+#[test]
+fn trim_trailing_spaces_updates_selected_lines_and_undo_restores() {
+    let (mut app, _) = App::new();
+
+    let _ = app.update(Message::FileOpened(Ok(opened_file(
+        "notes.txt",
+        "one   \ntwo\t \nthree  ",
+    ))));
+    let _ = app.update(Message::EditorAction(
+        DocumentId::new(2),
+        EditorAction::SelectRegion(selection(position(0, 1), position(1, 2))),
+    ));
+    let _ = app.update(Message::TrimTrailingSpaces);
+
+    assert_debug_contains(
+        &active_document_debug(&app),
+        "text: \"one\\ntwo\\nthree  \"",
+    );
+
+    let _ = app.update(Message::Undo);
+
+    let debug = active_document_debug(&app);
+    assert_debug_contains(&debug, "text: \"one   \\ntwo\\t \\nthree  \"");
+    assert_debug_contains(
+        &debug,
+        "selection: EditorSelection {
+            anchor: EditorPosition {
+                line: 0,
+                column: 1,
+            },
+            cursor: EditorPosition {
+                line: 1,
+                column: 2,
+            },
+        }",
+    );
+}
+
+#[test]
+fn join_lines_with_caret_joins_current_and_next_line_with_undo() {
+    let (mut app, _) = App::new();
+
+    let _ = app.update(Message::FileOpened(Ok(opened_file(
+        "notes.txt",
+        "one   \n \ttwo\nthree",
+    ))));
+    let _ = app.update(Message::EditorAction(
+        DocumentId::new(2),
+        EditorAction::PlaceCaret(position(0, 1)),
+    ));
+    let _ = app.update(Message::JoinLines);
+
+    assert_debug_contains(&active_document_debug(&app), "text: \"one two\\nthree\"");
+
+    let _ = app.update(Message::Undo);
+
+    let debug = active_document_debug(&app);
+    assert_debug_contains(&debug, "text: \"one   \\n \\ttwo\\nthree\"");
+    assert_debug_contains(
+        &debug,
+        "selection: EditorSelection {
+            anchor: EditorPosition {
+                line: 0,
+                column: 1,
+            },
+            cursor: EditorPosition {
+                line: 0,
+                column: 1,
             },
         }",
     );

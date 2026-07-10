@@ -118,4 +118,25 @@ impl DecorationModel {
             line_decorations,
         }
     }
+
+    /// Synchronizes the inexpensive decorations used by a loading document.
+    /// Full fold and indentation metadata is computed after loading finishes.
+    pub fn sync_loading_line_count(&mut self, line_count: usize) {
+        self.hidden_line_spans.clear();
+        self.indent_guides.clear();
+
+        if line_count < self.line_decorations.len() {
+            self.line_decorations.truncate(line_count);
+        }
+
+        for line in self.line_decorations.len()..line_count {
+            self.line_decorations.push(LineDecoration {
+                line,
+                line_number: self.settings.show_line_numbers.then_some(line + 1),
+                fold_range: None,
+                has_fold_control: false,
+                is_fold_collapsed: false,
+            });
+        }
+    }
 }

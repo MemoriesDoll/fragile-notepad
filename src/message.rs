@@ -50,6 +50,7 @@ pub enum AdvancedSearchTab {
     Replace,
     FindInFiles,
     ReplaceInFiles,
+    GoToLine,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +140,10 @@ pub enum Message {
     PreviousFunction,
     SelectCurrentFunction,
     SelectCurrentFunctionBody,
+    Uppercase,
+    Lowercase,
+    TrimTrailingSpaces,
+    JoinLines,
     Cut,
     Copy,
     Paste,
@@ -164,7 +169,10 @@ pub enum Message {
     SaveFile,
     SaveAllFiles,
     SaveFileAs,
+    SaveCopyAs,
     FileSaved(SaveRequest, FileSaveResult),
+    FileCopySaved(SaveRequest, FileSaveResult),
+    ReloadFromDisk,
     CloseFile,
     CloseAllFiles,
     CloseAllButActiveFile,

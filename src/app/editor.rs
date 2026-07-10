@@ -10,11 +10,12 @@ use crate::message::{ClipboardReadResult, Message, PasteRequest};
 use super::editor_ops::{
     add_adjacent_caret, backspace, convert_selection_to_rectangle, delete, delete_line,
     duplicate_line, go_to_matching_delimiter, go_to_next_function, go_to_previous_function,
-    line_span_text, move_document_position, paste_clipboard_mode, paste_selection,
-    replace_selection, select_current_function, select_current_function_body,
+    join_lines, line_span_text, lowercase_selection, move_document_position, paste_clipboard_mode,
+    paste_selection, replace_selection, select_current_function, select_current_function_body,
     select_delimiter_in_place, select_matching_delimiter, select_word_at, selected_text,
     selection_set_is_all_carets, set_all_folds_collapsed, set_current_fold_collapsed,
-    split_selection_into_lines, toggle_current_fold, toggle_fold, unindent,
+    split_selection_into_lines, toggle_current_fold, toggle_fold, trim_trailing_spaces, unindent,
+    uppercase_selection,
 };
 
 impl App {
@@ -244,6 +245,10 @@ impl App {
             EditorAction::DeleteLine => delete_line(document),
             EditorAction::CopyLine => false,
             EditorAction::CutLine => delete_line(document),
+            EditorAction::Uppercase => uppercase_selection(document, tab_width),
+            EditorAction::Lowercase => lowercase_selection(document, tab_width),
+            EditorAction::TrimTrailingSpaces => trim_trailing_spaces(document, tab_width),
+            EditorAction::JoinLines => join_lines(document),
             EditorAction::ScrollLines(lines) => {
                 let max = document.viewport.visible_row_count().saturating_sub(1);
                 let next = if lines.is_negative() {

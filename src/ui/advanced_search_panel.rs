@@ -13,13 +13,23 @@ const TABS: &[(AdvancedSearchTab, &str)] = &[
     (AdvancedSearchTab::Replace, "Replace"),
     (AdvancedSearchTab::FindInFiles, "Find in Files"),
     (AdvancedSearchTab::ReplaceInFiles, "Replace in Files"),
+    (AdvancedSearchTab::GoToLine, "Go To Line"),
 ];
 const BODY_TEXT_SIZE: u32 = 14;
 const SECONDARY_TEXT_SIZE: u32 = 13;
 const OPTION_TEXT_SIZE: u32 = 12;
 
 pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
-    container(
+    let content = if matches!(dialog.active_tab, AdvancedSearchTab::GoToLine) {
+        column![
+            tabs(dialog.active_tab),
+            rule::horizontal(1),
+            go_to_line_panel(dialog),
+            space::vertical(),
+        ]
+        .height(Fill)
+        .width(Fill)
+    } else {
         column![
             tabs(dialog.active_tab),
             rule::horizontal(1),
@@ -40,12 +50,14 @@ pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
             results(dialog),
         ]
         .height(Fill)
-        .width(Fill),
-    )
-    .width(Fill)
-    .height(Fill)
-    .style(styles::settings_panel)
-    .into()
+        .width(Fill)
+    };
+
+    container(content)
+        .width(Fill)
+        .height(Fill)
+        .style(styles::settings_panel)
+        .into()
 }
 
 fn tabs(active: AdvancedSearchTab) -> Element<'static, Message> {
@@ -105,6 +117,36 @@ fn fields(dialog: &SearchDialogState) -> Element<'_, Message> {
     }
 
     fields.into()
+}
+
+fn go_to_line_panel(dialog: &SearchDialogState) -> Element<'_, Message> {
+    container(
+        row![
+            column![
+                field_row(
+                    "Line number:",
+                    text_input("Line number", &dialog.go_to_line)
+                        .on_input(Message::AdvancedSearchQueryChanged)
+                        .on_submit(Message::AdvancedFindNextRun)
+                        .padding([7, 10])
+                        .size(BODY_TEXT_SIZE)
+                        .width(Fill)
+                        .style(styles::input)
+                        .into(),
+                ),
+                status_line(dialog),
+            ]
+            .spacing(12)
+            .width(FillPortion(3)),
+            container(command_column(dialog)).width(Length::Fixed(188.0)),
+        ]
+        .spacing(14)
+        .padding([14, 16])
+        .height(Length::Fixed(112.0)),
+    )
+    .width(Fill)
+    .style(styles::settings_content)
+    .into()
 }
 
 fn options(dialog: &SearchDialogState) -> Element<'_, Message> {
@@ -207,6 +249,11 @@ fn command_column(dialog: &SearchDialogState) -> Element<'_, Message> {
             action_button("Replace All", Message::AdvancedReplaceAllOpenRun, true),
             space::vertical(),
             scope_hint(dialog),
+            action_button("Close", Message::AdvancedSearchClosed, true),
+        ],
+        AdvancedSearchTab::GoToLine => column![
+            action_button("Go", Message::AdvancedFindNextRun, true),
+            space::vertical(),
             action_button("Close", Message::AdvancedSearchClosed, true),
         ],
     }
@@ -338,5 +385,6 @@ const fn scope_label(tab: AdvancedSearchTab) -> &'static str {
     match tab {
         AdvancedSearchTab::Find | AdvancedSearchTab::Replace => "Current document",
         AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles => "Open documents",
+        AdvancedSearchTab::GoToLine => "Current document",
     }
 }

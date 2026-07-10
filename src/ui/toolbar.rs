@@ -303,8 +303,11 @@ fn file_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
             ShortcutCommand::SaveFileAs,
             Message::SaveFileAs,
         ),
-        menu::disabled("Save a Copy As..."),
+        menu::item("Save a Copy As...", Message::SaveCopyAs),
         menu::item("Save All", Message::SaveAllFiles),
+        menu::separator(),
+        menu::item("Reload from Disk", Message::ReloadFromDisk),
+        menu::separator(),
         menu::item("Close", Message::CloseFile),
         menu::item("Close All", Message::CloseAllFiles),
         close_multiple_documents_menu(),
@@ -330,6 +333,8 @@ fn edit_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
         selection_operations_menu(settings),
         menu::separator(),
         indent_menu(settings),
+        menu::separator(),
+        transformation_menu(),
         menu::separator(),
         line_operations_menu(settings),
     ]
@@ -369,6 +374,10 @@ fn search_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
         menu::item(
             "Replace in Open Documents...",
             Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::ReplaceInFiles),
+        ),
+        menu::item(
+            "Go To Line...",
+            Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::GoToLine),
         ),
         menu::separator(),
     ];
@@ -440,6 +449,19 @@ fn indent_menu(settings: &EditorSettings) -> MenuNode {
                 ShortcutCommand::Unindent,
                 Message::Shortcut(ShortcutCommand::Unindent),
             ),
+        ],
+    )
+}
+
+fn transformation_menu() -> MenuNode {
+    menu::submenu(
+        "transformations",
+        "Convert Case / Transform",
+        vec![
+            menu::item("UPPERCASE", Message::Uppercase),
+            menu::item("lowercase", Message::Lowercase),
+            menu::item("Trim Trailing Spaces", Message::TrimTrailingSpaces),
+            menu::item("Join Lines", Message::JoinLines),
         ],
     )
 }

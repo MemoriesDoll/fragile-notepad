@@ -152,9 +152,7 @@ pub(super) fn draw_plan<Renderer>(
                 scroll_text_clip_bounds,
             );
         } else {
-            for (row_index, row) in plan.rows.iter().enumerate() {
-                let row_geometry = row_geometries.get_by_row_index(row_index);
-
+            for row in &plan.rows {
                 draw_row_text(
                     renderer,
                     row,
@@ -162,7 +160,6 @@ pub(super) fn draw_plan<Renderer>(
                     bounds.y + row.y + text_baseline_offset(metrics),
                     metrics,
                     decorations,
-                    row_geometry,
                     style,
                     scroll_text_clip_bounds,
                     frame_id,

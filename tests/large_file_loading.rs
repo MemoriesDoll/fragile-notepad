@@ -7,6 +7,8 @@ use iced::widget::text_editor::LineEnding;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+use std::time::Instant;
 
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(1);
 
@@ -297,6 +299,120 @@ fn malformed_utf8_streams_reset_legacy_preview() {
     assert!(finished.had_errors);
     assert!(finished.fallback_contents.is_none());
     assert_eq!(preview_from_chunks(&events).chars().count(), bytes.len());
+}
+
+#[test]
+fn binary_loader_streams_payload_as_normal_text() {
+    let path = temp_file_path("binary");
+    let bytes = vec![0; DEFAULT_CHUNK_SIZE * 16];
+    fs::write(&path, &bytes).expect("write temp input");
+
+    let document_id = DocumentId::new(48);
+    let generation = DocumentLoadGeneration::next();
+    let events = collect_load_events(FileLoadRequest {
+        document_id,
+        generation,
+        path: path.clone(),
+        chunk_size: DEFAULT_CHUNK_SIZE,
+    });
+    let _ = fs::remove_file(&path);
+
+    let contents = preview_from_chunks(&events);
+    let chunk_count = events
+        .iter()
+        .filter(|event| matches!(event, FileLoadEvent::Chunk(_)))
+        .count();
+
+    assert!(
+        chunk_count > 1,
+        "binary payloads should stream through the ordinary text path"
+    );
+    assert_eq!(contents.as_bytes(), bytes);
+
+    let finished = events
+        .iter()
+        .find_map(|event| match event {
+            FileLoadEvent::Finished(Ok(finished)) => Some(finished),
+            _ => None,
+        })
+        .expect("finished event");
+
+    assert_eq!(finished.document_id, document_id);
+    assert_eq!(finished.generation, generation);
+    assert_eq!(finished.bytes_read, bytes.len() as u64);
+    assert_eq!(finished.total_bytes, Some(bytes.len() as u64));
+    assert!(!finished.had_errors);
+    assert!(finished.fallback_contents.is_none());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_ntdll_binary_load_applies_as_normal_text_without_chunk_stall() {
+    let path = PathBuf::from(r"C:\Windows\System32\ntdll.dll");
+    let Ok(metadata) = fs::metadata(&path) else {
+        eprintln!("skipping ntdll.dll regression: file is unavailable");
+        return;
+    };
+
+    let document_id = DocumentId::new(49);
+    let generation = DocumentLoadGeneration::next();
+    let events = collect_load_events(FileLoadRequest {
+        document_id,
+        generation,
+        path: path.clone(),
+        chunk_size: DEFAULT_CHUNK_SIZE,
+    });
+    let mut document = Document::loading(document_id, path.clone(), generation);
+    let started = Instant::now();
+    let mut chunk_count = 0;
+    let mut slowest_chunk = Duration::ZERO;
+
+    for event in events {
+        match event {
+            FileLoadEvent::Progress(progress) => {
+                document.update_load_progress(
+                    progress.generation,
+                    progress.bytes_read,
+                    progress.total_bytes,
+                );
+            }
+            FileLoadEvent::Chunk(chunk) => {
+                chunk_count += 1;
+                let chunk_started = Instant::now();
+                document.replace_loading_preview(
+                    chunk.generation,
+                    &chunk.text,
+                    chunk.reset,
+                    chunk.bytes_read,
+                    chunk.total_bytes,
+                );
+                slowest_chunk = slowest_chunk.max(chunk_started.elapsed());
+            }
+            FileLoadEvent::Finished(Ok(finished)) => {
+                assert!(document.complete_streaming_load(finished.generation, finished.encoding));
+                assert_eq!(finished.bytes_read, metadata.len());
+                assert!(finished.had_errors);
+            }
+            FileLoadEvent::Finished(Err(error)) => panic!("load failed: {error:?}"),
+        }
+    }
+
+    let elapsed = started.elapsed();
+    assert!(chunk_count > 1);
+    assert_eq!(document.text().chars().count() as u64, metadata.len());
+    assert_eq!(document.viewport.line_count(), document.buffer.line_count());
+    assert_eq!(
+        document.decorations.line_decorations.len(),
+        document.buffer.line_count()
+    );
+    assert!(
+        slowest_chunk < Duration::from_millis(250),
+        "a streamed ntdll.dll chunk blocked document updates for {slowest_chunk:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "applying ntdll.dll loader events to the document took {elapsed:?}"
+    );
 }
 
 #[test]

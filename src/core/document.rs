@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const DEFAULT_SYNTAX_TOKEN: &str = "txt";
+pub const MAX_FULL_DOCUMENT_ANALYSIS_BYTES: usize = 1024 * 1024;
 const DEFAULT_REVEAL_CONTEXT_ROWS: usize = 3;
 static NEXT_LOAD_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -187,15 +188,23 @@ impl Document {
         let selection_set = SelectionSet::single(selection);
         let history = EditorHistory::new("");
         let decoration_settings = DecorationSettings::default();
-        let folds = FoldModel::new(
-            fold_provider(decoration_settings, &syntax_token).compute_folds(&buffer),
-        );
+        let can_run_full_document_analysis = buffer.len_bytes() <= MAX_FULL_DOCUMENT_ANALYSIS_BYTES;
+        let folds = if can_run_full_document_analysis {
+            FoldModel::new(fold_provider(decoration_settings, &syntax_token).compute_folds(&buffer))
+        } else {
+            FoldModel::default()
+        };
         let viewport = ViewportModel::new(buffer.line_count(), &folds);
+        let indent_guides = if can_run_full_document_analysis {
+            indent_guides(&buffer, decoration_settings.indent_width)
+        } else {
+            Vec::new()
+        };
         let decorations = DecorationModel::from_folds(
             decoration_settings,
             buffer.line_count(),
             &folds,
-            indent_guides(&buffer, decoration_settings.indent_width),
+            indent_guides,
         );
 
         Self {
@@ -274,6 +283,7 @@ impl Document {
 
     pub fn can_run_full_document_analysis(&self) -> bool {
         self.has_complete_text_index()
+            && self.buffer.len_bytes() <= MAX_FULL_DOCUMENT_ANALYSIS_BYTES
     }
 
     pub fn load_generation(&self) -> Option<DocumentLoadGeneration> {
@@ -339,12 +349,22 @@ impl Document {
 
         if reset {
             self.buffer = EditorBuffer::from_text(strip_text_bom(text).to_owned());
+            self.folds.recompute(Vec::new());
+            self.viewport = ViewportModel::new(self.buffer.line_count(), &self.folds);
+            self.decorations = DecorationModel::from_folds(
+                self.decorations.settings,
+                self.buffer.line_count(),
+                &self.folds,
+                Vec::new(),
+            );
         } else {
             self.buffer.append_text(text);
+            let line_count = self.buffer.line_count();
+            self.viewport.sync_unfolded_line_count(line_count);
+            self.decorations.sync_loading_line_count(line_count);
         }
         self.selection = EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0));
         self.selection_set = SelectionSet::single(self.selection);
-        self.refresh_view_models();
         self.syntax_cache.borrow_mut().clear();
         self.revision = self.revision.saturating_add(1);
         true
@@ -498,6 +518,14 @@ impl Document {
         self.syntax_token != DEFAULT_SYNTAX_TOKEN
     }
 
+    pub fn render_syntax_token(&self) -> &str {
+        if self.can_run_full_document_analysis() {
+            &self.syntax_token
+        } else {
+            DEFAULT_SYNTAX_TOKEN
+        }
+    }
+
     pub fn can_undo(&self) -> bool {
         self.history.can_undo()
     }
@@ -536,6 +564,8 @@ impl Document {
         if self.can_run_full_document_analysis() {
             self.folds
                 .recompute(self.fold_provider().compute_folds(&self.buffer));
+        } else {
+            self.folds.recompute(Vec::new());
         }
         self.refresh_view_models();
         self.refresh_dirty_state();
@@ -547,11 +577,16 @@ impl Document {
 
     pub fn refresh_view_models(&mut self) {
         self.viewport = ViewportModel::new(self.buffer.line_count(), &self.folds);
+        let indent_guides = if self.can_run_full_document_analysis() {
+            indent_guides(&self.buffer, self.decorations.settings.indent_width)
+        } else {
+            Vec::new()
+        };
         self.decorations = DecorationModel::from_folds(
             self.decorations.settings,
             self.buffer.line_count(),
             &self.folds,
-            indent_guides(&self.buffer, self.decorations.settings.indent_width),
+            indent_guides,
         );
         self.scroll.first_visible_row = self
             .scroll
@@ -577,6 +612,8 @@ impl Document {
         if self.can_run_full_document_analysis() {
             self.folds
                 .recompute(fold_provider(settings, &self.syntax_token).compute_folds(&self.buffer));
+        } else {
+            self.folds.recompute(Vec::new());
         }
         self.refresh_view_models();
     }
@@ -662,6 +699,8 @@ impl Document {
         if self.can_run_full_document_analysis() {
             self.folds
                 .recompute(self.fold_provider().compute_folds(&self.buffer));
+        } else {
+            self.folds.recompute(Vec::new());
         }
         self.refresh_view_models();
         self.revision = self.revision.saturating_add(1);

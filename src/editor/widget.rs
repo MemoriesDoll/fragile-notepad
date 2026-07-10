@@ -843,7 +843,7 @@ mod tests {
     }
 
     #[test]
-    fn rich_text_visible_range_keeps_tabs_on_full_row_fallback() {
+    fn rich_text_visible_range_clips_tabbed_lines_to_visible_columns() {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
@@ -876,12 +876,12 @@ mod tests {
                     height: 20.0,
                 },
             ),
-            0..row.text.len()
+            2..23
         );
     }
 
     #[test]
-    fn rich_text_visible_range_keeps_non_ascii_on_full_row_fallback() {
+    fn rich_text_visible_range_clips_non_ascii_lines_on_utf8_boundaries() {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
@@ -914,7 +914,7 @@ mod tests {
                     height: 20.0,
                 },
             ),
-            0..row.text.len()
+            2..23
         );
     }
 

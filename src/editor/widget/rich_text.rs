@@ -3,12 +3,13 @@ use iced::{Color, Font, Pixels, Point, Rectangle, Size, alignment};
 use std::ops::Range;
 
 use crate::editor::decoration::DecorationModel;
-use crate::editor::layout::{EditorMetrics, visual_width_with_tab_width};
+use crate::editor::layout::{
+    EditorMetrics, byte_column_for, visual_column_for, visual_width_with_tab_width,
+};
 use crate::editor::render::RowRenderPlan;
 
 use super::cache::{RichParagraphCache, SyntaxSpanKey};
 use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING};
-use super::line_cache::LineGeometry;
 use super::style::EditorStyle;
 
 const MAX_SYNTAX_SPANS_PER_ROW: usize = 256;
@@ -27,7 +28,6 @@ pub(super) fn draw_row_text<Renderer>(
     baseline_y: f32,
     metrics: EditorMetrics,
     decorations: &DecorationModel,
-    line_geometry: &LineGeometry<Renderer::Paragraph>,
     style: EditorStyle,
     clip_bounds: Rectangle,
     frame_id: u64,
@@ -45,23 +45,32 @@ pub(super) fn draw_row_text<Renderer>(
 ) where
     Renderer: text::Renderer<Font = Font>,
 {
+    if contains_unsafe_render_controls(&row.text) {
+        draw_clipped_plain_text(
+            renderer,
+            row.text.clone(),
+            text_origin_x,
+            baseline_y,
+            metrics,
+            clip_bounds,
+            style.syntax_fallback_text,
+            draw_plain_text,
+        );
+        return;
+    }
+
     if let Some(expanded) = expand_tabs_for_rendering(&row.text, decorations.settings.indent_width)
     {
-        let text_bounds = Size::new(
-            line_geometry.width(decorations.settings.indent_width),
-            metrics.line_height,
-        );
-
         if row.syntax_spans.is_empty() || row.syntax_spans.len() > MAX_SYNTAX_SPANS_PER_ROW {
-            draw_plain_text(
+            draw_clipped_plain_text(
                 renderer,
                 expanded.text,
-                Point::new(text_origin_x, baseline_y),
-                text_bounds,
-                style.syntax_fallback_text,
-                text::Alignment::Left,
+                text_origin_x,
+                baseline_y,
                 metrics,
                 clip_bounds,
+                style.syntax_fallback_text,
+                draw_plain_text,
             );
             return;
         }
@@ -73,15 +82,15 @@ pub(super) fn draw_row_text<Renderer>(
         };
 
         if expanded_row.syntax_spans.is_empty() || !syntax_spans_are_valid(&expanded_row) {
-            draw_plain_text(
+            draw_clipped_plain_text(
                 renderer,
                 expanded_row.text,
-                Point::new(text_origin_x, baseline_y),
-                text_bounds,
-                style.syntax_fallback_text,
-                text::Alignment::Left,
+                text_origin_x,
+                baseline_y,
                 metrics,
                 clip_bounds,
+                style.syntax_fallback_text,
+                draw_plain_text,
             );
             return;
         }
@@ -102,20 +111,15 @@ pub(super) fn draw_row_text<Renderer>(
     }
 
     if row.syntax_spans.is_empty() || row.syntax_spans.len() > MAX_SYNTAX_SPANS_PER_ROW {
-        let text_bounds = Size::new(
-            line_geometry.width(decorations.settings.indent_width),
-            metrics.line_height,
-        );
-
-        draw_plain_text(
+        draw_clipped_plain_text(
             renderer,
             row.text.clone(),
-            Point::new(text_origin_x, baseline_y),
-            text_bounds,
-            style.syntax_fallback_text,
-            text::Alignment::Left,
+            text_origin_x,
+            baseline_y,
             metrics,
             clip_bounds,
+            style.syntax_fallback_text,
+            draw_plain_text,
         );
         return;
     }
@@ -160,12 +164,14 @@ fn draw_rich_row_text<Renderer>(
 {
     let visible_range = visible_rich_text_range(row, position.x, metrics, clip_bounds);
     let visible_text = &row.text[visible_range.clone()];
+    let visible_start_column = visual_column_for(&row.text, visible_range.start, 1);
+    let visible_width = visual_column_for(visible_text, visible_text.len(), 1);
     let visible_position = Point::new(
-        position.x + visible_range.start as f32 * metrics.character_width,
+        position.x + visible_start_column as f32 * metrics.character_width,
         position.y,
     );
     let visible_bounds = Size::new(
-        (visible_range.end - visible_range.start) as f32 * metrics.character_width,
+        (visible_width as f32 * metrics.character_width).max(metrics.character_width),
         height,
     );
     let mut span_keys = Vec::new();
@@ -283,6 +289,70 @@ fn draw_rich_row_text<Renderer>(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
+fn draw_clipped_plain_text<Renderer>(
+    renderer: &mut Renderer,
+    text: String,
+    text_origin_x: f32,
+    baseline_y: f32,
+    metrics: EditorMetrics,
+    clip_bounds: Rectangle,
+    color: Color,
+    draw_plain_text: impl FnOnce(
+        &mut Renderer,
+        String,
+        Point,
+        Size,
+        Color,
+        text::Alignment,
+        EditorMetrics,
+        Rectangle,
+    ),
+) {
+    let visible_range = visible_text_range(&text, text_origin_x, metrics, clip_bounds);
+    let visible_text = &text[visible_range.clone()];
+    let render_text = if contains_unsafe_render_controls(&text) {
+        safe_control_heavy_text(visible_text)
+    } else {
+        visible_text.to_owned()
+    };
+    let visible_start_column = visual_column_for(&text, visible_range.start, 1);
+    let visible_width = visual_column_for(visible_text, visible_text.len(), 1);
+
+    draw_plain_text(
+        renderer,
+        render_text,
+        Point::new(
+            text_origin_x + visible_start_column as f32 * metrics.character_width,
+            baseline_y,
+        ),
+        Size::new(
+            (visible_width as f32 * metrics.character_width).max(metrics.character_width),
+            metrics.line_height,
+        ),
+        color,
+        text::Alignment::Left,
+        metrics,
+        clip_bounds,
+    );
+}
+
+fn contains_unsafe_render_controls(text: &str) -> bool {
+    text.chars().any(|ch| ch != '\t' && ch.is_control())
+}
+
+fn safe_control_heavy_text(text: &str) -> String {
+    text.chars()
+        .map(|ch| {
+            if ch.is_ascii_graphic() || ch == ' ' {
+                ch
+            } else {
+                '.'
+            }
+        })
+        .collect()
+}
+
 pub(super) fn visible_rich_text_range(
     row: &RowRenderPlan,
     text_origin_x: f32,
@@ -314,12 +384,24 @@ pub(super) fn visible_styled_text_range(
     metrics: EditorMetrics,
     clip_bounds: Rectangle,
 ) -> Range<usize> {
-    if row.text.is_empty() || !can_batch_fast_text(&row.text) || metrics.character_width <= 0.0 {
+    if !syntax_spans_are_valid(row) {
         return 0..row.text.len();
     }
 
-    if !syntax_spans_are_valid(row) {
-        return 0..row.text.len();
+    let range = visible_text_range(&row.text, text_origin_x, metrics, clip_bounds);
+    let start = style_boundary_start(row, range.start);
+
+    start..range.end
+}
+
+fn visible_text_range(
+    text: &str,
+    text_origin_x: f32,
+    metrics: EditorMetrics,
+    clip_bounds: Rectangle,
+) -> Range<usize> {
+    if text.is_empty() || metrics.character_width <= 0.0 {
+        return 0..text.len();
     }
 
     let first = ((clip_bounds.x - text_origin_x) / metrics.character_width)
@@ -328,11 +410,10 @@ pub(super) fn visible_styled_text_range(
     let last = ((clip_bounds.x + clip_bounds.width - text_origin_x) / metrics.character_width)
         .ceil()
         .max(0.0) as usize;
-    let start = first.saturating_sub(LONG_LINE_VISIBLE_MARGIN_COLUMNS);
-    let end = last
-        .saturating_add(LONG_LINE_VISIBLE_MARGIN_COLUMNS)
-        .min(row.text.len());
-    let start = style_boundary_start(row, start.min(row.text.len()));
+    let start_column = first.saturating_sub(LONG_LINE_VISIBLE_MARGIN_COLUMNS);
+    let end_column = last.saturating_add(LONG_LINE_VISIBLE_MARGIN_COLUMNS);
+    let start = byte_column_for(text, start_column, 1);
+    let end = byte_column_for(text, end_column, 1).max(start);
 
     start..end
 }
@@ -493,6 +574,13 @@ mod tests {
         assert_eq!(expanded.byte_offsets[1], 1);
         assert_eq!(expanded.byte_offsets[2], 8);
         assert_eq!(expanded.byte_offsets[3], 9);
+    }
+
+    #[test]
+    fn control_heavy_rows_use_bounded_ascii_display_fallback() {
+        assert!(!contains_unsafe_render_controls("caf\u{00e9}\ttext"));
+        assert!(contains_unsafe_render_controls("caf\u{00e9}\0text"));
+        assert_eq!(safe_control_heavy_text("A\0\u{00e9} Z"), "A.. Z");
     }
 
     #[test]
@@ -676,7 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn rich_text_visible_range_keeps_tabs_on_full_row_fallback() {
+    fn rich_text_visible_range_clips_tabbed_lines_to_visible_columns() {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
@@ -709,12 +797,12 @@ mod tests {
                     height: 20.0,
                 },
             ),
-            0..row.text.len()
+            2..23
         );
     }
 
     #[test]
-    fn rich_text_visible_range_keeps_non_ascii_on_full_row_fallback() {
+    fn rich_text_visible_range_clips_non_ascii_lines_on_utf8_boundaries() {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
@@ -747,7 +835,7 @@ mod tests {
                     height: 20.0,
                 },
             ),
-            0..row.text.len()
+            2..23
         );
     }
 

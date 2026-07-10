@@ -22,7 +22,7 @@ pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element
         &document.decorations,
         &document.syntax_cache,
         highlighter::Settings {
-            token: document.syntax_token.clone(),
+            token: document.render_syntax_token().to_owned(),
             theme: settings.syntax_theme,
         },
         document.selection_set().clone(),

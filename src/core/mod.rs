@@ -11,6 +11,7 @@ pub mod workspace;
 pub use commands::{CoreCommand, EditorCommand, FileCommand, SearchCommand, SettingsCommand};
 pub use document::{
     Document, DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState,
+    MAX_FULL_DOCUMENT_ANALYSIS_BYTES,
 };
 pub use encoding::{DecodedText, EncodingError, TextEncoding, decode_bytes, encode_text};
 pub use search::{FindState, PreparedSearch, SearchError, SearchMode, SearchOptions, TextMatch};

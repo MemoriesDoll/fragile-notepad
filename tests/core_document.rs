@@ -1,4 +1,6 @@
-use fragile_notepad::core::{Document, DocumentId, TextEncoding, decode_bytes, encode_text};
+use fragile_notepad::core::{
+    Document, DocumentId, MAX_FULL_DOCUMENT_ANALYSIS_BYTES, TextEncoding, decode_bytes, encode_text,
+};
 use fragile_notepad::editor::{
     EditTransaction, EditorPosition, EditorRange, EditorSelection, SelectionSet,
 };
@@ -412,6 +414,22 @@ fn loading_document_text_index_gates_full_document_analysis_until_completion() {
             .ranges()
             .contains(&fragile_notepad::editor::FoldRange::new(0, 2))
     );
+}
+
+#[test]
+fn large_document_keeps_text_index_but_skips_unbounded_semantic_and_rich_text_work() {
+    let text = format!(
+        "fn oversized() {{\n{}\n}}\n",
+        "x".repeat(MAX_FULL_DOCUMENT_ANALYSIS_BYTES)
+    );
+    let document = Document::from_path(DocumentId::new(18), fixture_path("oversized.rs"), &text);
+
+    assert!(document.has_complete_text_index());
+    assert!(!document.can_run_full_document_analysis());
+    assert_eq!(document.syntax_token, "rs");
+    assert_eq!(document.render_syntax_token(), "txt");
+    assert!(document.folds.ranges().is_empty());
+    assert!(document.decorations.indent_guides.is_empty());
 }
 
 #[test]

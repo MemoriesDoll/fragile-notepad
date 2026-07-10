@@ -3,6 +3,7 @@ use fragile_notepad::core::{
     ShortcutCommand, ShortcutKey,
 };
 use fragile_notepad::editor::DecorationSettings;
+use std::path::PathBuf;
 
 #[test]
 fn editor_settings_defaults_enable_core_editor_decorations() {
@@ -51,6 +52,7 @@ fn editor_settings_defaults_enable_core_editor_decorations() {
             .binding(ShortcutCommand::ConvertSelectionToRectangle)
             .is_some()
     );
+    assert!(settings.open_history.is_empty());
 }
 
 #[test]
@@ -97,6 +99,73 @@ fn editor_settings_parse_xml_decoration_toggles_indentation_and_shortcuts() {
         settings.shortcuts.binding_display(ShortcutCommand::FoldAll),
         "Unassigned"
     );
+}
+
+#[test]
+fn editor_settings_parse_open_history_de_dupes_in_saved_order() {
+    let settings = EditorSettings::from_xml_str(
+        "\
+<fragile-notepad-settings version=\"1\">
+  <open-history>
+    <file path=\"/tmp/alpha.txt\" />
+    <file path=\"/tmp/beta.txt\" />
+    <file path=\"/tmp/alpha.txt\" />
+  </open-history>
+</fragile-notepad-settings>
+",
+    );
+
+    assert_eq!(
+        settings.open_history,
+        vec![
+            PathBuf::from("/tmp/alpha.txt"),
+            PathBuf::from("/tmp/beta.txt")
+        ]
+    );
+}
+
+#[test]
+fn editor_settings_record_open_history_promotes_and_trims_recent_paths() {
+    let mut settings = EditorSettings::default();
+    settings.record_open_history_path("one.txt");
+    settings.record_open_history_path("two.txt");
+    settings.record_open_history_path("one.txt");
+
+    assert_eq!(
+        settings.open_history,
+        vec![PathBuf::from("one.txt"), PathBuf::from("two.txt")]
+    );
+
+    for index in 0..(EditorSettings::MAX_OPEN_HISTORY + 2) {
+        settings.record_open_history_path(format!("recent-{index}.txt"));
+    }
+
+    assert_eq!(
+        settings.open_history.len(),
+        EditorSettings::MAX_OPEN_HISTORY
+    );
+    assert_eq!(
+        settings.open_history.first(),
+        Some(&PathBuf::from(format!(
+            "recent-{}.txt",
+            EditorSettings::MAX_OPEN_HISTORY + 1
+        )))
+    );
+    assert!(!settings.open_history.contains(&PathBuf::from("one.txt")));
+}
+
+#[test]
+fn editor_settings_round_trip_preserves_xml_escaped_open_history() {
+    let mut settings = EditorSettings::default();
+    settings.record_open_history_path("notes/A & B.txt");
+
+    let persisted = settings.to_xml_string();
+
+    assert!(persisted.contains("<open-history>"));
+    assert!(persisted.contains("path=\"notes/A &amp; B.txt\""));
+
+    let parsed = EditorSettings::from_xml_str(&persisted);
+    assert_eq!(parsed.open_history, vec![PathBuf::from("notes/A & B.txt")]);
 }
 
 #[test]

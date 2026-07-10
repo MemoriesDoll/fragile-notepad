@@ -71,4 +71,27 @@ impl ViewportModel {
                 document_line: *document_line,
             })
     }
+
+    /// Synchronizes an unfolded viewport after text has only been appended.
+    ///
+    /// Loading documents do not expose folds until their text index is
+    /// complete. Extending the identity mapping avoids rebuilding every
+    /// previously loaded line for each streamed chunk.
+    pub fn sync_unfolded_line_count(&mut self, line_count: usize) {
+        if line_count < self.line_count
+            || self.visible_lines.len() != self.line_count
+            || self.document_to_visible.len() != self.line_count
+        {
+            self.visible_lines = (0..line_count).collect();
+            self.document_to_visible = (0..line_count).map(Some).collect();
+            self.line_count = line_count;
+            return;
+        }
+
+        for line in self.line_count..line_count {
+            self.visible_lines.push(line);
+            self.document_to_visible.push(Some(line));
+        }
+        self.line_count = line_count;
+    }
 }

@@ -299,6 +299,12 @@ impl App {
             Message::SelectCurrentFunctionBody => {
                 self.update_active_editor_command(EditorAction::SelectCurrentFunctionBody)
             }
+            Message::Uppercase => self.update_active_editor_command(EditorAction::Uppercase),
+            Message::Lowercase => self.update_active_editor_command(EditorAction::Lowercase),
+            Message::TrimTrailingSpaces => {
+                self.update_active_editor_command(EditorAction::TrimTrailingSpaces)
+            }
+            Message::JoinLines => self.update_active_editor_command(EditorAction::JoinLines),
             Message::Cut => self.update_active_editor_command(EditorAction::Cut),
             Message::Copy => self.update_active_editor_command(EditorAction::Copy),
             Message::Paste => self.update_active_editor_command(EditorAction::Paste),
@@ -322,7 +328,10 @@ impl App {
             | Message::SaveFile
             | Message::SaveAllFiles
             | Message::SaveFileAs
+            | Message::SaveCopyAs
             | Message::FileSaved(_, _)
+            | Message::FileCopySaved(_, _)
+            | Message::ReloadFromDisk
             | Message::EncodingSelected(_)
             | Message::CloseFile
             | Message::CloseAllFiles
@@ -505,7 +514,7 @@ impl App {
             return;
         }
 
-        if !document.has_complete_text_index() {
+        if !document.can_run_full_document_analysis() {
             return;
         }
 

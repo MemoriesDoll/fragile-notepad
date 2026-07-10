@@ -220,6 +220,105 @@ fn load_completion_applies_matching_generation_and_clears_indexing_state() {
 }
 
 #[test]
+fn reload_from_disk_requires_saved_clean_non_loading_document() {
+    let (mut app, _) = App::new();
+
+    let _ = app.update(Message::ReloadFromDisk);
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Reload from disk requires a saved file.")
+    );
+
+    let document_id = app.workspace.active_document_id;
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.set_path("note.txt");
+        document.mark_dirty();
+    }
+
+    let _ = app.update(Message::ReloadFromDisk);
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Save changes before reloading from disk.")
+    );
+
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.mark_clean();
+        document.load_state = crate::core::DocumentLoadState::Loading {
+            generation: crate::core::DocumentLoadGeneration::next(),
+            bytes_read: 0,
+            total_bytes: None,
+        };
+    }
+
+    let _ = app.update(Message::ReloadFromDisk);
+    assert_eq!(
+        app.file_status.as_deref(),
+        Some("Finish loading before reloading.")
+    );
+}
+
+#[test]
+fn reload_from_disk_reuses_active_document_and_chunked_completion() {
+    let (mut app, _) = App::new();
+    let document_id = app.workspace.active_document_id;
+    let path = PathBuf::from("note.txt");
+
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.set_path(path.clone());
+        document.buffer = crate::editor::EditorBuffer::from_text("old body");
+        document.refresh_after_text_change();
+        document.mark_clean();
+    }
+
+    let _ = app.update(Message::ReloadFromDisk);
+    let generation = app
+        .workspace
+        .document(document_id)
+        .expect("document")
+        .load_generation()
+        .expect("reload generation");
+
+    assert_eq!(app.workspace.active_document_id, document_id);
+    assert!(app.is_loading);
+    assert_eq!(
+        app.workspace
+            .document(document_id)
+            .expect("document")
+            .text(),
+        ""
+    );
+
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation,
+        path: path.clone(),
+        text: Arc::new("new body".to_owned()),
+        reset: false,
+        bytes_read: 8,
+        total_bytes: Some(8),
+    }));
+    let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
+        document_id,
+        generation,
+        path: path.clone(),
+        encoding: crate::core::TextEncoding::Utf8,
+        had_errors: false,
+        fallback_contents: None,
+        bytes_read: 8,
+        total_bytes: Some(8),
+    })));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.path.as_deref(), Some(path.as_path()));
+    assert_eq!(document.text(), "new body");
+    assert!(!document.is_dirty);
+    assert!(!app.is_loading);
+}
+
+#[test]
 fn failed_load_sets_status_without_leaving_document_indexing() {
     let mut app = App::new().0;
     let (document_id, generation) = app.workspace.insert_loading_file("missing.txt");
@@ -493,6 +592,71 @@ fn save_completion_does_not_mark_clean_after_encoding_changes() {
             .expect("document")
             .is_dirty
     );
+}
+
+#[test]
+fn save_copy_as_starts_pending_snapshot_without_changing_document() {
+    let (mut app, _) = App::new();
+    let document_id = app.workspace.active_document_id;
+    let original_path = PathBuf::from("note.txt");
+
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.set_path(original_path.clone());
+        document.buffer = crate::editor::EditorBuffer::from_text("copy body");
+        document.refresh_after_text_change();
+        document.mark_dirty();
+    }
+
+    let _ = app.update(Message::SaveCopyAs);
+
+    let request = app
+        .pending_save
+        .as_ref()
+        .expect("save copy should create pending request");
+    assert_eq!(request.document_id, document_id);
+    assert_eq!(request.snapshot.as_ref().as_slice(), b"copy body\n");
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.path.as_deref(), Some(original_path.as_path()));
+    assert!(document.is_dirty);
+}
+
+#[test]
+fn save_copy_completion_preserves_document_path_and_dirty_state() {
+    let (mut app, _) = App::new();
+    let document_id = app.workspace.active_document_id;
+    let original_path = PathBuf::from("note.txt");
+
+    {
+        let document = app.workspace.document_mut(document_id).expect("document");
+        document.set_path(original_path.clone());
+        document.buffer = crate::editor::EditorBuffer::from_text("copy body");
+        document.refresh_after_text_change();
+        document.mark_dirty();
+    }
+
+    let request = app
+        .workspace
+        .document(document_id)
+        .map(|document| SaveRequest {
+            document_id,
+            revision: document.revision(),
+            snapshot: Arc::new(document.bytes_for_save().expect("snapshot")),
+        })
+        .expect("document");
+    app.pending_save = Some(request.clone());
+
+    let _ = app.update(Message::FileCopySaved(
+        request,
+        Ok(PathBuf::from("copy.txt")),
+    ));
+
+    let document = app.workspace.document(document_id).expect("document");
+    assert_eq!(document.path.as_deref(), Some(original_path.as_path()));
+    assert!(document.is_dirty);
+    assert!(app.pending_save.is_none());
+    assert_eq!(app.file_status.as_deref(), Some("Saved copy: copy.txt"));
 }
 
 #[test]

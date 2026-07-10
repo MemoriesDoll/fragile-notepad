@@ -15,6 +15,7 @@ use crate::editor::viewport::ViewportModel;
 use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING};
 
 const LINE_GEOMETRY_CACHE_MINIMUM: usize = 256;
+const MAX_MEASURED_LINE_BYTES: usize = 4 * 1024;
 
 #[derive(Debug)]
 pub(super) struct LineGeometryCache<Paragraph> {
@@ -297,7 +298,7 @@ where
             };
         }
 
-        if text.contains('\t') {
+        if text.contains('\t') || requires_fallback_geometry(text) {
             return Self::Tabular {
                 text: text.to_owned(),
                 character_width: metrics.character_width,
@@ -398,28 +399,14 @@ where
             }
         }
     }
-
-    pub(super) fn width(&self, tab_width: usize) -> f32 {
-        match self {
-            Self::Fast {
-                text,
-                character_width,
-            }
-            | Self::Tabular {
-                text,
-                character_width,
-            } => visual_column_for(text, text.len(), tab_width) as f32 * character_width,
-            Self::Measured {
-                text, paragraph, ..
-            } => paragraph
-                .min_width()
-                .max(self.x_for_byte_column(text.len(), tab_width)),
-        }
-    }
 }
 
 fn can_use_fast_geometry(text: &str) -> bool {
     text.bytes().all(|byte| byte.is_ascii())
+}
+
+fn requires_fallback_geometry(text: &str) -> bool {
+    text.len() > MAX_MEASURED_LINE_BYTES || text.chars().any(char::is_control)
 }
 
 fn fallback_x_for_byte_column(
@@ -537,5 +524,14 @@ mod tests {
             38,
             "second scroll frame should reuse 36 of 37 row geometries"
         );
+    }
+
+    #[test]
+    fn long_or_control_heavy_unicode_lines_skip_full_paragraph_measurement() {
+        assert!(!requires_fallback_geometry("caf\u{00e9}"));
+        assert!(requires_fallback_geometry("caf\u{00e9}\0"));
+        assert!(requires_fallback_geometry(
+            &"\u{00e9}".repeat(MAX_MEASURED_LINE_BYTES)
+        ));
     }
 }

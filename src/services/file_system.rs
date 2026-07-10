@@ -71,8 +71,23 @@ pub fn save_file_as(
     window: &dyn iced::Window,
     contents: Vec<u8>,
 ) -> impl Future<Output = FileSaveResult> + use<> {
+    save_file_with_dialog(window, contents, "Save text file...")
+}
+
+pub fn save_file_copy_as(
+    window: &dyn iced::Window,
+    contents: Vec<u8>,
+) -> impl Future<Output = FileSaveResult> + use<> {
+    save_file_with_dialog(window, contents, "Save a copy as...")
+}
+
+fn save_file_with_dialog(
+    window: &dyn iced::Window,
+    contents: Vec<u8>,
+    title: &'static str,
+) -> impl Future<Output = FileSaveResult> + use<> {
     let dialog = rfd::AsyncFileDialog::new()
-        .set_title("Save text file...")
+        .set_title(title)
         .set_parent(&window);
 
     async move {

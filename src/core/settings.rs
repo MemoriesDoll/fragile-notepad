@@ -3,6 +3,8 @@ use iced::highlighter;
 use crate::core::shortcuts::{KeyBinding, ShortcutCommand, ShortcutMap};
 use crate::editor::DecorationSettings;
 
+use std::path::{Path, PathBuf};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppearanceMode {
     System,
@@ -61,9 +63,11 @@ pub struct EditorSettings {
     pub syntax_theme: highlighter::Theme,
     pub decorations: DecorationSettings,
     pub shortcuts: ShortcutMap,
+    pub open_history: Vec<PathBuf>,
 }
 
 impl EditorSettings {
+    pub const MAX_OPEN_HISTORY: usize = 16;
     pub const DEFAULT_ZOOM: f32 = 1.0;
     pub const MIN_ZOOM: f32 = 0.5;
     pub const MAX_ZOOM: f32 = 3.0;
@@ -161,6 +165,38 @@ impl EditorSettings {
         self.decorations.show_folding_controls = show_folding_controls;
     }
 
+    pub fn record_open_history_path(&mut self, path: impl Into<PathBuf>) -> bool {
+        let path = path.into();
+        if path.as_os_str().is_empty() {
+            return false;
+        }
+
+        let before = self.open_history.clone();
+        self.open_history.retain(|existing| existing != &path);
+        self.open_history.insert(0, path);
+        self.open_history.truncate(Self::MAX_OPEN_HISTORY);
+
+        self.open_history != before
+    }
+
+    fn set_open_history<I>(&mut self, paths: I)
+    where
+        I: IntoIterator<Item = PathBuf>,
+    {
+        self.open_history.clear();
+
+        for path in paths {
+            if self.open_history.len() >= Self::MAX_OPEN_HISTORY {
+                break;
+            }
+            if path.as_os_str().is_empty() || self.open_history.iter().any(|entry| entry == &path) {
+                continue;
+            }
+
+            self.open_history.push(path);
+        }
+    }
+
     pub fn to_xml_string(&self) -> String {
         let mut shortcuts = XmlElement::new("shortcuts");
         for entry in self.shortcuts.entries() {
@@ -170,6 +206,12 @@ impl EditorSettings {
                 shortcut = shortcut.attribute("binding", binding.persisted());
             }
             shortcuts.push_child(shortcut);
+        }
+
+        let mut open_history = XmlElement::new("open-history");
+        for path in &self.open_history {
+            open_history
+                .push_child(XmlElement::new("file").attribute("path", persisted_path(path)));
         }
 
         XmlElement::new("fragile-notepad-settings")
@@ -183,6 +225,7 @@ impl EditorSettings {
                     )
                     .attribute("syntax-theme", self.syntax_theme.to_string()),
             )
+            .child(open_history)
             .child(
                 XmlElement::new("editor")
                     .attribute("word-wrap", self.word_wrap)
@@ -312,6 +355,15 @@ impl EditorSettings {
             settings.shortcuts = shortcut_map;
         }
 
+        if let Some(open_history) = child(root, "open-history") {
+            let paths = open_history
+                .children()
+                .filter(|node| node.has_tag_name("file"))
+                .filter_map(|node| node.attribute("path"))
+                .map(PathBuf::from);
+            settings.set_open_history(paths);
+        }
+
         settings
     }
 }
@@ -331,8 +383,13 @@ impl Default for EditorSettings {
                 ..DecorationSettings::default()
             },
             shortcuts: ShortcutMap::default(),
+            open_history: Vec::new(),
         }
     }
+}
+
+fn persisted_path(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 fn child<'a, 'input>(

@@ -61,7 +61,7 @@ impl EditorBuffer {
     }
 
     pub fn position_for_byte_offset(&self, byte_offset: usize) -> Option<EditorPosition> {
-        if byte_offset > self.byte_len() {
+        if byte_offset > self.len_bytes() {
             return None;
         }
 
@@ -81,6 +81,10 @@ impl EditorBuffer {
 
     pub fn line_count(&self) -> usize {
         self.line_starts.len()
+    }
+
+    pub fn len_bytes(&self) -> usize {
+        self.rope.len_bytes()
     }
 
     pub fn line(&self, index: usize) -> Option<String> {
@@ -123,8 +127,30 @@ impl EditorBuffer {
     }
 
     pub fn append_text(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+
+        let byte_len = self.rope.len_bytes();
+        let can_extend_line_index = byte_len > 0
+            && !matches!(self.rope.byte(byte_len - 1), b'\r' | b'\n')
+            && !text
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| matches!(byte, b'\r' | b'\n'));
+
         self.rope.insert(self.rope.len_chars(), text);
-        self.rebuild_line_starts();
+
+        if can_extend_line_index {
+            self.line_starts.extend(
+                line_starts(text)
+                    .into_iter()
+                    .skip(1)
+                    .map(|offset| byte_len.saturating_add(offset)),
+            );
+        } else {
+            self.rebuild_line_starts();
+        }
     }
 
     pub fn clamp_position(&self, position: EditorPosition) -> EditorPosition {
@@ -161,10 +187,6 @@ impl EditorBuffer {
             .saturating_add(position.column)
     }
 
-    fn byte_len(&self) -> usize {
-        self.rope.len_bytes()
-    }
-
     fn char_offset(&self, position: EditorPosition) -> usize {
         let position = self.clamp_position(position);
         let line_start_byte = self.line_starts.get(position.line).copied().unwrap_or(0);
@@ -186,7 +208,7 @@ impl EditorBuffer {
     }
 
     fn is_inside_paired_line_ending(&self, byte_offset: usize) -> bool {
-        if byte_offset == 0 || byte_offset >= self.byte_len() {
+        if byte_offset == 0 || byte_offset >= self.len_bytes() {
             return false;
         }
 

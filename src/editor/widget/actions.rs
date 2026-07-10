@@ -20,6 +20,10 @@ pub enum EditorAction {
     DeleteLine,
     CopyLine,
     CutLine,
+    Uppercase,
+    Lowercase,
+    TrimTrailingSpaces,
+    JoinLines,
     ScrollLines(i32),
     ScrollToRow(usize),
     ToggleFold(FoldRange),
@@ -64,6 +68,10 @@ impl EditorAction {
                 | Self::DuplicateLine
                 | Self::DeleteLine
                 | Self::CutLine
+                | Self::Uppercase
+                | Self::Lowercase
+                | Self::TrimTrailingSpaces
+                | Self::JoinLines
                 | Self::Cut
                 | Self::Paste
                 | Self::Undo

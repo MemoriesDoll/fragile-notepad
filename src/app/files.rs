@@ -1,6 +1,6 @@
 use iced::{Task, window};
 
-use crate::core::DocumentId;
+use crate::core::{DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState};
 use crate::message::{
     DirtyCloseDecision, FileError, FileLoadChunk, FileLoadFailure, FileLoadFinished,
     FileLoadProgress, FileLoadRequest, FileOpenResult, FileResult, FileSaveResult, Message,
@@ -117,7 +117,17 @@ impl App {
                 self.file_status = None;
                 self.save_active(true)
             }
+            Message::SaveCopyAs => {
+                self.active_menu = None;
+                self.file_status = None;
+                self.save_copy_active()
+            }
             Message::FileSaved(request, result) => self.save_done(request, result),
+            Message::FileCopySaved(request, result) => self.save_copy_done(request, result),
+            Message::ReloadFromDisk => {
+                self.active_menu = None;
+                self.reload_active_from_disk()
+            }
             Message::EncodingSelected(encoding) => {
                 self.active_menu = None;
                 if let Some(document) = self.workspace.active_document_mut() {
@@ -180,6 +190,7 @@ impl App {
         let task = match result {
             Ok(opened) => {
                 self.file_status = None;
+                let opened_path = opened.path.clone();
                 let document_id =
                     if let Some(document_id) = self.loading_document_id_for_path(&opened.path) {
                         if let Some(document) = self.workspace.document_mut(document_id)
@@ -198,7 +209,10 @@ impl App {
                 }
                 self.refresh_find_matches();
                 self.prewarm_active_syntax_cache();
-                self.schedule_outline_parse(document_id)
+                Task::batch([
+                    self.schedule_outline_parse(document_id),
+                    self.record_open_history_and_cache(opened_path),
+                ])
             }
             Err(error) => {
                 self.file_status = Some(format!("Open failed: {}", error.summary()));
@@ -250,6 +264,51 @@ impl App {
         })
     }
 
+    fn reload_active_from_disk(&mut self) -> Task<Message> {
+        let document_id = self.workspace.active_document_id;
+        let Some(document) = self.workspace.document(document_id) else {
+            return Task::none();
+        };
+
+        let Some(path) = document.path.clone() else {
+            self.file_status = Some(String::from("Reload from disk requires a saved file."));
+            return Task::none();
+        };
+
+        if document.is_dirty {
+            self.file_status = Some(String::from("Save changes before reloading from disk."));
+            return Task::none();
+        }
+
+        if document.is_loading_or_indexing() {
+            self.file_status = Some(String::from("Finish loading before reloading."));
+            return Task::none();
+        }
+
+        let generation = DocumentLoadGeneration::next();
+        if let Some(document) = self.workspace.document_mut(document_id) {
+            document.load_state = DocumentLoadState::Loading {
+                generation,
+                bytes_read: 0,
+                total_bytes: None,
+            };
+            document.index_state = DocumentIndexState::Pending { generation };
+            let _ = document.replace_loading_preview(generation, "", true, 0, None);
+        }
+
+        self.is_loading = true;
+        self.file_status = None;
+        self.refresh_find_matches();
+        self.prewarm_active_syntax_cache();
+
+        services::load_file_request(FileLoadRequest {
+            document_id,
+            generation,
+            path,
+            chunk_size: services::DEFAULT_CHUNK_SIZE,
+        })
+    }
+
     fn load_progress(&mut self, progress: FileLoadProgress) -> Task<Message> {
         let Some(document) = self.workspace.document_mut(progress.document_id) else {
             return Task::none();
@@ -290,6 +349,7 @@ impl App {
     ) -> Task<Message> {
         let task = match result {
             Ok(finished) => {
+                let opened_path = finished.path.clone();
                 let Some(document) = self.workspace.document_mut(finished.document_id) else {
                     self.refresh_file_loading_state();
                     return Task::none();
@@ -309,7 +369,10 @@ impl App {
                 self.file_status = None;
                 self.refresh_find_matches();
                 self.prewarm_active_syntax_cache();
-                self.schedule_outline_parse(finished.document_id)
+                Task::batch([
+                    self.schedule_outline_parse(finished.document_id),
+                    self.record_open_history_and_cache(opened_path),
+                ])
             }
             Err(failure) => self.load_failed(failure),
         };
@@ -333,6 +396,49 @@ impl App {
     fn save_active(&mut self, force_save_as: bool) -> Task<Message> {
         self.pending_save_all.clear();
         self.save_one(self.workspace.active_document_id, force_save_as)
+    }
+
+    fn save_copy_active(&mut self) -> Task<Message> {
+        if self.pending_save.is_some() {
+            return Task::none();
+        }
+
+        let Some(document) = self.workspace.active_document() else {
+            return Task::none();
+        };
+        if document.is_loading_or_indexing() {
+            self.file_status = Some(String::from("Finish loading before saving."));
+            return Task::none();
+        }
+        let snapshot = match document.bytes_for_save() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.file_status = Some(format!(
+                    "Save copy failed: {}",
+                    FileError::Encoding(error).summary()
+                ));
+                return Task::none();
+            }
+        };
+
+        let request = SaveRequest {
+            document_id: document.id,
+            revision: document.revision(),
+            snapshot: Arc::new(snapshot),
+        };
+        self.pending_save = Some(request.clone());
+        let contents = request.snapshot.as_ref().clone();
+
+        window::oldest()
+            .and_then(move |id| {
+                let contents = contents.clone();
+
+                window::run(id, move |window| {
+                    services::file_system::save_file_copy_as(window, contents)
+                })
+            })
+            .then(Task::future)
+            .map(move |result| Message::FileCopySaved(request.clone(), result))
     }
 
     fn save_all_documents(&mut self) -> Task<Message> {
@@ -424,6 +530,7 @@ impl App {
         match result {
             Ok(path) => {
                 self.file_status = None;
+                let saved_path = path.clone();
                 let mut syntax_changed = false;
                 if let Some(document) = self.workspace.document_mut(request.document_id) {
                     let before_revision = document.revision();
@@ -440,6 +547,7 @@ impl App {
                 if syntax_changed {
                     tasks.push(self.schedule_outline_parse(request.document_id));
                 }
+                tasks.push(self.record_open_history_and_cache(saved_path));
             }
             Err(error) => {
                 self.file_status = Some(format!("Save failed: {}", error.summary()));
@@ -483,6 +591,21 @@ impl App {
         }
 
         Task::batch(tasks)
+    }
+
+    fn save_copy_done(&mut self, _request: SaveRequest, result: FileSaveResult) -> Task<Message> {
+        self.pending_save = None;
+
+        match result {
+            Ok(path) => {
+                self.file_status = Some(format!("Saved copy: {}", path.display()));
+            }
+            Err(error) => {
+                self.file_status = Some(format!("Save copy failed: {}", error.summary()));
+            }
+        }
+
+        Task::none()
     }
 
     fn close_request(&mut self, document_id: DocumentId) -> Task<Message> {
@@ -643,5 +766,18 @@ impl App {
             .iter()
             .find(|document| document.is_loading() && document.path.as_deref() == Some(path))
             .map(|document| document.id)
+    }
+
+    fn record_open_history_and_cache(&mut self, path: PathBuf) -> Task<Message> {
+        let settings_task = if self.settings.record_open_history_path(path.clone()) {
+            self.settings_dialog.draft.open_history = self.settings.open_history.clone();
+            self.persist_settings()
+        } else {
+            Task::none()
+        };
+
+        let cache_task = Task::perform(services::update_small_file_cache(path), |_| Message::None);
+
+        Task::batch([settings_task, cache_task])
     }
 }

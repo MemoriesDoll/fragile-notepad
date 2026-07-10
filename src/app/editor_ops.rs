@@ -223,6 +223,116 @@ pub(super) fn delete_line(document: &mut crate::core::Document) -> bool {
     replace_document_range(document, range, "", after_selection)
 }
 
+pub(super) fn uppercase_selection(document: &mut crate::core::Document, tab_width: usize) -> bool {
+    transform_selected_text(document, tab_width, |text| text.to_uppercase())
+}
+
+pub(super) fn lowercase_selection(document: &mut crate::core::Document, tab_width: usize) -> bool {
+    transform_selected_text(document, tab_width, |text| text.to_lowercase())
+}
+
+fn transform_selected_text(
+    document: &mut crate::core::Document,
+    tab_width: usize,
+    transform: impl Fn(&str) -> String,
+) -> bool {
+    let before_selection_set = document.selection_set().clone();
+
+    if selection_set_is_all_carets(&before_selection_set, &document.buffer, tab_width) {
+        return false;
+    }
+
+    let mut replacements = Vec::new();
+    for (source_index, line) in concrete_selected_lines(document, &before_selection_set, tab_width)
+        .into_iter()
+        .enumerate()
+    {
+        let range = document.buffer.clamp_range(line.range());
+        if range.is_empty() {
+            continue;
+        }
+
+        let before = document.buffer.slice_text(range);
+        let replacement = transform(&before);
+        if replacement == before {
+            continue;
+        }
+
+        replacements.push(ConcreteReplacement {
+            range,
+            replacement,
+            source_index,
+            main_preferred: line.selection() == before_selection_set.main(),
+        });
+    }
+
+    apply_concrete_replacements(document, before_selection_set, replacements, false)
+}
+
+pub(super) fn trim_trailing_spaces(document: &mut crate::core::Document, tab_width: usize) -> bool {
+    let before_selection_set = document.selection_set().clone();
+    let lines = selected_lines_for_selection_set(document, &before_selection_set, tab_width);
+    let mut replacements = Vec::new();
+
+    for (source_index, line) in lines.into_iter().enumerate() {
+        let Some(text) = document.buffer.line(line) else {
+            continue;
+        };
+        let trimmed = text.trim_end_matches(is_ascii_space_or_tab);
+        if trimmed.len() == text.len() {
+            continue;
+        }
+
+        replacements.push(ConcreteReplacement {
+            range: EditorRange::new(
+                EditorPosition::new(line, trimmed.len()),
+                EditorPosition::new(line, text.len()),
+            ),
+            replacement: String::new(),
+            source_index,
+            main_preferred: line == before_selection_set.main().cursor.line,
+        });
+    }
+
+    apply_concrete_replacements(document, before_selection_set, replacements, false)
+}
+
+pub(super) fn join_lines(document: &mut crate::core::Document) -> bool {
+    let selection = document.main_selection();
+    let (first_line, last_line) = if selection.is_caret() {
+        let line = document.buffer.clamp_position(selection.cursor).line;
+        if line + 1 >= document.buffer.line_count() {
+            return false;
+        }
+
+        (line, line + 1)
+    } else {
+        let Some((first_line, last_line)) = selected_line_span(&document.buffer, selection) else {
+            return false;
+        };
+
+        (first_line, last_line)
+    };
+
+    if first_line >= last_line {
+        return false;
+    }
+
+    let replacement = joined_line_text(&document.buffer, first_line, last_line);
+    let range = EditorRange::new(
+        EditorPosition::new(first_line, 0),
+        line_end(&document.buffer, last_line),
+    );
+    let after = EditorPosition::new(first_line, replacement.len());
+
+    replace_document_range(
+        document,
+        range,
+        &replacement,
+        EditorSelection::new(after, after),
+    )
+}
+
 pub(super) fn replace_selection_for_search(
     document: &mut crate::core::Document,
     replacement: &str,
@@ -381,6 +491,37 @@ fn selected_line_span(buffer: &EditorBuffer, selection: EditorSelection) -> Opti
     (first_line <= last_line).then_some((first_line, last_line))
 }
 
+fn selected_lines_for_selection_set(
+    document: &crate::core::Document,
+    selection_set: &SelectionSet,
+    tab_width: usize,
+) -> Vec<usize> {
+    let mut lines = Vec::new();
+
+    if selection_set_is_all_carets(selection_set, &document.buffer, tab_width) {
+        lines.extend(
+            selection_set
+                .ranges()
+                .iter()
+                .map(|selection| document.buffer.clamp_position(selection.cursor).line),
+        );
+    } else {
+        for selection in selection_set.ranges() {
+            let Some((first_line, last_line)) =
+                selected_line_span(&document.buffer, selection.selection())
+            else {
+                continue;
+            };
+
+            lines.extend(first_line..=last_line);
+        }
+    }
+
+    lines.sort_unstable();
+    lines.dedup();
+    lines
+}
+
 fn selected_touched_line_range(
     buffer: &EditorBuffer,
     selection: EditorSelection,
@@ -457,6 +598,29 @@ fn document_line_ending(document: &crate::core::Document) -> String {
         .map(|ending| ending.as_str())
         .unwrap_or("\n")
         .to_owned()
+}
+
+fn joined_line_text(buffer: &EditorBuffer, first_line: usize, last_line: usize) -> String {
+    let mut lines = Vec::new();
+
+    for line in first_line..=last_line {
+        let text = buffer.line(line).unwrap_or_default();
+        let text = if line == first_line {
+            text.trim_end_matches(is_ascii_space_or_tab)
+        } else if line == last_line {
+            text.trim_start_matches(is_ascii_space_or_tab)
+        } else {
+            text.trim_matches(is_ascii_space_or_tab)
+        };
+
+        lines.push(text.to_owned());
+    }
+
+    lines.join(" ")
+}
+
+fn is_ascii_space_or_tab(ch: char) -> bool {
+    matches!(ch, ' ' | '\t')
 }
 
 fn concrete_selected_lines(
