@@ -116,25 +116,43 @@ impl App {
                 ])
             }
             Message::SettingsLoaded(result) => {
+                self.settings_loaded = true;
+                if let Err(error) = &result {
+                    self.settings_read_failed = true;
+                    self.file_status = Some(format!(
+                        "Settings could not be read: {}. The existing settings file will be preserved.",
+                        error.summary()
+                    ));
+                }
+                let mut tasks = Vec::new();
                 if let Ok(Some(settings)) = result {
-                    self.settings = settings;
+                    self.settings = super::session::merge_initial_settings(
+                        &self.settings,
+                        settings,
+                        self.initial_settings_edits,
+                    );
                     self.settings_dialog.reset_from(&self.settings);
                     self.apply_decorations();
                     self.prewarm_active_syntax_cache();
 
                     if super::rendering::startup_gpu_boost_requested(&self.settings) {
                         if self.main_window_opened {
-                            return self.request_gpu_boost();
+                            tasks.push(self.request_gpu_boost());
+                        } else {
+                            self.pending_startup_gpu_boost = true;
                         }
-
-                        self.pending_startup_gpu_boost = true;
                     }
                 }
 
-                Task::none()
+                tasks.push(self.restore_startup());
+                if self.settings_dirty {
+                    tasks.push(self.persist_settings());
+                }
+                Task::batch(tasks)
             }
             Message::SettingsPersisted(result) => {
                 if let Err(error) = result {
+                    self.settings_dirty = true;
                     self.file_status = Some(format!("Settings save failed: {}", error.summary()));
                 }
 
@@ -292,7 +310,26 @@ impl App {
         self.close_settings_window()
     }
 
-    pub(super) fn persist_settings(&self) -> Task<Message> {
+    pub(super) fn persist_settings(&mut self) -> Task<Message> {
+        self.settings_dirty = true;
+        if !self.settings_loaded || self.settings_read_failed || self.settings_flush_scheduled {
+            return Task::none();
+        }
+        self.settings_flush_scheduled = true;
+        Task::perform(
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            },
+            |_| Message::SettingsFlush,
+        )
+    }
+
+    pub(super) fn flush_settings(&mut self) -> Task<Message> {
+        self.settings_flush_scheduled = false;
+        if !self.settings_dirty || !self.settings_loaded || self.settings_read_failed {
+            return Task::none();
+        }
+        self.settings_dirty = false;
         Task::perform(
             services::save_settings(self.settings.clone()),
             Message::SettingsPersisted,

@@ -1,6 +1,111 @@
 use super::test_support::*;
 
 #[test]
+fn navigation_keeps_caret_visible_without_scrolling_visible_moves() {
+    let (mut app, _) = App::new();
+    let id = app.workspace.active_document_id;
+    let text = (0..100).map(|_| "line").collect::<Vec<_>>().join("\n");
+    set_active_document_text(
+        &mut app,
+        &text,
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::ViewportChanged {
+            visible_rows: 10,
+            text_width: 640,
+            character_width_milli: 8000,
+        },
+    ));
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::MoveCaret(crate::editor::CaretMotion::Down),
+    ));
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .scroll
+            .first_visible_row,
+        0
+    );
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::MoveCaret(crate::editor::CaretMotion::DocumentEnd),
+    ));
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.main_selection().cursor, EditorPosition::new(99, 4));
+    assert!(document.scroll.first_visible_row <= 99 && document.scroll.first_visible_row + 10 > 99);
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::MoveCaret(crate::editor::CaretMotion::DocumentStart),
+    ));
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .scroll
+            .first_visible_row,
+        0
+    );
+}
+
+#[test]
+fn vertical_navigation_preserves_visual_columns_across_utf8_and_tabs() {
+    let (mut app, _) = App::new();
+    let id = app.workspace.active_document_id;
+    set_active_document_text(
+        &mut app,
+        "éé\nabcd\n\tend\nabcdef",
+        EditorSelection::new(EditorPosition::new(0, 4), EditorPosition::new(0, 4)),
+    );
+    for expected in [
+        EditorPosition::new(1, 2),
+        EditorPosition::new(2, 0),
+        EditorPosition::new(3, 2),
+    ] {
+        let _ = app.update(Message::EditorAction(
+            id,
+            EditorAction::MoveCaret(crate::editor::CaretMotion::Down),
+        ));
+        assert_eq!(
+            app.workspace
+                .active_document()
+                .unwrap()
+                .main_selection()
+                .cursor,
+            expected
+        );
+    }
+}
+
+#[test]
+fn indent_shortcut_and_editor_action_preserve_multiline_selection() {
+    for shortcut in [false, true] {
+        let (mut app, _) = App::new();
+        let id = app.workspace.active_document_id;
+        app.settings.indentation = IndentationMode::Spaces(2);
+        set_active_document_text(
+            &mut app,
+            "one\ntwo",
+            EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(1, 3)),
+        );
+        if shortcut {
+            let _ = app.update_shortcut(crate::core::ShortcutCommand::Indent);
+        } else {
+            let _ = app.update(Message::EditorAction(id, EditorAction::Indent));
+        }
+        assert_eq!(
+            app.workspace.active_document().unwrap().text(),
+            "  one\n  two"
+        );
+        let _ = app.update(Message::Undo);
+        assert_eq!(app.workspace.active_document().unwrap().text(), "one\ntwo");
+    }
+}
+
+#[test]
 fn editor_tab_action_inserts_configured_indentation() {
     let (mut app, _) = App::new();
     let document_id = app.workspace.active_document_id;

@@ -70,6 +70,7 @@ pub struct AdvancedEditor<'a, Message> {
     metrics: EditorMetrics,
     scroll: ScrollOffset,
     scroll_speed: f32,
+    viewport_key: u64,
     shortcuts: &'a ShortcutMap,
     width: Length,
     height: Length,
@@ -97,6 +98,7 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
             metrics: EditorMetrics::default(),
             scroll: ScrollOffset::ZERO,
             scroll_speed: 1.5,
+            viewport_key: 0,
             shortcuts: &DEFAULT_SHORTCUTS,
             width: Length::Fill,
             height: Length::Fill,
@@ -106,6 +108,11 @@ impl<'a, Message> AdvancedEditor<'a, Message> {
 
     pub fn id(mut self, id: impl Into<widget::Id>) -> Self {
         self.id = Some(id.into());
+        self
+    }
+
+    pub fn viewport_key(mut self, key: u64) -> Self {
+        self.viewport_key = key;
         self
     }
 
@@ -356,6 +363,7 @@ where
                 metrics: self.metrics,
                 scroll: self.scroll,
                 scroll_speed: self.scroll_speed,
+                viewport_key: self.viewport_key,
                 shortcuts: self.shortcuts,
                 on_action: &*self.on_action,
             },

@@ -12,7 +12,7 @@ fn loading_file_is_inserted_before_chunks_finish() {
         .active_document()
         .expect("loading file should be active immediately");
 
-    assert_eq!(document.path.as_deref(), Some(path.as_path()));
+    assert_eq!(document.path, Some(std::path::absolute(path).unwrap()));
     assert!(document.is_loading_or_indexing());
     assert_eq!(document.buffer.text(), "");
     assert!(app.is_loading);
@@ -288,7 +288,7 @@ fn reload_from_disk_reuses_active_document_and_chunked_completion() {
             .document(document_id)
             .expect("document")
             .text(),
-        ""
+        "old body"
     );
 
     let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
@@ -338,6 +338,118 @@ fn failed_load_sets_status_without_leaving_document_indexing() {
 }
 
 #[test]
+fn failed_reload_preserves_original_text_history_and_save_snapshot() {
+    let mut app = App::new().0;
+    let document_id = app.workspace.active_document_id;
+    let path = PathBuf::from("reload.txt");
+    let _ = app.update(Message::EditorAction(
+        document_id,
+        crate::editor::EditorAction::InsertText("original".to_owned()),
+    ));
+    let document = app.workspace.document_mut(document_id).expect("document");
+    document.set_path(path.clone());
+    document.mark_clean();
+    let original_history = document.history.clone();
+    let original_bytes = document.bytes_for_save().expect("snapshot");
+
+    let _ = app.update(Message::ReloadFromDisk);
+    let generation = app
+        .workspace
+        .document(document_id)
+        .unwrap()
+        .load_generation()
+        .unwrap();
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation,
+        path: path.clone(),
+        text: Arc::new("partial".into()),
+        reset: false,
+        bytes_read: 7,
+        total_bytes: Some(20),
+    }));
+    assert_eq!(
+        app.workspace.document(document_id).unwrap().text(),
+        "original"
+    );
+    let _ = app.update(Message::FileLoadFinished(Err(FileLoadFailure {
+        document_id,
+        generation,
+        path,
+        error: crate::message::FileError::Io(std::io::ErrorKind::UnexpectedEof),
+    })));
+    let document = app.workspace.document(document_id).unwrap();
+    assert_eq!(document.text(), "original");
+    assert_eq!(document.history, original_history);
+    assert_eq!(document.bytes_for_save().unwrap(), original_bytes);
+    assert!(!document.is_loading_or_indexing());
+    assert!(!document.is_dirty);
+    assert!(app.pending_reloads.is_empty());
+}
+
+#[test]
+fn failed_initial_load_blocks_save_and_save_copy() {
+    let mut app = App::new().0;
+    let path = PathBuf::from("partial.txt");
+    let (document_id, generation) = app.workspace.insert_loading_file(path.clone());
+    let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
+        document_id,
+        generation,
+        path: path.clone(),
+        text: Arc::new("partial".into()),
+        reset: false,
+        bytes_read: 7,
+        total_bytes: Some(20),
+    }));
+    let _ = app.update(Message::FileLoadFinished(Err(FileLoadFailure {
+        document_id,
+        generation,
+        path,
+        error: crate::message::FileError::Io(std::io::ErrorKind::UnexpectedEof),
+    })));
+    for message in [Message::SaveFile, Message::SaveFileAs, Message::SaveCopyAs] {
+        let _ = app.update(message);
+        assert!(app.pending_save.is_none());
+        assert_eq!(
+            app.file_status.as_deref(),
+            Some("Reload the file successfully before saving.")
+        );
+    }
+}
+
+#[test]
+fn undo_during_save_cannot_keep_the_previous_clean_checkpoint() {
+    let mut app = App::new().0;
+    let document_id = app.workspace.active_document_id;
+    let path = PathBuf::from("save-race.txt");
+    let _ = app.update(Message::EditorAction(
+        document_id,
+        crate::editor::EditorAction::InsertText("a".to_owned()),
+    ));
+    let document = app.workspace.document_mut(document_id).unwrap();
+    document.set_path(path.clone());
+    document.mark_clean();
+    let _ = app.update(Message::EditorAction(
+        document_id,
+        crate::editor::EditorAction::InsertText("b".to_owned()),
+    ));
+    let _ = app.update(Message::SaveFile);
+    let request = app.pending_save.clone().expect("pending save");
+    let _ = app.update(Message::Undo);
+    assert!(!app.workspace.document(document_id).unwrap().is_dirty);
+    let _ = app.update(Message::CloseFile);
+    assert!(app.workspace.document(document_id).is_some());
+    let _ = app.update(Message::FileSaved(request, Ok(path)));
+    assert_eq!(app.workspace.document(document_id).unwrap().text(), "a");
+    assert!(app.workspace.document(document_id).unwrap().is_dirty);
+    let _ = app.update(Message::Redo);
+    let _ = app.update(Message::Undo);
+    assert!(app.workspace.document(document_id).unwrap().is_dirty);
+    let _ = app.update(Message::CloseFile);
+    assert_eq!(app.pending_dirty_close, Some(document_id));
+}
+
+#[test]
 fn dropped_file_completion_opens_document_through_existing_open_path() {
     let (mut app, _) = App::new();
     let main_window = app.main_window_id.expect("main window id");
@@ -357,7 +469,7 @@ fn dropped_file_completion_opens_document_through_existing_open_path() {
         .active_document()
         .expect("dropped file should open as active document");
 
-    assert_eq!(document.path.as_deref(), Some(path.as_path()));
+    assert_eq!(document.path, Some(std::path::absolute(path).unwrap()));
     assert_eq!(document.buffer.text(), "dropped body");
     assert!(!app.is_loading);
 }

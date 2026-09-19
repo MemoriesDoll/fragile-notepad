@@ -5,9 +5,8 @@ use super::callable_statements::{
 use super::fsm::{ByteRange, DeclarationEvent, StructuralEvent, StructuralEventKind};
 use super::lexical::OutlineCodeMask;
 use super::scan::*;
-pub(super) use super::structure_support::{
-    container_depth, containing_container, declaration_depth, editor_range, indent_depth_before,
-};
+#[cfg(test)]
+pub(super) use super::structure_support::containing_container;
 use super::{OutlineBodyKind, OutlineNameCapture, OutlinePlan, OutlineRulePlan, OutlineScanMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +26,7 @@ pub(super) fn discover_structure(
     for rule in &plan.containers {
         containers.extend(container_events_for_rule(text, mask, plan, rule));
     }
+    let container_names = ContainerNames::new(text, &containers);
 
     for rule in &plan.declarations {
         declarations.extend(declaration_events_for_rule(
@@ -34,7 +34,7 @@ pub(super) fn discover_structure(
             mask,
             plan,
             rule,
-            &containers,
+            &container_names,
         ));
     }
 
@@ -71,7 +71,7 @@ fn declaration_events_for_rule(
     mask: &OutlineCodeMask,
     plan: &OutlinePlan,
     rule: &OutlineRulePlan,
-    containers: &[StructuralEvent],
+    containers: &ContainerNames,
 ) -> Vec<DeclarationEvent> {
     if rule.scan == OutlineScanMode::Callable {
         let mut events = callable_declaration_events_for_rule(text, mask, rule, containers);
@@ -101,7 +101,7 @@ fn callable_declaration_events_for_rule(
     text: &str,
     mask: &OutlineCodeMask,
     rule: &OutlineRulePlan,
-    containers: &[StructuralEvent],
+    containers: &ContainerNames,
 ) -> Vec<DeclarationEvent> {
     let mut events = Vec::new();
     let statements = callable_statements(
@@ -146,7 +146,7 @@ fn arrow_function_declaration_events_for_rule(
     text: &str,
     mask: &OutlineCodeMask,
     rule: &OutlineRulePlan,
-    containers: &[StructuralEvent],
+    containers: &ContainerNames,
 ) -> Vec<DeclarationEvent> {
     let mut events = Vec::new();
     let statements = callable_statements(
@@ -252,7 +252,7 @@ fn callable_declaration_at(
     text: &str,
     mask: &OutlineCodeMask,
     rule: &OutlineRulePlan,
-    containers: &[StructuralEvent],
+    containers: &ContainerNames,
     statement: &CallableStatement,
     open_paren: usize,
 ) -> Option<DeclarationEvent> {
@@ -304,7 +304,7 @@ fn arrow_function_declaration_at(
     text: &str,
     mask: &OutlineCodeMask,
     rule: &OutlineRulePlan,
-    containers: &[StructuralEvent],
+    containers: &ContainerNames,
     statement: &CallableStatement,
     arrow: usize,
 ) -> Option<DeclarationEvent> {
@@ -758,7 +758,7 @@ fn callable_has_required_non_container_previous_token(
     text: &str,
     mask: &OutlineCodeMask,
     rule: &OutlineRulePlan,
-    containers: &[StructuralEvent],
+    containers: &ContainerNames,
     name_range: ByteRange,
 ) -> bool {
     if rule.callable.require_non_container_previous.is_empty()
@@ -853,7 +853,7 @@ fn is_qualified_identifier(value: &str) -> bool {
 
 fn callable_name_matches_containing_container(
     text: &str,
-    containers: &[StructuralEvent],
+    containers: &ContainerNames,
     rule: &OutlineRulePlan,
     name_range: ByteRange,
 ) -> bool {
@@ -870,16 +870,39 @@ fn callable_name_matches_containing_container(
         .find_map(|prefix| name.strip_prefix(prefix))
         .unwrap_or(name);
 
-    containers
-        .iter()
-        .filter(|container| {
-            container
-                .body_range
-                .is_some_and(|body| body.start <= name_range.start && name_range.start < body.end)
+    containers.contains(unprefixed_name, name_range.start)
+}
+
+struct ContainerNames(std::collections::HashMap<String, (Vec<usize>, Vec<usize>)>);
+
+impl ContainerNames {
+    fn new(text: &str, containers: &[StructuralEvent]) -> Self {
+        let mut names: std::collections::HashMap<String, (Vec<usize>, Vec<usize>)> =
+            std::collections::HashMap::new();
+        for container in containers {
+            let Some(body) = container.body_range.filter(|range| range.start < range.end) else {
+                continue;
+            };
+            let Some(name) = text.get(container.name_range.start..container.name_range.end) else {
+                continue;
+            };
+            let (starts, ends) = names.entry(name.to_owned()).or_default();
+            starts.push(body.start);
+            ends.push(body.end);
+        }
+        for (starts, ends) in names.values_mut() {
+            starts.sort_unstable();
+            ends.sort_unstable();
+        }
+        Self(names)
+    }
+
+    fn contains(&self, name: &str, offset: usize) -> bool {
+        self.0.get(name).is_some_and(|(starts, ends)| {
+            starts.partition_point(|start| *start <= offset)
+                > ends.partition_point(|end| *end <= offset)
         })
-        .any(|container| {
-            text.get(container.name_range.start..container.name_range.end) == Some(unprefixed_name)
-        })
+    }
 }
 
 fn callable_name_has_qualified_separator(

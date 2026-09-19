@@ -1,4 +1,267 @@
 use super::test_support::*;
+use crate::core::DocumentId;
+
+fn deferred_search_document(
+    app: &mut App,
+    path: &str,
+    recovered: Option<&str>,
+) -> (DocumentId, crate::core::DocumentLoadGeneration) {
+    let id = app.workspace.generate_document_id();
+    let generation = crate::core::DocumentLoadGeneration::next();
+    let mut document = crate::core::Document::loading(id, path, generation);
+    document.load_state = crate::core::DocumentLoadState::Deferred { generation };
+    document.defer_analysis = true;
+    app.workspace.documents.push(document);
+    app.session.pending.insert(
+        id,
+        crate::core::session::SessionDocument {
+            path: Some(path.into()),
+            text: recovered.map(str::to_owned),
+            is_dirty: recovered.is_some(),
+            ..Default::default()
+        },
+    );
+    (id, generation)
+}
+
+fn finish_search_document(
+    app: &mut App,
+    id: DocumentId,
+    generation: crate::core::DocumentLoadGeneration,
+    text: &str,
+) {
+    app.workspace.document_mut(id).unwrap().complete_loading(
+        generation,
+        crate::core::DecodedText {
+            text: text.to_owned(),
+            encoding: crate::core::TextEncoding::Utf8,
+            had_errors: false,
+        },
+    );
+    app.apply_session_metadata(id);
+    let _ = app.resume_pending_search();
+}
+
+#[test]
+fn find_all_hydrates_deferred_disk_and_recovered_tabs_without_switching_tabs() {
+    let (mut app, _) = App::new();
+    let active = app.workspace.active_document_id;
+    set_active_document_text(
+        &mut app,
+        "needle",
+        EditorSelection::new(EditorPosition::new(0, 2), EditorPosition::new(0, 2)),
+    );
+    let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
+    let (recovered, _) =
+        deferred_search_document(&mut app, "recovered.txt", Some("needle recovered"));
+    let order = app
+        .workspace
+        .documents
+        .iter()
+        .map(|document| document.id)
+        .collect::<Vec<_>>();
+    app.search_dialog.query = "needle".into();
+    let _ = app.update(Message::AdvancedFindAllOpenRun);
+    assert!(app.pending_search.is_some());
+    assert!(
+        app.workspace
+            .document(recovered)
+            .unwrap()
+            .has_complete_text_index()
+    );
+    assert!(app.workspace.document(disk).unwrap().is_loading());
+    finish_search_document(&mut app, disk, generation, "needle disk");
+    assert!(app.pending_search.is_none());
+    assert_eq!(app.search_dialog.results.len(), 3);
+    assert_eq!(app.workspace.active_document_id, active);
+    assert_eq!(
+        app.workspace
+            .active_document()
+            .unwrap()
+            .main_selection()
+            .cursor
+            .column,
+        2
+    );
+    assert_eq!(
+        app.workspace
+            .documents
+            .iter()
+            .map(|document| document.id)
+            .collect::<Vec<_>>(),
+        order
+    );
+}
+
+#[test]
+fn deferred_replace_all_uses_captured_options_scope_and_replacement() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "old OLD",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let original_active = app.workspace.active_document_id;
+    let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
+    app.search_dialog.query = "old".into();
+    app.search_dialog.replacement = "new".into();
+    app.search_dialog.case_sensitive = true;
+    let _ = app.update(Message::AdvancedReplaceAllOpenRun);
+    assert_eq!(
+        app.workspace.document(original_active).unwrap().text(),
+        "old OLD",
+        "wait before any mutation"
+    );
+    // Direct changes stand in for unrelated UI refreshes; captured request owns its inputs.
+    app.search_dialog.query = "OLD".into();
+    app.search_dialog.replacement = "wrong".into();
+    app.search_dialog.case_sensitive = false;
+    let extra = app.workspace.insert_loaded_file("later.txt", "old");
+    finish_search_document(&mut app, disk, generation, "old OLD");
+    assert_eq!(
+        app.workspace.document(original_active).unwrap().text(),
+        "new OLD"
+    );
+    assert_eq!(app.workspace.document(disk).unwrap().text(), "new OLD");
+    assert_eq!(app.workspace.document(extra).unwrap().text(), "old");
+}
+
+#[test]
+fn deferred_replace_all_aborts_before_mutation_on_failed_or_closed_target() {
+    for closed in [false, true] {
+        let (mut app, _) = App::new();
+        set_active_document_text(
+            &mut app,
+            "old",
+            EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+        );
+        let active = app.workspace.active_document_id;
+        let (disk, generation) = deferred_search_document(&mut app, "missing.txt", None);
+        app.search_dialog.query = "old".into();
+        app.search_dialog.replacement = "new".into();
+        let _ = app.update(Message::AdvancedReplaceAllOpenRun);
+        if closed {
+            app.workspace.close(disk);
+        } else {
+            app.workspace
+                .document_mut(disk)
+                .unwrap()
+                .fail_loading(generation);
+        }
+        let _ = app.resume_pending_search();
+        assert!(app.pending_search.is_none());
+        assert!(app.search_dialog.status.contains("canceled"));
+        assert_eq!(app.workspace.document(active).unwrap().text(), "old");
+    }
+}
+
+#[test]
+fn changing_query_cancels_deferred_replacement() {
+    let (mut app, _) = App::new();
+    let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
+    app.search_dialog.query = "old".into();
+    app.search_dialog.replacement = "new".into();
+    let _ = app.update(Message::AdvancedReplaceAllOpenRun);
+    let _ = app.update(Message::AdvancedSearchQueryChanged("different".into()));
+    finish_search_document(&mut app, disk, generation, "old");
+    assert_eq!(app.workspace.document(disk).unwrap().text(), "old");
+}
+
+#[test]
+fn new_find_operation_supersedes_deferred_replace_and_keeps_included_scope() {
+    let (mut app, _) = App::new();
+    let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
+    let (excluded, _) = deferred_search_document(&mut app, "excluded.rs", None);
+    app.search_dialog.query = "old".into();
+    app.search_dialog.replacement = "new".into();
+    app.search_dialog.include_pattern = "*.txt".into();
+    let _ = app.update(Message::AdvancedReplaceAllOpenRun);
+    let _ = app.update(Message::AdvancedFindAllOpenRun);
+    finish_search_document(&mut app, disk, generation, "old");
+    assert_eq!(app.workspace.document(disk).unwrap().text(), "old");
+    assert_eq!(app.search_dialog.results.len(), 1);
+    assert!(matches!(
+        app.workspace.document(excluded).unwrap().load_state,
+        crate::core::DocumentLoadState::Deferred { .. }
+    ));
+}
+
+#[test]
+fn recovered_unsaved_document_is_included_in_replace_all() {
+    let (mut app, _) = App::new();
+    let active = app.workspace.active_document_id;
+    let (recovered, _) = deferred_search_document(&mut app, "recovered.txt", Some("old old"));
+    app.search_dialog.query = "old".into();
+    app.search_dialog.replacement = "new".into();
+    let _ = app.update(Message::AdvancedReplaceAllOpenRun);
+    assert!(app.pending_search.is_none());
+    assert_eq!(app.workspace.document(recovered).unwrap().text(), "new new");
+    assert!(app.workspace.document_mut(recovered).unwrap().undo());
+    assert_eq!(app.workspace.document(recovered).unwrap().text(), "old old");
+    assert_eq!(app.workspace.active_document_id, active);
+}
+
+#[test]
+fn replace_all_is_one_undoable_multiline_transaction() {
+    let (mut app, _) = App::new();
+    let original = "one\ntwo\none\ntwo";
+    set_active_document_text(
+        &mut app,
+        original,
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let _ = app.update(Message::FindQueryChanged("one\ntwo".into()));
+    let _ = app.update(Message::FindReplacementChanged("X".into()));
+    let _ = app.update(Message::ReplaceAll);
+    assert_eq!(app.workspace.active_document().unwrap().text(), "X\nX");
+    let _ = app.update(Message::Undo);
+    assert_eq!(app.workspace.active_document().unwrap().text(), original);
+    let _ = app.update(Message::Redo);
+    assert_eq!(app.workspace.active_document().unwrap().text(), "X\nX");
+}
+
+#[test]
+fn regex_replace_all_uses_original_context_and_one_history_entry() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        "xfoo yfoo",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    app.search_dialog.query = r"\B(foo)".into();
+    app.search_dialog.replacement = "<$1>".into();
+    app.search_dialog.mode = crate::core::SearchMode::Regex;
+    let _ = app.update(Message::AdvancedReplaceAllCurrentRun);
+    assert_eq!(
+        app.workspace.active_document().unwrap().text(),
+        "x<foo> y<foo>"
+    );
+    let _ = app.update(Message::Undo);
+    assert_eq!(app.workspace.active_document().unwrap().text(), "xfoo yfoo");
+}
+
+#[test]
+fn replace_all_large_match_count_updates_document_once() {
+    let (mut app, _) = App::new();
+    set_active_document_text(
+        &mut app,
+        &"a ".repeat(2000),
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let before = app.workspace.active_document().unwrap().revision();
+    let _ = app.update(Message::FindQueryChanged("a".into()));
+    let _ = app.update(Message::FindReplacementChanged("longer".into()));
+    let started = std::time::Instant::now();
+    let _ = app.update(Message::ReplaceAll);
+    eprintln!(
+        "replace_all 2000 matches: {:.2} ms",
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.text(), "longer ".repeat(2000));
+    assert_eq!(document.revision(), before + 1);
+    assert!(document.selection_set().is_single());
+}
 
 #[test]
 fn advanced_search_result_selection_scrolls_target_line_into_view() {

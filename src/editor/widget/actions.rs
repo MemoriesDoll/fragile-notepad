@@ -26,6 +26,11 @@ pub enum EditorAction {
     JoinLines,
     ScrollLines(i32),
     ScrollToRow(usize),
+    ViewportChanged {
+        visible_rows: usize,
+        text_width: u32,
+        character_width_milli: u32,
+    },
     ToggleFold(FoldRange),
     FoldCurrent,
     UnfoldCurrent,
@@ -55,6 +60,10 @@ pub enum EditorAction {
 }
 
 impl EditorAction {
+    pub fn from_shortcut(command: ShortcutCommand) -> Option<Self> {
+        shortcut_action(command)
+    }
+
     pub fn mutates_document(&self) -> bool {
         matches!(
             self,
@@ -177,6 +186,8 @@ fn caret_motion(named: key::Named, modifiers: keyboard::Modifiers) -> Option<Car
         key::Named::ArrowRight => Some(CaretMotion::Right),
         key::Named::ArrowUp => Some(CaretMotion::Up),
         key::Named::ArrowDown => Some(CaretMotion::Down),
+        key::Named::Home if modifiers.command() => Some(CaretMotion::DocumentStart),
+        key::Named::End if modifiers.command() => Some(CaretMotion::DocumentEnd),
         key::Named::Home => Some(CaretMotion::LineStart),
         key::Named::End => Some(CaretMotion::LineEnd),
         key::Named::PageUp => Some(CaretMotion::PageUp),

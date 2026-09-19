@@ -242,7 +242,7 @@ impl ShortcutCommand {
             )),
             Self::UnfoldCurrent => Some(KeyBinding::new(
                 ShortcutModifiers::primary_alt_shift(),
-                ShortcutKey::character('f'),
+                ShortcutKey::character('u'),
             )),
             Self::ToggleCurrentFold => None,
             Self::FoldAll => Some(KeyBinding::new(

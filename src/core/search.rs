@@ -358,27 +358,7 @@ fn compute_literal_matches(text: &str, query: &str, options: SearchOptions) -> V
             .collect();
     }
 
-    let query_folded = query.to_lowercase();
-    let query_chars = query.chars().count();
-    let mut matches = Vec::new();
-    let mut cursor = 0;
-
-    while cursor < text.len() {
-        let Some(end) = end_after_chars(text, cursor, query_chars) else {
-            break;
-        };
-
-        if text[cursor..end].to_lowercase() == query_folded
-            && (!options.whole_word || is_whole_word_match(text, cursor, end))
-        {
-            matches.push(TextMatch::new(cursor, end));
-            cursor = end;
-        } else {
-            cursor = next_char_boundary(text, cursor);
-        }
-    }
-
-    matches
+    compute_literal_matches_in_chunks([text], query, options)
 }
 
 fn compute_literal_matches_in_chunks<'a>(
@@ -390,53 +370,54 @@ fn compute_literal_matches_in_chunks<'a>(
         return Vec::new();
     }
 
-    let context_chars = query.chars().count().saturating_sub(1);
+    // Keep a single scan cursor across chunks, plus both word-boundary neighbors.
+    // Re-scanning overlapping chunk suffixes can change non-overlap semantics.
+    let query_chars: Vec<char> = query.chars().collect();
+    let query_folded = query.to_lowercase();
+    let width = query_chars.len();
+    let mut input = chunks.into_iter().flat_map(str::chars);
+    let mut window = VecDeque::with_capacity(width + 1);
     let mut matches = Vec::new();
-    let mut carry = String::new();
     let mut absolute_offset = 0usize;
-    let mut emitted_until = 0usize;
-
-    for chunk in chunks {
-        if chunk.is_empty() {
-            continue;
+    let mut before = None;
+    loop {
+        while window.len() <= width {
+            let Some(ch) = input.next() else { break };
+            window.push_back(ch);
         }
-
-        let carry_len = carry.len();
-        let window_start = absolute_offset.saturating_sub(carry_len);
-        let mut window = String::with_capacity(carry_len + chunk.len());
-        window.push_str(&carry);
-        window.push_str(chunk);
-
-        for text_match in compute_literal_matches(&window, query, options) {
-            let start = window_start + text_match.start;
-            let end = window_start + text_match.end;
-            if start >= emitted_until {
-                matches.push(TextMatch::new(start, end));
-                emitted_until = end;
-            }
+        if window.len() < width {
+            break;
         }
-
-        absolute_offset += chunk.len();
-        carry = trailing_chars(&window, context_chars);
+        let candidate = window.iter().take(width);
+        let equal = if options.case_sensitive {
+            candidate.copied().eq(query_chars.iter().copied())
+        } else if query.is_ascii() && candidate.clone().all(|ch| ch.is_ascii()) {
+            candidate
+                .zip(&query_chars)
+                .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        } else {
+            candidate.collect::<String>().to_lowercase() == query_folded
+        };
+        let whole_word = !options.whole_word
+            || (!before.is_some_and(is_word_char)
+                && !window.get(width).copied().is_some_and(is_word_char));
+        let accepted = equal && whole_word;
+        let advance = if accepted || (equal && options.case_sensitive) {
+            width
+        } else {
+            1
+        };
+        let start = absolute_offset;
+        for _ in 0..advance {
+            let ch = window.pop_front().expect("complete search window");
+            absolute_offset += ch.len_utf8();
+            before = Some(ch);
+        }
+        if accepted {
+            matches.push(TextMatch::new(start, absolute_offset));
+        }
     }
-
     matches
-}
-
-fn trailing_chars(text: &str, max_chars: usize) -> String {
-    if max_chars == 0 || text.is_empty() {
-        return String::new();
-    }
-
-    let mut chars = VecDeque::with_capacity(max_chars);
-    for ch in text.chars() {
-        if chars.len() == max_chars {
-            chars.pop_front();
-        }
-        chars.push_back(ch);
-    }
-
-    chars.into_iter().collect()
 }
 
 fn compute_regex_matches(text: &str, regex: &Regex, options: SearchOptions) -> Vec<TextMatch> {
@@ -484,11 +465,10 @@ fn regex_replacement_for_match(
         return None;
     }
 
-    let matched = &text[text_match.start..text_match.end];
-    let captures = regex.captures(matched)?;
+    let captures = regex.captures_at(text, text_match.start)?;
     let full_match = captures.get(0)?;
 
-    if full_match.start() != 0 || full_match.end() != matched.len() {
+    if full_match.start() != text_match.start || full_match.end() != text_match.end {
         return None;
     }
 
@@ -541,30 +521,6 @@ fn is_whole_word_match(text: &str, start: usize, end: usize) -> bool {
 
 fn is_word_char(ch: char) -> bool {
     ch == '_' || ch.is_alphanumeric()
-}
-
-fn end_after_chars(text: &str, start: usize, char_count: usize) -> Option<usize> {
-    let mut end = start;
-    let mut chars_seen = 0;
-
-    for (offset, ch) in text[start..].char_indices() {
-        if chars_seen == char_count {
-            break;
-        }
-
-        end = start + offset + ch.len_utf8();
-        chars_seen += 1;
-    }
-
-    (chars_seen == char_count).then_some(end)
-}
-
-fn next_char_boundary(text: &str, start: usize) -> usize {
-    text[start..]
-        .chars()
-        .next()
-        .map(|ch| start + ch.len_utf8())
-        .unwrap_or(text.len())
 }
 
 fn expand_extended_pattern(value: &str) -> String {

@@ -70,6 +70,21 @@ pub enum WindowTarget {
 #[derive(Debug, Clone)]
 pub enum Message {
     None,
+    OpenPaths(Vec<PathBuf>),
+    ForwardedFiles(
+        Vec<PathBuf>,
+        ActivationRequest,
+        crate::ipc::AdmissionReceipt,
+    ),
+    StartupReady,
+    StartupFrameReady,
+    SessionLoaded(Result<Option<crate::core::session::Session>, String>),
+    SessionFlush,
+    SessionPersisted(Result<(), String>),
+    ShutdownPersisted(Result<(), String>),
+    SettingsFlush,
+    RefreshLoadingFind,
+    DocumentAnalyzed(crate::core::document::DocumentAnalysis),
     Shortcut(ShortcutCommand),
     EditorAction(DocumentId, EditorAction),
     OutlineParseCompleted(OutlineParseResult),

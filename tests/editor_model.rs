@@ -9,6 +9,66 @@ use fragile_notepad::editor::{
 };
 use std::sync::Arc;
 
+#[test]
+fn unmatched_closing_delimiters_do_not_block_fold_scanning() {
+    let buffer = EditorBuffer::from_text("}] )\n{\nbody\n}\n]");
+    assert!(
+        IndentBraceFoldProvider::default()
+            .compute_folds(&buffer)
+            .contains(&FoldRange::new(1, 3))
+    );
+}
+
+#[test]
+fn incremental_line_index_matches_rebuild_across_edits_and_newline_pairing() {
+    let sources = [
+        "",
+        "a\nb\nc",
+        "a\r\nb\r\nc",
+        "a\n\rb",
+        "a\r\n\r\n\r\nb",
+        "é\r好\nlast",
+        "\r\n\r\n",
+        "a\n",
+    ];
+    let replacements = ["", "x", "\n", "\r", "\r\n", "\n\r", "é\n好", "\n\r\n\r"];
+    for source in sources {
+        let original = EditorBuffer::from_text(source);
+        for replacement in replacements {
+            let mut appended = original.clone();
+            appended.append_text(replacement);
+            let rebuilt = EditorBuffer::from_text(format!("{source}{replacement}"));
+            assert_eq!(appended, rebuilt, "append {replacement:?} to {source:?}");
+        }
+        let positions = (0..=source.len())
+            .filter_map(|offset| original.position_for_byte_offset(offset))
+            .collect::<Vec<_>>();
+        for (index, start) in positions.iter().enumerate() {
+            for end in &positions[index..] {
+                for replacement in replacements {
+                    let mut actual = original.clone();
+                    actual.replace_range(EditorRange::new(*start, *end), replacement);
+                    let rebuilt = EditorBuffer::from_text(actual.text());
+                    assert_eq!(
+                        actual.line_count(),
+                        rebuilt.line_count(),
+                        "{source:?}, {start:?}..{end:?}, {replacement:?}"
+                    );
+                    for line in 0..actual.line_count() {
+                        assert_eq!(actual.line_text(line), rebuilt.line_text(line));
+                    }
+                    for offset in 0..=actual.len_bytes() {
+                        assert_eq!(
+                            actual.position_for_byte_offset(offset),
+                            rebuilt.position_for_byte_offset(offset)
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct OutlineSnippetCase {
     syntax_token: &'static str,
     source: &'static str,

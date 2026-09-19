@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use crate::core::{Document, DocumentId};
 
-use super::super::buffer::EditorBuffer;
 use super::{
     FunctionEntry, OutlineDiagnostic, OutlineEngine, OutlineParseRequest, OutlineParseResult,
-    OutlineRegistry, OutlineTree, outline_for_syntax_with_registry,
+    OutlineRegistry, OutlineTree,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,7 +155,36 @@ pub fn outline_request_for_document(
 }
 
 pub async fn parse_outline_request(request: OutlineParseRequest) -> OutlineParseResult {
-    parse_outline_snapshot(request)
+    if tokio::runtime::Handle::try_current().is_err() {
+        return parse_outline_snapshot(request);
+    }
+    static WORKERS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+        std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
+    let permit = WORKERS
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("outline worker semaphore");
+    let abandoned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _cancellation = CancelQueuedParse(abandoned.clone());
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        if abandoned.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        Some(parse_outline_snapshot(request))
+    })
+    .await
+    .expect("outline parsing worker")
+    .expect("active outline request")
+}
+
+struct CancelQueuedParse(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for CancelQueuedParse {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 pub fn parse_outline_snapshot(request: OutlineParseRequest) -> OutlineParseResult {
@@ -174,16 +202,5 @@ pub fn parse_outline_snapshot(request: OutlineParseRequest) -> OutlineParseResul
         );
     };
 
-    let mut result = OutlineEngine::new(plan, registry.registry_hash()).parse(request.clone());
-    if result.functions.is_empty() {
-        let buffer = EditorBuffer::from_text(request.text.as_ref().clone());
-        let fallback = outline_for_syntax_with_registry(&buffer, &request.syntax_token, registry);
-
-        if !fallback.is_empty() {
-            result.tree = OutlineTree::default();
-            result.functions = fallback;
-        }
-    }
-
-    result
+    OutlineEngine::new(plan, registry.registry_hash()).parse(request)
 }

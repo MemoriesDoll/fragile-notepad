@@ -1,8 +1,8 @@
 use crate::editor::layout::visual_column_for;
 use crate::editor::{
     CaretMotion, EditTransaction, EditorBuffer, EditorPosition, EditorRange, EditorSelection,
-    ProjectedSelectionLine, SelectionRange, SelectionSet, line_end, next_grapheme_offset,
-    position_for_byte_offset, previous_grapheme_offset,
+    ProjectedSelectionLine, SelectionRange, SelectionSet, line_end, next_grapheme_position,
+    previous_grapheme_position,
 };
 use crate::message::ClipboardMode;
 
@@ -28,45 +28,25 @@ struct ConcreteReplacement {
 
 pub(super) fn selected_text(document: &crate::core::Document, tab_width: usize) -> Option<String> {
     let newline = document_line_ending(document);
-    let projected = concrete_selected_lines(document, document.selection_set(), tab_width);
-
-    if projected.is_empty() || projected.iter().all(|line| line.range().is_empty()) {
-        return None;
-    }
-
-    if document
-        .selection_set()
-        .ranges()
-        .iter()
-        .any(|selection| selection.is_rectangular())
-    {
-        let mut lines = Vec::new();
-        for line in projected {
-            let range = document.buffer.clamp_range(line.range());
-            lines.push(document.buffer.slice_text(range));
-        }
-
-        return Some(lines.join(&newline));
-    }
-
-    let mut ranges =
-        concrete_ranges_for_selection_set(document.selection_set(), &document.buffer, tab_width);
-    ranges.sort_by_key(|range| {
-        let range = range.normalized();
-
-        (
-            document.buffer.byte_offset(range.start),
-            document.buffer.byte_offset(range.end),
-        )
-    });
-
     let mut chunks = Vec::new();
-    for range in ranges {
-        let range = document.buffer.clamp_range(range);
-        if range.is_empty() {
-            continue;
+    for selection in document.selection_set().ranges() {
+        if selection.is_rectangular() {
+            let lines = selection.projected_lines(&document.buffer, tab_width);
+            if lines.iter().any(|line| !line.range().is_empty()) {
+                chunks.push(
+                    lines
+                        .into_iter()
+                        .map(|line| document.buffer.slice_text(line.range()))
+                        .collect::<Vec<_>>()
+                        .join(&newline),
+                );
+            }
+        } else {
+            let range = document.buffer.clamp_range(selection.range());
+            if !range.is_empty() {
+                chunks.push(document.buffer.slice_text(range));
+            }
         }
-        chunks.push(document.buffer.slice_text(range));
     }
 
     (!chunks.is_empty()).then(|| chunks.join(&newline))
@@ -74,25 +54,21 @@ pub(super) fn selected_text(document: &crate::core::Document, tab_width: usize) 
 
 pub(super) fn line_span_text(document: &crate::core::Document, tab_width: usize) -> Option<String> {
     let newline = document_line_ending(document);
-    let mut ranges = Vec::new();
-
-    for selection in document.selection_set().ranges() {
-        for line in selection.projected_lines(&document.buffer, tab_width) {
-            if let Some(range) = selected_touched_line_range(&document.buffer, line.selection()) {
-                ranges.push(range);
-            }
+    let lines = selected_lines_for_selection_set(document, document.selection_set(), tab_width);
+    let mut text = String::new();
+    for line in lines {
+        let position = EditorPosition::new(line, 0);
+        let Some(range) =
+            selected_touched_line_range(&document.buffer, EditorSelection::new(position, position))
+        else {
+            continue;
+        };
+        if !text.is_empty() && !text.ends_with(['\r', '\n']) {
+            text.push_str(&newline);
         }
+        text.push_str(&document.buffer.slice_text(range));
     }
-
-    ranges.sort_by_key(|range| document.buffer.byte_offset(range.start));
-    ranges.dedup();
-
-    let mut chunks = Vec::new();
-    for range in ranges {
-        chunks.push(document.buffer.slice_text(range));
-    }
-
-    (!chunks.is_empty()).then(|| chunks.join(&newline))
+    (!text.is_empty()).then_some(text)
 }
 
 pub(super) fn replace_selection(
@@ -110,6 +86,24 @@ pub(super) fn replace_selection(
     );
 
     apply_concrete_replacements(document, before_selection_set, replacements, allow_grouping)
+}
+
+pub(super) fn replace_ranges_for_search(
+    document: &mut crate::core::Document,
+    ranges: Vec<(EditorRange, String)>,
+) -> bool {
+    let before = document.selection_set().clone();
+    let replacements = ranges
+        .into_iter()
+        .enumerate()
+        .map(|(source_index, (range, replacement))| ConcreteReplacement {
+            range,
+            replacement,
+            source_index,
+            main_preferred: source_index == 0,
+        })
+        .collect();
+    apply_concrete_replacements_with_policy(document, before, replacements, false, true)
 }
 
 fn replace_document_range(
@@ -157,25 +151,21 @@ pub(super) fn duplicate_line(document: &mut crate::core::Document) -> bool {
     };
 
     let insert_position = range.end;
-    let start_offset = document.buffer.byte_offset(range.start);
     let end_offset = document.buffer.byte_offset(range.end);
-    let text = document.buffer.text();
-    let Some(copied_text) = text.get(start_offset..end_offset) else {
-        return false;
-    };
+    let copied_text = document.buffer.slice_text(range);
 
     let line_ending = document
         .line_ending
         .map(|ending| ending.as_str())
         .unwrap_or("\n");
     let needs_leading_line_ending =
-        end_offset == text.len() && !copied_text.ends_with(['\r', '\n']);
+        end_offset == document.buffer.len_bytes() && !copied_text.ends_with(['\r', '\n']);
     let mut insertion = String::with_capacity(copied_text.len() + line_ending.len());
 
     if needs_leading_line_ending {
         insertion.push_str(line_ending);
     }
-    insertion.push_str(copied_text);
+    insertion.push_str(&copied_text);
 
     let insert_range = EditorRange::new(insert_position, insert_position);
     let delta = document.buffer.replace_range(insert_range, &insertion);
@@ -189,11 +179,16 @@ pub(super) fn duplicate_line(document: &mut crate::core::Document) -> bool {
             .then_some(line_ending.len())
             .unwrap_or(0);
     let duplicate_end_offset = end_offset + insertion.len();
-    let text = document.buffer.text();
-    let Some(duplicate_start) = position_for_byte_offset(&text, duplicate_start_offset) else {
+    let Some(duplicate_start) = document
+        .buffer
+        .position_for_byte_offset(duplicate_start_offset)
+    else {
         return false;
     };
-    let Some(duplicate_end) = position_for_byte_offset(&text, duplicate_end_offset) else {
+    let Some(duplicate_end) = document
+        .buffer
+        .position_for_byte_offset(duplicate_end_offset)
+    else {
         return false;
     };
 
@@ -352,18 +347,13 @@ pub(super) fn backspace(document: &mut crate::core::Document, tab_width: usize) 
 
     let before_selection_set = document.selection_set().clone();
     let mut replacements = Vec::new();
-    let text = document.buffer.text();
 
     for (source_index, line) in concrete_selected_lines(document, &before_selection_set, tab_width)
         .into_iter()
         .enumerate()
     {
         let cursor = line.start;
-        let offset = document.buffer.byte_offset(cursor);
-        let Some(start_offset) = previous_grapheme_offset(&text, offset) else {
-            continue;
-        };
-        let Some(start) = position_for_byte_offset(&text, start_offset) else {
+        let Some(start) = previous_grapheme_position(&document.buffer, cursor) else {
             continue;
         };
 
@@ -385,18 +375,13 @@ pub(super) fn delete(document: &mut crate::core::Document, tab_width: usize) -> 
 
     let before_selection_set = document.selection_set().clone();
     let mut replacements = Vec::new();
-    let text = document.buffer.text();
 
     for (source_index, line) in concrete_selected_lines(document, &before_selection_set, tab_width)
         .into_iter()
         .enumerate()
     {
         let cursor = line.start;
-        let offset = document.buffer.byte_offset(cursor);
-        let Some(end_offset) = next_grapheme_offset(&text, offset) else {
-            continue;
-        };
-        let Some(end) = position_for_byte_offset(&text, end_offset) else {
+        let Some(end) = next_grapheme_position(&document.buffer, cursor) else {
             continue;
         };
 
@@ -409,6 +394,72 @@ pub(super) fn delete(document: &mut crate::core::Document, tab_width: usize) -> 
     }
 
     apply_concrete_replacements(document, before_selection_set, replacements, false)
+}
+
+pub(super) fn indent(
+    document: &mut crate::core::Document,
+    tab_width: usize,
+    indentation_text: &str,
+) -> bool {
+    if indentation_text.is_empty() {
+        return false;
+    }
+    if selection_set_is_all_carets(document.selection_set(), &document.buffer, tab_width) {
+        return replace_selection(document, indentation_text, false, tab_width);
+    }
+
+    let before = document.selection_set().clone();
+    let lines = selected_lines_for_selection_set(document, &before, tab_width);
+    let (Some(first), Some(last)) = (lines.first().copied(), lines.last().copied()) else {
+        return false;
+    };
+    let span = EditorRange::new(
+        EditorPosition::new(first, 0),
+        line_end(&document.buffer, last),
+    );
+    let span_start = document.buffer.byte_offset(span.start);
+    let source = document.buffer.slice_text(span);
+    let mut replacement =
+        String::with_capacity(source.len() + lines.len() * indentation_text.len());
+    let mut copied_until = 0;
+    for line in &lines {
+        let offset = document.buffer.byte_offset(EditorPosition::new(*line, 0)) - span_start;
+        replacement.push_str(&source[copied_until..offset]);
+        replacement.push_str(indentation_text);
+        copied_until = offset;
+    }
+    replacement.push_str(&source[copied_until..]);
+    let delta = document.buffer.replace_range(span, &replacement);
+    let added_visual_columns =
+        visual_column_for(indentation_text, indentation_text.len(), tab_width);
+    let mut ranges = before.ranges().to_vec();
+    for range in &mut ranges {
+        for position in [&mut range.anchor, &mut range.cursor] {
+            if lines.binary_search(&position.line).is_ok() {
+                position.column += indentation_text.len();
+            }
+        }
+        if let crate::editor::SelectionShape::Rectangular(rectangle) = &mut range.shape {
+            rectangle.anchor_visual_column += added_visual_columns;
+            rectangle.cursor_visual_column += added_visual_columns;
+        }
+    }
+    document.set_selection_set(SelectionSet::from_selection_ranges(
+        ranges,
+        before.main_index(),
+    ));
+    document.preferred_vertical_column = None;
+    document.history.record_with_selection_sets(
+        EditTransaction {
+            delta,
+            before_selection: before.main(),
+            after_selection: document.main_selection(),
+        },
+        before,
+        document.selection_set().clone(),
+    );
+    document.refresh_text_from(first);
+    true
 }
 
 pub(super) fn unindent(document: &mut crate::core::Document, indentation_width: usize) -> bool {
@@ -430,15 +481,16 @@ pub(super) fn unindent(document: &mut crate::core::Document, indentation_width: 
     );
     let start_offset = document.buffer.byte_offset(before_range.start);
     let end_offset = document.buffer.byte_offset(before_range.end);
-    let before_text = document.buffer.text();
-    let mut source_offset = start_offset;
+    let before_text = document.buffer.slice_text(before_range);
+    let mut source_offset = 0;
     let mut replacement = String::with_capacity(end_offset.saturating_sub(start_offset));
 
     for (index, line) in (first_line..=last_line).enumerate() {
-        let line_start = document.buffer.byte_offset(EditorPosition::new(line, 0));
+        let line_start = document.buffer.byte_offset(EditorPosition::new(line, 0)) - start_offset;
         let line_end = document
             .buffer
-            .byte_offset(line_end(&document.buffer, line));
+            .byte_offset(line_end(&document.buffer, line))
+            - start_offset;
         let removal = removals[index];
 
         replacement.push_str(&before_text[source_offset..line_start]);
@@ -446,7 +498,7 @@ pub(super) fn unindent(document: &mut crate::core::Document, indentation_width: 
         source_offset = line_end;
     }
 
-    replacement.push_str(&before_text[source_offset..end_offset]);
+    replacement.push_str(&before_text[source_offset..]);
 
     let delta = document.buffer.replace_range(before_range, &replacement);
     document.set_main_selection(EditorSelection::new(
@@ -497,16 +549,15 @@ fn selected_lines_for_selection_set(
     tab_width: usize,
 ) -> Vec<usize> {
     let mut lines = Vec::new();
-
-    if selection_set_is_all_carets(selection_set, &document.buffer, tab_width) {
-        lines.extend(
-            selection_set
-                .ranges()
-                .iter()
-                .map(|selection| document.buffer.clamp_position(selection.cursor).line),
-        );
-    } else {
-        for selection in selection_set.ranges() {
+    for selection in selection_set.ranges() {
+        if selection.is_rectangular() {
+            lines.extend(
+                selection
+                    .projected_lines(&document.buffer, tab_width)
+                    .into_iter()
+                    .map(|line| line.line),
+            );
+        } else {
             let Some((first_line, last_line)) =
                 selected_line_span(&document.buffer, selection.selection())
             else {
@@ -644,9 +695,19 @@ fn concrete_ranges_for_selection_set(
     tab_width: usize,
 ) -> Vec<EditorRange> {
     selection_set
-        .projected_lines(buffer, tab_width)
-        .into_iter()
-        .map(|line| buffer.clamp_range(line.range()))
+        .ranges()
+        .iter()
+        .flat_map(|selection| {
+            if selection.is_rectangular() {
+                selection
+                    .projected_lines(buffer, tab_width)
+                    .into_iter()
+                    .map(|line| buffer.clamp_range(line.range()))
+                    .collect::<Vec<_>>()
+            } else {
+                vec![buffer.clamp_range(selection.range())]
+            }
+        })
         .collect()
 }
 
@@ -655,12 +716,9 @@ pub(super) fn selection_set_is_all_carets(
     buffer: &EditorBuffer,
     tab_width: usize,
 ) -> bool {
-    let lines = selection_set.projected_lines(buffer, tab_width);
-
-    !lines.is_empty()
-        && lines
-            .iter()
-            .all(|line| buffer.clamp_range(line.range()).is_empty())
+    concrete_ranges_for_selection_set(selection_set, buffer, tab_width)
+        .iter()
+        .all(|range| range.is_empty())
 }
 
 pub(super) fn add_adjacent_caret(document: &mut crate::core::Document, motion: CaretMotion) {
@@ -734,23 +792,28 @@ fn replacement_edits_for_selection_set(
     tab_width: usize,
     replacement_for_line: impl Fn(usize) -> String,
 ) -> Vec<ConcreteReplacement> {
-    let main_selection = selection_set.main();
-
-    selection_set
-        .projected_lines(buffer, tab_width)
-        .into_iter()
-        .enumerate()
-        .map(|(source_index, line)| {
-            let range = buffer.clamp_range(line.range());
-
-            ConcreteReplacement {
+    let mut edits = Vec::new();
+    for (selection_index, selection) in selection_set.ranges().iter().enumerate() {
+        let ranges = if selection.is_rectangular() {
+            selection
+                .projected_lines(buffer, tab_width)
+                .into_iter()
+                .map(|line| buffer.clamp_range(line.range()))
+                .collect::<Vec<_>>()
+        } else {
+            vec![buffer.clamp_range(selection.range())]
+        };
+        for range in ranges {
+            let source_index = edits.len();
+            edits.push(ConcreteReplacement {
                 range,
                 replacement: replacement_for_line(source_index),
                 source_index,
-                main_preferred: line.selection() == main_selection,
-            }
-        })
-        .collect()
+                main_preferred: selection_index == selection_set.main_index(),
+            });
+        }
+    }
+    edits
 }
 
 pub(super) fn paste_clipboard_mode(
@@ -850,8 +913,24 @@ fn clipboard_lines(text: &str) -> Vec<String> {
 fn apply_concrete_replacements(
     document: &mut crate::core::Document,
     before_selection_set: SelectionSet,
+    replacements: Vec<ConcreteReplacement>,
+    allow_grouping: bool,
+) -> bool {
+    apply_concrete_replacements_with_policy(
+        document,
+        before_selection_set,
+        replacements,
+        allow_grouping,
+        false,
+    )
+}
+
+fn apply_concrete_replacements_with_policy(
+    document: &mut crate::core::Document,
+    before_selection_set: SelectionSet,
     mut replacements: Vec<ConcreteReplacement>,
     allow_grouping: bool,
+    single_caret_after: bool,
 ) -> bool {
     if replacements.is_empty() {
         return false;
@@ -879,11 +958,7 @@ fn apply_concrete_replacements(
 
     let span = EditorRange::new(first.range.start, last.range.end);
     let span_start_offset = document.buffer.byte_offset(span.start);
-    let span_end_offset = document.buffer.byte_offset(span.end);
-    let before_text = document.buffer.text();
-    let Some(span_text) = before_text.get(span_start_offset..span_end_offset) else {
-        return false;
-    };
+    let span_text = document.buffer.slice_text(span);
 
     let replacement_offsets = replacements
         .iter()
@@ -894,11 +969,17 @@ fn apply_concrete_replacements(
             )
         })
         .collect::<Vec<_>>();
-    let mut replacement_text = span_text.to_owned();
-
-    for (replacement, (start, end)) in replacements.iter().zip(replacement_offsets.iter()).rev() {
-        replacement_text.replace_range(*start..*end, &replacement.replacement);
+    let mut replacement_text = String::with_capacity(span_text.len());
+    let mut copied_until = 0;
+    for (replacement, (start, end)) in replacements.iter().zip(replacement_offsets.iter()) {
+        if *start < copied_until {
+            return false;
+        }
+        replacement_text.push_str(&span_text[copied_until..*start]);
+        replacement_text.push_str(&replacement.replacement);
+        copied_until = *end;
     }
+    replacement_text.push_str(&span_text[copied_until..]);
 
     let replacement_buffer = EditorBuffer::from_text(replacement_text.clone());
 
@@ -906,6 +987,9 @@ fn apply_concrete_replacements(
     let mut after_ranges_by_source = Vec::with_capacity(replacements.len());
 
     for (replacement, (start, end)) in replacements.iter().zip(replacement_offsets.iter()) {
+        if single_caret_after && !after_ranges_by_source.is_empty() {
+            break;
+        }
         let original_len = end.saturating_sub(*start);
         let final_start = start.saturating_add_signed(cumulative_delta);
         let final_end = final_start + replacement.replacement.len();
@@ -934,7 +1018,16 @@ fn apply_concrete_replacements(
         &after_ranges_by_source,
         before_selection_set.main_index(),
     );
-    document.set_selection_set(after_selection_set);
+    if single_caret_after {
+        document.set_main_selection(
+            after_ranges_by_source
+                .first()
+                .map(|(_, _, selection)| *selection)
+                .unwrap_or(after_selection_set.main()),
+        );
+    } else {
+        document.set_selection_set(after_selection_set);
+    }
     document.preferred_vertical_column = None;
 
     if delta.before_text == delta.after_text {

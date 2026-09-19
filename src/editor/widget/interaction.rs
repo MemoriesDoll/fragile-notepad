@@ -26,6 +26,7 @@ pub(super) struct InteractionContext<'a, Message> {
     pub(super) metrics: crate::editor::layout::EditorMetrics,
     pub(super) scroll: ScrollOffset,
     pub(super) scroll_speed: f32,
+    pub(super) viewport_key: u64,
     pub(super) shortcuts: &'a ShortcutMap,
     pub(super) on_action: &'a dyn Fn(EditorAction) -> Message,
 }
@@ -61,6 +62,29 @@ where
     Renderer: iced::advanced::Renderer + text::Renderer<Font = Font>,
 {
     let mut outcome = UpdateOutcome::default();
+    // Rendering includes a partially visible bottom row; caret navigation must
+    // count only complete rows so the insertion point cannot remain clipped.
+    let visible_rows = ((editor_layout.height - context.metrics.padding_top)
+        / context.metrics.line_height.max(1.0))
+    .floor()
+    .max(1.0) as usize;
+    let text_width =
+        (bounds.width - context.metrics.text_origin_x(context.decorations) - 14.0).max(1.0) as u32;
+    let character_width_milli = (context.metrics.character_width * 1000.0).max(1.0) as u32;
+    let geometry = (
+        context.viewport_key,
+        visible_rows,
+        text_width,
+        character_width_milli,
+    );
+    if state.viewport_geometry != Some(geometry) {
+        state.viewport_geometry = Some(geometry);
+        shell.publish((context.on_action)(EditorAction::ViewportChanged {
+            visible_rows,
+            text_width,
+            character_width_milli,
+        }));
+    }
 
     match event {
         Event::Window(window::Event::Unfocused) => {

@@ -42,6 +42,47 @@ fn preview_from_chunks(events: &[FileLoadEvent]) -> String {
 }
 
 #[test]
+fn malformed_utf8_bom_preserves_text_and_reports_decoding_errors() {
+    for (name, bytes, expected) in [
+        (
+            "invalid-middle",
+            b"\xef\xbb\xbfa\xffb".as_slice(),
+            "a\u{fffd}b",
+        ),
+        (
+            "truncated-end",
+            b"\xef\xbb\xbfa\xc3".as_slice(),
+            "a\u{fffd}",
+        ),
+    ] {
+        let path = temp_file_path(name);
+        fs::write(&path, bytes).expect("write temp input");
+        for chunk_size in [1, 3, 64] {
+            let events = collect_load_events(FileLoadRequest {
+                document_id: DocumentId::new(41),
+                generation: DocumentLoadGeneration::next(),
+                path: path.clone(),
+                chunk_size,
+            });
+            assert_eq!(preview_from_chunks(&events), expected);
+            let finished = events
+                .iter()
+                .find_map(|event| match event {
+                    FileLoadEvent::Finished(Ok(finished)) => Some(finished),
+                    _ => None,
+                })
+                .expect("successful load with decoding warning");
+            assert_eq!(
+                finished.encoding,
+                fragile_notepad::core::TextEncoding::Utf8Bom
+            );
+            assert!(finished.had_errors);
+        }
+        fs::remove_file(path).expect("remove temp input");
+    }
+}
+
+#[test]
 fn chunked_loader_streams_progress_chunks_and_final_decoded_text() {
     let path = temp_file_path("utf8-crlf-bom");
     let mut bytes = Vec::from(&b"\xef\xbb\xbfalpha\r\ncaf"[..]);

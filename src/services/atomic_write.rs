@@ -1,6 +1,8 @@
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::AsyncWriteExt;
 
 #[cfg(windows)]
 use std::ffi::OsStr;
@@ -8,19 +10,29 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 
 pub async fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_with_permissions(path, contents, false).await
+}
+
+pub async fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_with_permissions(path, contents, true).await
+}
+
+async fn write_with_permissions(path: &Path, contents: &[u8], _private: bool) -> io::Result<()> {
     let temp_path = temp_path(path);
 
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
 
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if _private {
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temp_path).await?;
     let write_result = async {
-        tokio::fs::write(&temp_path, contents).await?;
-
-        let file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .open(&temp_path)
-            .await?;
+        file.write_all(contents).await?;
         file.sync_all().await?;
         drop(file);
 
@@ -80,6 +92,7 @@ fn wide_null(value: &OsStr) -> Vec<u16> {
 }
 
 fn temp_path(path: &Path) -> PathBuf {
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
@@ -91,8 +104,9 @@ fn temp_path(path: &Path) -> PathBuf {
         .unwrap_or(0);
 
     parent.join(format!(
-        ".{file_name}.{}.{}.tmp",
+        ".{file_name}.{}.{}.{}.tmp",
         std::process::id(),
-        unique
+        unique,
+        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
     ))
 }

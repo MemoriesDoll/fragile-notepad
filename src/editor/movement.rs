@@ -1,7 +1,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::buffer::EditorBuffer;
-use super::position::{EditorPosition, position_for_byte_offset};
+use super::position::EditorPosition;
 use super::widget::CaretMotion;
 use super::word::is_default_word_char;
 
@@ -63,22 +63,30 @@ pub fn previous_grapheme_position(
     buffer: &EditorBuffer,
     position: EditorPosition,
 ) -> Option<EditorPosition> {
-    let offset = buffer.byte_offset(position);
-    let text = buffer.text();
-    let offset = previous_grapheme_offset(&text, offset)?;
-
-    position_for_byte_offset(&text, offset)
+    let position = buffer.clamp_position(position);
+    if position.column == 0 {
+        return position
+            .line
+            .checked_sub(1)
+            .map(|line| line_end(buffer, line));
+    }
+    let text = buffer.line(position.line)?;
+    previous_grapheme_offset(&text, position.column)
+        .map(|column| EditorPosition::new(position.line, column))
 }
 
 pub fn next_grapheme_position(
     buffer: &EditorBuffer,
     position: EditorPosition,
 ) -> Option<EditorPosition> {
-    let offset = buffer.byte_offset(position);
-    let text = buffer.text();
-    let offset = next_grapheme_offset(&text, offset)?;
-
-    position_for_byte_offset(&text, offset)
+    let position = buffer.clamp_position(position);
+    let text = buffer.line(position.line)?;
+    if position.column == text.len() {
+        return (position.line + 1 < buffer.line_count())
+            .then_some(EditorPosition::new(position.line + 1, 0));
+    }
+    next_grapheme_offset(&text, position.column)
+        .map(|column| EditorPosition::new(position.line, column))
 }
 
 pub fn previous_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
@@ -99,7 +107,7 @@ pub fn next_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
 }
 
 pub fn line_end(buffer: &EditorBuffer, line: usize) -> EditorPosition {
-    EditorPosition::new(line, buffer.line(line).unwrap_or_default().len())
+    buffer.clamp_position(EditorPosition::new(line, usize::MAX))
 }
 
 pub fn document_end(buffer: &EditorBuffer) -> EditorPosition {
@@ -120,59 +128,45 @@ fn previous_word_position(
     buffer: &EditorBuffer,
     position: EditorPosition,
 ) -> Option<EditorPosition> {
-    let text = buffer.text();
-    let mut offset = buffer.byte_offset(position);
-
-    while let Some(previous) = previous_grapheme_offset(&text, offset) {
-        if text[previous..]
-            .chars()
-            .next()
-            .is_some_and(is_default_word_char)
-        {
-            break;
+    let mut position = buffer.clamp_position(position);
+    let mut in_word = false;
+    loop {
+        let text = buffer.line(position.line)?;
+        for (column, grapheme) in text[..position.column].grapheme_indices(true).rev() {
+            let word = grapheme.chars().next().is_some_and(is_default_word_char);
+            if in_word && !word {
+                return Some(position);
+            }
+            in_word |= word;
+            position.column = column;
         }
-
-        offset = previous;
-    }
-
-    while let Some(previous) = previous_grapheme_offset(&text, offset) {
-        if !text[previous..]
-            .chars()
-            .next()
-            .is_some_and(is_default_word_char)
-        {
-            break;
+        if in_word || position.line == 0 {
+            return Some(position);
         }
-
-        offset = previous;
+        position = line_end(buffer, position.line - 1);
     }
-
-    position_for_byte_offset(&text, offset)
 }
 
 fn next_word_position(buffer: &EditorBuffer, position: EditorPosition) -> Option<EditorPosition> {
-    let text = buffer.text();
-    let mut offset = buffer.byte_offset(position);
-
-    while offset < text.len() {
-        let ch = text[offset..].chars().next()?;
-        if !is_default_word_char(ch) {
-            break;
+    let mut position = buffer.clamp_position(position);
+    let mut skipping_word = true;
+    loop {
+        let text = buffer.line(position.line)?;
+        let start = position.column;
+        for (offset, ch) in text[start..].char_indices() {
+            let word = is_default_word_char(ch);
+            if !word {
+                skipping_word = false;
+            } else if !skipping_word {
+                return Some(EditorPosition::new(position.line, start + offset));
+            }
         }
-
-        offset += ch.len_utf8();
-    }
-
-    while offset < text.len() {
-        let ch = text[offset..].chars().next()?;
-        if is_default_word_char(ch) {
-            break;
+        if position.line + 1 == buffer.line_count() {
+            return Some(EditorPosition::new(position.line, text.len()));
         }
-
-        offset += ch.len_utf8();
+        skipping_word = false;
+        position = EditorPosition::new(position.line + 1, 0);
     }
-
-    position_for_byte_offset(&text, offset)
 }
 
 fn previous_paragraph_position(buffer: &EditorBuffer, position: EditorPosition) -> EditorPosition {
@@ -221,4 +215,50 @@ fn next_paragraph_position(buffer: &EditorBuffer, position: EditorPosition) -> E
 
 fn is_blank_line(buffer: &EditorBuffer, line: usize) -> bool {
     buffer.line(line).unwrap_or_default().trim().is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grapheme_navigation_crosses_combining_clusters_and_paired_endings() {
+        let buffer = EditorBuffer::from_text("a\u{301}😀\r\nb\n\rc");
+        let positions = [
+            EditorPosition::new(0, 0),
+            EditorPosition::new(0, 3),
+            EditorPosition::new(0, 7),
+            EditorPosition::new(1, 0),
+            EditorPosition::new(1, 1),
+            EditorPosition::new(2, 0),
+            EditorPosition::new(2, 1),
+        ];
+        for pair in positions.windows(2) {
+            assert_eq!(next_grapheme_position(&buffer, pair[0]), Some(pair[1]));
+            assert_eq!(previous_grapheme_position(&buffer, pair[1]), Some(pair[0]));
+        }
+        assert_eq!(previous_grapheme_position(&buffer, positions[0]), None);
+        assert_eq!(next_grapheme_position(&buffer, positions[6]), None);
+    }
+
+    #[test]
+    fn word_navigation_crosses_empty_lines_without_copying_the_document() {
+        let buffer = EditorBuffer::from_text("one\r\n\r\n  two! three");
+        assert_eq!(
+            move_position(&buffer, EditorPosition::new(0, 0), CaretMotion::WordRight),
+            EditorPosition::new(2, 2)
+        );
+        assert_eq!(
+            move_position(&buffer, EditorPosition::new(2, 2), CaretMotion::WordLeft),
+            EditorPosition::new(0, 0)
+        );
+        assert_eq!(
+            move_position(&buffer, EditorPosition::new(2, 2), CaretMotion::WordRight),
+            EditorPosition::new(2, 7)
+        );
+        assert_eq!(
+            move_position(&buffer, EditorPosition::new(2, 7), CaretMotion::WordLeft),
+            EditorPosition::new(2, 2)
+        );
+    }
 }

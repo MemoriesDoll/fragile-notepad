@@ -2,14 +2,32 @@ use iced::Task;
 use iced::widget::operation;
 
 use crate::core::{Document, PreparedSearch};
-use crate::editor::{EditorSelection, position_for_byte_offset, word_range_at_position};
+use crate::editor::{
+    EditorRange, EditorSelection, position_for_byte_offset, word_range_at_position,
+};
 use crate::message::{AdvancedSearchTab, Message};
 use crate::ui::find_panel::FIND_INPUT_ID;
 
 use super::App;
 
+#[derive(Debug)]
+pub(super) struct PendingSearch {
+    dialog: crate::search_dialog::SearchDialogState,
+    search: PreparedSearch,
+    documents: Vec<crate::core::DocumentId>,
+    replace: bool,
+}
+
 impl App {
     pub(super) fn update_search(&mut self, message: Message) -> Task<Message> {
+        // Editing the request or starting a new search cancels its queued work.
+        // Loading already requested documents may finish, but cannot mutate text.
+        if !matches!(message, Message::AdvancedSearchResultSelected(_, _)) {
+            if self.pending_search.is_some() {
+                self.search_dialog.status = String::from("Search canceled.");
+            }
+            self.pending_search = None;
+        }
         if let Some(document) = self.workspace.active_document_mut() {
             document.sync_selection_mirror();
         }
@@ -119,13 +137,8 @@ impl App {
                 self.search_dialog.set_include_pattern(include_pattern);
                 Task::none()
             }
-            Message::AdvancedSearchRun => {
-                self.refresh_search_results();
-                Task::none()
-            }
-            Message::AdvancedCountRun => {
-                self.refresh_search_results();
-                Task::none()
+            Message::AdvancedSearchRun | Message::AdvancedCountRun => {
+                self.begin_pending_search(self.dialog_scope(), false)
             }
             Message::AdvancedFindNextRun => {
                 if matches!(self.search_dialog.active_tab, AdvancedSearchTab::GoToLine) {
@@ -136,12 +149,10 @@ impl App {
                 Task::none()
             }
             Message::AdvancedFindAllCurrentRun => {
-                self.refresh_results_for(SearchScope::Current);
-                Task::none()
+                self.begin_pending_search(SearchScope::Current, false)
             }
             Message::AdvancedFindAllOpenRun => {
-                self.refresh_results_for(SearchScope::OpenDocuments);
-                Task::none()
+                self.begin_pending_search(SearchScope::OpenDocuments, false)
             }
             Message::AdvancedReplaceRun => self.advanced_replace_current(),
             Message::AdvancedReplaceAllRun => self.advanced_replace_all(),
@@ -310,16 +321,25 @@ impl App {
             return Task::none();
         }
 
-        let mut changed = false;
-
-        for text_match in matches.iter().rev() {
-            let latest_text = self
-                .workspace
-                .active_document()
-                .map(Document::text)
-                .unwrap_or_default();
-
-            changed |= self.replace_active_match(&latest_text, text_match.start, text_match.end);
+        let replacements = matches
+            .into_iter()
+            .filter_map(|found| {
+                Some((
+                    EditorRange::new(
+                        document.buffer.position_for_byte_offset(found.start)?,
+                        document.buffer.position_for_byte_offset(found.end)?,
+                    ),
+                    self.find.replacement.clone(),
+                ))
+            })
+            .collect();
+        let document = self
+            .workspace
+            .active_document_mut()
+            .expect("active document");
+        let changed = super::editor_ops::replace_ranges_for_search(document, replacements);
+        if changed {
+            document.ensure_caret_visible();
         }
 
         self.refresh_find_matches();
@@ -388,50 +408,139 @@ impl App {
     }
 
     fn replace_all_in(&mut self, scope: SearchScope) -> Task<Message> {
-        let replacement = self.search_dialog.replacement.clone();
+        self.begin_pending_search(scope, true)
+    }
+
+    fn dialog_scope(&self) -> SearchScope {
+        if matches!(
+            self.search_dialog.active_tab,
+            AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
+        ) {
+            SearchScope::OpenDocuments
+        } else {
+            SearchScope::Current
+        }
+    }
+
+    fn begin_pending_search(&mut self, scope: SearchScope, replace: bool) -> Task<Message> {
+        self.pending_search = None;
+        if matches!(self.search_dialog.active_tab, AdvancedSearchTab::GoToLine) && !replace {
+            self.go_to_line();
+            return Task::none();
+        }
         let Some(search) = self.prepare_advanced_search() else {
             return Task::none();
         };
-        let document_ids = self.document_ids_for_scope(scope);
+        let documents = self.document_ids_for_scope(scope);
+        let deferred = documents
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.workspace.document(*id).is_some_and(|document| {
+                    matches!(
+                        document.load_state,
+                        crate::core::document::DocumentLoadState::Deferred { .. }
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        self.pending_search = Some(PendingSearch {
+            dialog: self.search_dialog.clone(),
+            search,
+            documents,
+            replace,
+        });
+        let mut tasks = deferred
+            .into_iter()
+            .map(|id| self.activate_document(id))
+            .collect::<Vec<_>>();
+        tasks.push(self.resume_pending_search());
+        Task::batch(tasks)
+    }
 
+    pub(super) fn resume_pending_search(&mut self) -> Task<Message> {
+        let Some(pending) = self.pending_search.as_ref() else {
+            return Task::none();
+        };
+        if pending.documents.iter().any(|id| {
+            self.workspace.document(*id).is_none_or(|document| {
+                matches!(
+                    document.load_state,
+                    crate::core::document::DocumentLoadState::Failed { .. }
+                )
+            })
+        }) {
+            self.pending_search = None;
+            self.search_dialog.results.clear();
+            self.search_dialog.status = String::from(
+                "Search canceled: a target document was closed or could not be loaded. No replacements were made.",
+            );
+            return Task::none();
+        }
+        let waiting = pending
+            .documents
+            .iter()
+            .filter(|id| {
+                self.workspace
+                    .document(**id)
+                    .is_some_and(|document| !document.has_complete_text_index())
+            })
+            .count();
+        if waiting > 0 {
+            self.search_dialog.results.clear();
+            self.search_dialog.status = format!("Loading {waiting} documents for search...");
+            return Task::none();
+        }
+        let pending = self.pending_search.take().expect("ready search");
         let mut changed_documents = Vec::new();
+        let active_id = self.workspace.active_document_id;
+        if pending.replace {
+            for document_id in &pending.documents {
+                let Some(document) = self.workspace.document_mut(*document_id) else {
+                    continue;
+                };
+                if !document.has_complete_text_index() {
+                    continue;
+                }
+                let text = document.text();
+                let matches = pending.search.matches(&text);
+                let replacements = matches
+                    .into_iter()
+                    .filter_map(|found| {
+                        Some((
+                            EditorRange::new(
+                                document.buffer.position_for_byte_offset(found.start)?,
+                                document.buffer.position_for_byte_offset(found.end)?,
+                            ),
+                            pending.search.replacement_for_match(
+                                &text,
+                                found,
+                                &pending.dialog.replacement,
+                            ),
+                        ))
+                    })
+                    .collect();
+                let document_changed =
+                    super::editor_ops::replace_ranges_for_search(document, replacements);
 
-        for document_id in document_ids {
-            let Some(document) = self.workspace.document(document_id) else {
-                continue;
-            };
-            if !document.has_complete_text_index() {
-                continue;
-            }
-            let text = document.text();
-            let matches = search.matches(&text);
-            let mut document_changed = false;
-
-            for text_match in matches.iter().rev() {
-                let latest_text = self
-                    .workspace
-                    .document(document_id)
-                    .map(Document::text)
-                    .unwrap_or_default();
-                let replacement =
-                    search.replacement_for_match(&latest_text, *text_match, &replacement);
-
-                document_changed |= self.replace_document_range_with(
-                    document_id,
-                    &latest_text,
-                    text_match.start,
-                    text_match.end,
-                    replacement,
-                );
-            }
-
-            if document_changed {
-                changed_documents.push(document_id);
+                if document_changed {
+                    if *document_id == active_id {
+                        document.ensure_caret_visible();
+                    }
+                    changed_documents.push(*document_id);
+                }
             }
         }
-
         self.refresh_find_matches();
-        self.refresh_results_for(scope);
+        let mut completed = pending.dialog;
+        completed.refresh_from_documents(
+            pending
+                .documents
+                .iter()
+                .filter_map(|id| self.workspace.document(*id)),
+        );
+        self.search_dialog.results = completed.results;
+        self.search_dialog.status = completed.status;
 
         Task::batch(
             changed_documents
@@ -466,23 +575,6 @@ impl App {
         };
 
         self.search_dialog.refresh_from_documents([document]);
-    }
-
-    fn refresh_results_for(&mut self, scope: SearchScope) {
-        match scope {
-            SearchScope::Current => {
-                let Some(document) = self.workspace.active_document() else {
-                    self.search_dialog.results.clear();
-                    self.search_dialog.status = String::from("No document");
-                    return;
-                };
-
-                self.search_dialog.refresh_from_documents([document]);
-            }
-            SearchScope::OpenDocuments => {
-                self.search_dialog.refresh_from_workspace(&self.workspace);
-            }
-        }
     }
 
     fn advanced_find_next(&mut self) {

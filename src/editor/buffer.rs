@@ -108,9 +108,7 @@ impl EditorBuffer {
         let end_offset = self.char_offset(before_range.end);
         let before_text = self.rope.slice(start_offset..end_offset).to_string();
 
-        self.rope.remove(start_offset..end_offset);
-        self.rope.insert(start_offset, replacement);
-        self.rebuild_line_starts();
+        self.replace_chars(start_offset, end_offset, replacement);
 
         let after_end = position_after_text(before_range.start, replacement);
         let after_range = EditorRange::new(
@@ -139,9 +137,8 @@ impl EditorBuffer {
                 .first()
                 .is_some_and(|byte| matches!(byte, b'\r' | b'\n'));
 
-        self.rope.insert(self.rope.len_chars(), text);
-
         if can_extend_line_index {
+            self.rope.insert(self.rope.len_chars(), text);
             self.line_starts.extend(
                 line_starts(text)
                     .into_iter()
@@ -149,7 +146,8 @@ impl EditorBuffer {
                     .map(|offset| byte_len.saturating_add(offset)),
             );
         } else {
-            self.rebuild_line_starts();
+            let end = self.rope.len_chars();
+            self.replace_chars(end, end, text);
         }
     }
 
@@ -258,8 +256,52 @@ impl EditorBuffer {
         end
     }
 
-    fn rebuild_line_starts(&mut self) {
-        self.line_starts = line_starts_from_chunks(self.rope.chunks());
+    fn replace_chars(&mut self, start: usize, end: usize, replacement: &str) {
+        let start_byte = self.rope.char_to_byte(start);
+        let end_byte = self.rope.char_to_byte(end);
+        let first_line = self
+            .line_starts
+            .partition_point(|offset| *offset <= start_byte)
+            .saturating_sub(2);
+        let window_start = self.line_starts[first_line];
+        let mut suffix_line = self
+            .line_starts
+            .partition_point(|offset| *offset <= end_byte);
+        // A changed CR/LF pairing can propagate through a run of line endings.
+        // Resume the old index only at a boundary followed by ordinary text.
+        while suffix_line < self.line_starts.len() {
+            let offset = self.line_starts[suffix_line];
+            if offset < self.rope.len_bytes() && !matches!(self.rope.byte(offset), b'\r' | b'\n') {
+                break;
+            }
+            suffix_line += 1;
+        }
+        let old_window_end = self
+            .line_starts
+            .get(suffix_line)
+            .copied()
+            .unwrap_or(self.rope.len_bytes());
+        let removed_bytes = end_byte - start_byte;
+        let new_window_end = old_window_end - removed_bytes + replacement.len();
+
+        self.rope.remove(start..end);
+        self.rope.insert(start, replacement);
+
+        let window = self
+            .rope
+            .slice(self.rope.byte_to_char(window_start)..self.rope.byte_to_char(new_window_end));
+        let mut local_starts = line_starts_from_chunks(window.chunks());
+        if suffix_line < self.line_starts.len() {
+            // The final boundary belongs to the unchanged suffix.
+            local_starts.pop();
+        }
+        for offset in &mut self.line_starts[suffix_line..] {
+            *offset = *offset - removed_bytes + replacement.len();
+        }
+        self.line_starts.splice(
+            first_line..suffix_line,
+            local_starts.into_iter().map(|offset| window_start + offset),
+        );
     }
 }
 

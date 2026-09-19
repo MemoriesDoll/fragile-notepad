@@ -67,6 +67,9 @@ impl fmt::Display for DocumentLoadGeneration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentLoadState {
     Complete,
+    Deferred {
+        generation: DocumentLoadGeneration,
+    },
     Loading {
         generation: DocumentLoadGeneration,
         bytes_read: u64,
@@ -96,6 +99,9 @@ pub struct Document {
     pub viewport: ViewportModel,
     pub decorations: DecorationModel,
     pub scroll: ScrollOffset,
+    pub viewport_visible_rows: usize,
+    pub viewport_text_width: f32,
+    pub viewport_character_width: f32,
     pub is_dirty: bool,
     pub is_pinned: bool,
     pub syntax_token: String,
@@ -104,6 +110,8 @@ pub struct Document {
     pub encoding: TextEncoding,
     pub load_state: DocumentLoadState,
     pub index_state: DocumentIndexState,
+    pub defer_analysis: bool,
+    pub analysis_pending: bool,
     revision: u64,
     metadata_dirty: bool,
     syntax_token_source: SyntaxTokenSource,
@@ -219,6 +227,9 @@ impl Document {
             viewport,
             decorations,
             scroll: ScrollOffset::ZERO,
+            viewport_visible_rows: 20,
+            viewport_text_width: 640.0,
+            viewport_character_width: 8.0,
             is_dirty: false,
             is_pinned: false,
             syntax_token,
@@ -227,6 +238,8 @@ impl Document {
             encoding: TextEncoding::Utf8,
             load_state: DocumentLoadState::Complete,
             index_state: DocumentIndexState::Complete,
+            defer_analysis: false,
+            analysis_pending: false,
             revision: 0,
             metadata_dirty: false,
             syntax_token_source,
@@ -255,6 +268,11 @@ impl Document {
 
     pub fn mark_dirty(&mut self) {
         self.metadata_dirty = true;
+        self.is_dirty = true;
+    }
+
+    pub fn invalidate_clean_checkpoint(&mut self) {
+        self.history.invalidate_clean_checkpoint();
         self.is_dirty = true;
     }
 
@@ -288,7 +306,8 @@ impl Document {
 
     pub fn load_generation(&self) -> Option<DocumentLoadGeneration> {
         match self.load_state {
-            DocumentLoadState::Loading { generation, .. }
+            DocumentLoadState::Deferred { generation }
+            | DocumentLoadState::Loading { generation, .. }
             | DocumentLoadState::Failed { generation } => Some(generation),
             DocumentLoadState::Complete => match self.index_state {
                 DocumentIndexState::Pending { generation } => Some(generation),
@@ -493,6 +512,25 @@ impl Document {
         }
     }
 
+    pub fn syntax_is_automatic(&self) -> bool {
+        self.syntax_token_source == SyntaxTokenSource::Auto
+    }
+
+    pub fn restore_syntax(&mut self, token: Option<String>, automatic: Option<bool>) {
+        // Old sessions cannot distinguish a manual choice matching the extension
+        // from automatic detection. Prefer detection when they agree.
+        let detected = self
+            .path
+            .as_deref()
+            .map(syntax_token_for_path)
+            .unwrap_or_else(|| DEFAULT_SYNTAX_TOKEN.to_owned());
+        if automatic.unwrap_or_else(|| token.as_ref().is_none_or(|token| token == &detected)) {
+            self.refresh_syntax_from_path();
+        } else if let Some(token) = token {
+            self.set_syntax_token(token);
+        }
+    }
+
     pub fn set_syntax_token(&mut self, syntax_token: impl Into<String>) {
         let syntax_token = syntax_token.into();
 
@@ -561,13 +599,32 @@ impl Document {
     }
 
     pub fn refresh_text_from(&mut self, first_changed_line: usize) {
-        if self.can_run_full_document_analysis() {
+        if self.defer_analysis {
+            self.analysis_pending = self.has_complete_text_index();
+            if self.folds.ranges().is_empty() {
+                self.viewport
+                    .sync_unfolded_line_count(self.buffer.line_count());
+                self.decorations
+                    .sync_loading_line_count(self.buffer.line_count());
+            } else if self.viewport.line_count() != self.buffer.line_count() {
+                self.viewport = ViewportModel::new(self.buffer.line_count(), &self.folds);
+            }
+        } else if self.can_run_full_document_analysis() {
             self.folds
                 .recompute(self.fold_provider().compute_folds(&self.buffer));
-        } else {
+            self.refresh_view_models();
+        } else if !self.folds.ranges().is_empty() || !self.decorations.indent_guides.is_empty() {
             self.folds.recompute(Vec::new());
+            self.refresh_view_models();
+        } else {
+            // Large files have an unfolded identity viewport. An inline edit does
+            // not change it, and inserting lines only needs to extend its tail.
+            self.viewport
+                .sync_unfolded_line_count(self.buffer.line_count());
+            self.decorations
+                .sync_loading_line_count(self.buffer.line_count());
         }
-        self.refresh_view_models();
+        self.clamp_scroll();
         self.refresh_dirty_state();
         self.syntax_cache
             .borrow_mut()
@@ -588,10 +645,48 @@ impl Document {
             &self.folds,
             indent_guides,
         );
+        self.clamp_scroll();
+    }
+
+    fn clamp_scroll(&mut self) {
         self.scroll.first_visible_row = self
             .scroll
             .first_visible_row
             .min(self.viewport.visible_row_count().saturating_sub(1));
+    }
+
+    pub fn ensure_caret_visible(&mut self) {
+        let cursor = self.buffer.clamp_position(self.main_selection().cursor);
+        let mut unfolded = false;
+        while let Some(range) = self.folds.collapsed_covering(cursor.line) {
+            self.folds.set_collapsed(range, false);
+            unfolded = true;
+        }
+        if unfolded {
+            self.refresh_view_models();
+        }
+        if let Some(row) = self.viewport.document_line_to_visible_row(cursor.line) {
+            let capacity = self.viewport_visible_rows.max(1);
+            if row < self.scroll.first_visible_row {
+                self.scroll.first_visible_row = row;
+            } else if row >= self.scroll.first_visible_row.saturating_add(capacity) {
+                self.scroll.first_visible_row = row.saturating_sub(capacity - 1);
+            }
+        }
+        let line = self.buffer.line(cursor.line).unwrap_or_default();
+        let column = crate::editor::layout::visual_column_for(
+            &line,
+            cursor.column,
+            self.decorations.settings.indent_width,
+        );
+        let char_width = self.viewport_character_width.max(1.0);
+        let x = column as f32 * char_width;
+        let width = self.viewport_text_width.max(char_width);
+        if x < self.scroll.horizontal_px {
+            self.scroll.horizontal_px = x;
+        } else if x + char_width > self.scroll.horizontal_px + width {
+            self.scroll.horizontal_px = (x + char_width - width).max(0.0);
+        }
     }
 
     pub fn reveal_line(&mut self, line: usize) {
@@ -608,7 +703,22 @@ impl Document {
     }
 
     pub fn set_decoration_settings(&mut self, settings: DecorationSettings) {
+        let previous = self.decorations.settings;
+        if previous == settings {
+            return;
+        }
         self.decorations.settings = settings;
+        if previous.indent_width == settings.indent_width {
+            for line in &mut self.decorations.line_decorations {
+                line.line_number = settings.show_line_numbers.then_some(line.line + 1);
+                line.has_fold_control = settings.show_folding_controls && line.fold_range.is_some();
+            }
+            return;
+        }
+        if self.defer_analysis {
+            self.analysis_pending = self.has_complete_text_index();
+            return;
+        }
         if self.can_run_full_document_analysis() {
             self.folds
                 .recompute(fold_provider(settings, &self.syntax_token).compute_folds(&self.buffer));
@@ -696,6 +806,11 @@ impl Document {
 
     fn refresh_after_syntax_change(&mut self) {
         self.syntax_cache.borrow_mut().clear();
+        if self.defer_analysis {
+            self.analysis_pending = self.has_complete_text_index();
+            self.revision = self.revision.saturating_add(1);
+            return;
+        }
         if self.can_run_full_document_analysis() {
             self.folds
                 .recompute(self.fold_provider().compute_folds(&self.buffer));
@@ -759,6 +874,80 @@ impl Document {
     fn fold_provider(&self) -> IndentBraceFoldProvider {
         fold_provider(self.decorations.settings, &self.syntax_token)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct DocumentAnalysis {
+    pub document_id: DocumentId,
+    pub revision: u64,
+    pub syntax_token: String,
+    pub indent_width: usize,
+    pub folds: Vec<crate::editor::FoldRange>,
+    pub guides: Vec<IndentGuide>,
+}
+
+impl Document {
+    pub fn analysis_request(&self) -> Option<(EditorBuffer, DocumentAnalysis)> {
+        (self.analysis_pending && self.has_complete_text_index()).then(|| {
+            (
+                self.buffer.clone(),
+                DocumentAnalysis {
+                    document_id: self.id,
+                    revision: self.revision,
+                    syntax_token: self.syntax_token.clone(),
+                    indent_width: self.decorations.settings.indent_width,
+                    folds: Vec::new(),
+                    guides: Vec::new(),
+                },
+            )
+        })
+    }
+
+    pub fn apply_analysis(&mut self, result: DocumentAnalysis) -> bool {
+        if self.id != result.document_id
+            || self.revision != result.revision
+            || self.syntax_token != result.syntax_token
+            || self.decorations.settings.indent_width != result.indent_width
+        {
+            return false;
+        }
+        self.folds.recompute(result.folds);
+        self.viewport = ViewportModel::new(self.buffer.line_count(), &self.folds);
+        self.decorations = DecorationModel::from_folds(
+            self.decorations.settings,
+            self.buffer.line_count(),
+            &self.folds,
+            result.guides,
+        );
+        self.analysis_pending = false;
+        self.clamp_scroll();
+        true
+    }
+
+    pub fn restore_collapsed_folds(&mut self, ranges: &[(usize, usize)]) {
+        for &(start, end) in ranges {
+            self.folds
+                .set_collapsed(crate::editor::FoldRange::new(start, end), true);
+        }
+        self.viewport = ViewportModel::new(self.buffer.line_count(), &self.folds);
+        self.decorations = DecorationModel::from_folds(
+            self.decorations.settings,
+            self.buffer.line_count(),
+            &self.folds,
+            std::mem::take(&mut self.decorations.indent_guides),
+        );
+        self.clamp_scroll();
+    }
+}
+
+pub fn analyze_document(buffer: EditorBuffer, mut result: DocumentAnalysis) -> DocumentAnalysis {
+    if buffer.len_bytes() <= MAX_FULL_DOCUMENT_ANALYSIS_BYTES {
+        result.folds =
+            IndentBraceFoldProvider::for_syntax(result.indent_width, &result.syntax_token)
+                .compute_folds(&buffer);
+        result.guides = indent_guides(&buffer, result.indent_width);
+    }
+    result
 }
 
 pub fn title_for_path(path: &Path) -> Option<&str> {

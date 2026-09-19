@@ -183,7 +183,7 @@ index 6b8ac2d4..b8ae58f7 100644
  #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
  pub enum Error {
 diff --git a/vendor/iced/graphics/src/compositor.rs b/vendor/iced/graphics/src/compositor.rs
-index af8b8d73..a4303eee 100644
+index af8b8d73..a8494ce1 100644
 --- a/vendor/iced/graphics/src/compositor.rs
 +++ b/vendor/iced/graphics/src/compositor.rs
 @@ -27,7 +27,7 @@ pub trait Compositor: Sized {
@@ -195,7 +195,7 @@ index af8b8d73..a4303eee 100644
  
      /// Creates a [`Self::Renderer`] for the [`Compositor`].
      fn create_renderer(&self, settings: renderer::Settings) -> Self::Renderer;
-@@ -97,6 +97,19 @@ pub trait Compositor: Sized {
+@@ -97,6 +97,38 @@ pub trait Compositor: Sized {
          viewport: &Viewport,
          background_color: Color,
      ) -> Vec<u8>;
@@ -212,10 +212,29 @@ index af8b8d73..a4303eee 100644
 +        viewport: &Viewport,
 +        background_color: Color,
 +    ) -> Result<OffscreenWarmUpEvidence, OffscreenWarmUpError>;
++
++    /// Starts offscreen work without waiting for GPU completion.
++    /// The renderer must retain its submission until it is polled or dropped.
++    fn begin_warm_up_offscreen(
++        &mut self,
++        _renderer: &mut Self::Renderer,
++        _viewport: &Viewport,
++        _background_color: Color,
++    ) -> Result<(), OffscreenWarmUpError> {
++        Err(OffscreenWarmUpError::Unsupported)
++    }
++
++    /// Checks completion without blocking the event loop. `None` means pending.
++    fn poll_warm_up_offscreen(
++        &mut self,
++        _renderer: &mut Self::Renderer,
++    ) -> Result<Option<OffscreenWarmUpEvidence>, OffscreenWarmUpError> {
++        Err(OffscreenWarmUpError::Unsupported)
++    }
  }
  
  /// A window that can be used in a [`Compositor`].
-@@ -153,6 +166,44 @@ pub struct Information {
+@@ -153,6 +185,44 @@ pub struct Information {
      pub backend: String,
  }
  
@@ -260,7 +279,7 @@ index af8b8d73..a4303eee 100644
  #[cfg(debug_assertions)]
  impl Compositor for () {
      type Renderer = ();
-@@ -213,6 +264,15 @@ impl Compositor for () {
+@@ -213,6 +283,15 @@ impl Compositor for () {
      ) -> Vec<u8> {
          vec![]
      }
@@ -277,7 +296,7 @@ index af8b8d73..a4303eee 100644
  
  #[cfg(debug_assertions)]
 diff --git a/vendor/iced/graphics/src/damage.rs b/vendor/iced/graphics/src/damage.rs
-index 8aa42798..04482c09 100644
+index 8aa42798..d2599335 100644
 --- a/vendor/iced/graphics/src/damage.rs
 +++ b/vendor/iced/graphics/src/damage.rs
 @@ -1,5 +1,80 @@
@@ -362,7 +381,7 @@ index 8aa42798..04482c09 100644
  
  /// Diffs the damage regions given some previous and current primitives.
  pub fn diff<T>(
-@@ -76,3 +151,348 @@ pub fn group(mut damage: Vec<Rectangle>, bounds: Rectangle) -> Vec<Rectangle> {
+@@ -76,3 +151,502 @@ pub fn group(mut damage: Vec<Rectangle>, bounds: Rectangle) -> Vec<Rectangle> {
  
      output
  }
@@ -457,41 +476,195 @@ index 8aa42798..04482c09 100644
 +    if budget == 0 || damage.len() <= budget {
 +        return damage;
 +    }
++    // Bound pathological work. Redrawing the union preserves final pixels.
++    if damage.len() > 256 {
++        return damage
++            .into_iter()
++            .reduce(|a, b| a.union(&b))
++            .into_iter()
++            .collect();
++    }
 +
++    // Cache the minimum for each left-hand row of the pair matrix. Merging
++    // changes just two slots; retain unaffected minima and compare the new
++    // slots, rescanning only rows whose previous winner became invalid.
++    let mut minima = (0..damage.len() - 1)
++        .map(|left| best_in_row(&damage, left))
++        .collect::<Vec<_>>();
 +    while damage.len() > budget {
-+        let mut best_pair = (0, 1);
-+        let mut best_extra_area = f32::INFINITY;
-+        let mut best_union_area = f32::INFINITY;
-+
-+        for left in 0..damage.len() {
-+            for right in (left + 1)..damage.len() {
-+                let union = damage[left].union(&damage[right]);
-+                let union_area = union.area();
-+                let extra_area = union_area - damage[left].area() - damage[right].area();
-+
-+                if extra_area < best_extra_area
-+                    || (extra_area == best_extra_area && union_area < best_union_area)
-+                {
-+                    best_pair = (left, right);
-+                    best_extra_area = extra_area;
-+                    best_union_area = union_area;
-+                }
++        let mut pair = minima[0];
++        for &candidate in &minima[1..] {
++            if candidate.better_than(pair) {
++                pair = candidate;
 +            }
 +        }
-+
-+        let (left, right) = best_pair;
++        let (left, right) = (pair.left, pair.right);
 +        let merged = damage[left].union(&damage[right]);
 +        damage[left] = merged;
 +        let _ = damage.swap_remove(right);
++        minima.truncate(damage.len() - 1);
++        for (row, minimum) in minima.iter_mut().enumerate() {
++            if row == left
++                || row == right
++                || minimum.right == left
++                || minimum.right == right
++                || minimum.right >= damage.len()
++            {
++                *minimum = best_in_row(&damage, row);
++            } else {
++                for changed in [left, right] {
++                    if changed > row && changed < damage.len() {
++                        let candidate = MergePair::new(&damage, row, changed);
++                        if candidate.better_than(*minimum) {
++                            *minimum = candidate;
++                        }
++                    }
++                }
++            }
++        }
 +    }
 +
 +    damage
++}
++
++fn best_in_row(damage: &[Rectangle], left: usize) -> MergePair {
++    let mut best = MergePair::new(damage, left, left + 1);
++    for right in left + 2..damage.len() {
++        let candidate = MergePair::new(damage, left, right);
++        if candidate.better_than(best) {
++            best = candidate;
++        }
++    }
++    best
++}
++
++#[derive(Debug, Clone, Copy)]
++struct MergePair {
++    extra_area: f32,
++    union_area: f32,
++    left: usize,
++    right: usize,
++}
++
++impl MergePair {
++    fn new(damage: &[Rectangle], left: usize, right: usize) -> Self {
++        let union_area = damage[left].union(&damage[right]).area();
++        Self {
++            extra_area: union_area - damage[left].area() - damage[right].area(),
++            union_area,
++            left,
++            right,
++        }
++    }
++    fn better_than(self, other: Self) -> bool {
++        self.extra_area < other.extra_area
++            || (self.extra_area == other.extra_area
++                && (self.union_area < other.union_area
++                    || (self.union_area == other.union_area
++                        && (self.left, self.right) < (other.left, other.right))))
++    }
 +}
 +
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
 +    use crate::core::Size;
++
++    fn reference(mut damage: Vec<Rectangle>, budget: usize) -> Vec<Rectangle> {
++        while damage.len() > budget {
++            let mut best = (0, 1);
++            let mut extra = f32::INFINITY;
++            let mut area = f32::INFINITY;
++            for left in 0..damage.len() {
++                for right in left + 1..damage.len() {
++                    let a = damage[left].union(&damage[right]).area();
++                    let e = a - damage[left].area() - damage[right].area();
++                    if e < extra || (e == extra && a < area) {
++                        best = (left, right);
++                        extra = e;
++                        area = a;
++                    }
++                }
++            }
++            damage[best.0] = damage[best.0].union(&damage[best.1]);
++            let _ = damage.swap_remove(best.1);
++        }
++        damage
++    }
++    #[test]
++    fn cached_compaction_matches_original_greedy_pair_order() {
++        let mut state = 17u32;
++        for count in [9, 16, 30, 60, 128, 256] {
++            for _ in 0..20 {
++                let damage = (0..count)
++                    .map(|_| {
++                        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
++                        Rectangle::new(
++                            Point::new(
++                                (state % 20) as f32 * 17.0,
++                                ((state >> 9) % 20) as f32 * 19.0,
++                            ),
++                            Size::new(20.0, 18.0),
++                        )
++                    })
++                    .collect::<Vec<_>>();
++                assert_eq!(compact_to_budget(damage.clone(), 8), reference(damage, 8));
++            }
++        }
++    }
++
++    #[test]
++    #[ignore = "manual release microbenchmark"]
++    fn benchmark_compaction_against_reference() {
++        use std::hint::black_box;
++        use std::time::Instant;
++        for count in [16, 32, 64, 128, 256] {
++            let damage = (0..count)
++                .map(|i| {
++                    Rectangle::new(
++                        Point::new((i % 8) as f32 * 140.0, (i / 8) as f32 * 70.0),
++                        Size::new(20.0 + (i % 3) as f32, 18.0),
++                    )
++                })
++                .collect::<Vec<_>>();
++            assert_eq!(
++                compact_to_budget(damage.clone(), 8),
++                reference(damage.clone(), 8)
++            );
++            for (name, run) in [
++                (
++                    "original",
++                    reference as fn(Vec<Rectangle>, usize) -> Vec<Rectangle>,
++                ),
++                ("cached", compact_to_budget),
++            ] {
++                let loops = 1000;
++                let started = Instant::now();
++                for _ in 0..loops {
++                    let _ = black_box(run(black_box(damage.clone()), 8));
++                }
++                eprintln!(
++                    "regions={count} algorithm={name} us={:.3}",
++                    started.elapsed().as_secs_f64() * 1e6 / loops as f64
++                );
++            }
++        }
++    }
++
++    #[test]
++    fn extreme_fragmentation_retains_all_damage_without_quadratic_storage() {
++        let damage = (0..4096)
++            .map(|i| {
++                Rectangle::new(
++                    Point::new((i % 64) as f32 * 40.0, (i / 64) as f32 * 40.0),
++                    Size::new(4.0, 4.0),
++                )
++            })
++            .collect::<Vec<_>>();
++        let compacted = compact_to_budget(damage.clone(), 8);
++        assert_eq!(compacted.len(), 1);
++        assert!(damage.iter().all(|rect| rect.is_within(&compacted[0])));
++    }
 +
 +    fn scroll(x: f32, y: f32, width: f32, height: f32, delta_y: f32) -> Scroll {
 +        Scroll {
@@ -712,7 +885,7 @@ index 8aa42798..04482c09 100644
 +    }
 +}
 diff --git a/vendor/iced/graphics/src/text.rs b/vendor/iced/graphics/src/text.rs
-index 58a7aa21..13291090 100644
+index 58a7aa21..158cad85 100644
 --- a/vendor/iced/graphics/src/text.rs
 +++ b/vendor/iced/graphics/src/text.rs
 @@ -12,7 +12,7 @@ pub use cosmic_text;
@@ -724,7 +897,7 @@ index 58a7aa21..13291090 100644
  
  use std::borrow::Cow;
  use std::collections::HashSet;
-@@ -106,6 +106,166 @@ impl Text {
+@@ -106,6 +106,306 @@ impl Text {
      }
  }
  
@@ -737,6 +910,11 @@ index 58a7aa21..13291090 100644
 +    if previous.len() < 2 || current.len() < 2 {
 +        return None;
 +    }
++    // In particular, repeated identical rows must not manufacture a scroll
++    // from an otherwise unchanged scene.
++    if previous == current {
++        return None;
++    }
 +
 +    let shared_len = previous.len().min(current.len());
 +    let required_matches = shared_len
@@ -744,9 +922,18 @@ index 58a7aa21..13291090 100644
 +        .max(shared_len.saturating_mul(2) / 3)
 +        .max(2);
 +    let mut best = None;
++    // Scroll copying is optional. Bound detection work and let the normal
++    // damage path redraw when a scene cannot be matched cheaply.
++    let mut remaining_comparisons = 65_536usize;
 +
 +    for previous_start in 0..previous.len() {
 +        for current_start in 0..current.len() {
++            let possible = (previous.len() - previous_start).min(current.len() - current_start);
++            let minimum = best.map_or(required_matches, |(matches, _)| matches + 1);
++            if possible < minimum {
++                break;
++            }
++            remaining_comparisons = remaining_comparisons.checked_sub(1)?;
 +            let Some(delta) = delta(previous[previous_start], current[current_start]) else {
 +                continue;
 +            };
@@ -758,12 +945,15 @@ index 58a7aa21..13291090 100644
 +            let mut matches = 0usize;
 +            while previous_start + matches < previous.len()
 +                && current_start + matches < current.len()
-+                && has_delta(
++            {
++                remaining_comparisons = remaining_comparisons.checked_sub(1)?;
++                if !has_delta(
 +                    previous[previous_start + matches],
 +                    current[current_start + matches],
 +                    delta,
-+                )
-+            {
++                ) {
++                    break;
++                }
 +                matches += 1;
 +            }
 +
@@ -885,6 +1075,129 @@ index 58a7aa21..13291090 100644
 +                && clip_bounds_a == clip_bounds_b
 +        }
 +        _ => false,
++    }
++}
++
++#[cfg(test)]
++mod scroll_tests {
++    use super::*;
++
++    fn row(content: usize, y: f32) -> Text {
++        Text::Cached {
++            content: content.to_string(),
++            bounds: Rectangle::new(Point::new(0.0, y), Size::new(80.0, 18.0)),
++            color: Color::BLACK,
++            size: Pixels(14.0),
++            line_height: Pixels(18.0),
++            font: Font::MONOSPACE,
++            align_x: Alignment::Left,
++            align_y: alignment::Vertical::Top,
++            shaping: Shaping::Basic,
++            wrapping: Wrapping::None,
++            ellipsis: Ellipsis::None,
++            clip_bounds: Rectangle::new(Point::ORIGIN, Size::new(200.0, 2000.0)),
++        }
++    }
++
++    fn reference(previous: &[&Text], current: &[&Text], allowance: usize) -> Option<Vector> {
++        let shared = previous.len().min(current.len());
++        let required = shared.saturating_sub(allowance).max(shared * 2 / 3).max(2);
++        let mut best = None;
++        for p in 0..previous.len() {
++            for c in 0..current.len() {
++                let Some(offset) = delta(previous[p], current[c]) else {
++                    continue;
++                };
++                if offset.x.abs() > 0.5 || offset.y.abs() < 0.5 {
++                    continue;
++                }
++                let count = previous[p..]
++                    .iter()
++                    .zip(&current[c..])
++                    .take_while(|(a, b)| has_delta(a, b, offset))
++                    .count();
++                if count >= required && best.is_none_or(|(n, _)| count > n) {
++                    best = Some((count, offset));
++                }
++            }
++        }
++        best.map(|(_, offset)| offset)
++    }
++
++    #[test]
++    fn optimized_scroll_matches_reference_for_changed_scenes() {
++        for count in [3, 8, 20, 70] {
++            for repeats in [1, 2, 7, 1000] {
++                for offset in [-3, -1, 1, 3] {
++                    let previous = (0..count)
++                        .map(|i| row(i % repeats, i as f32 * 18.0))
++                        .collect::<Vec<_>>();
++                    let current = (0..count)
++                        .map(|i| row(i % repeats, i as f32 * 18.0 + offset as f32 * 18.0))
++                        .collect::<Vec<_>>();
++                    let a = previous.iter().collect::<Vec<_>>();
++                    let b = current.iter().collect::<Vec<_>>();
++                    assert_eq!(scroll_delta(&a, &b, 10), reference(&a, &b, 10));
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn unchanged_repeated_rows_do_not_produce_scroll() {
++        let rows = (0..100)
++            .map(|i| row(0, i as f32 * 18.0))
++            .collect::<Vec<_>>();
++        let rows = rows.iter().collect::<Vec<_>>();
++        assert_eq!(scroll_delta(&rows, &rows, 10), None);
++    }
++
++    #[test]
++    fn scroll_matches_reference_with_entering_rows_edits_and_fractional_positions() {
++        for count in [8, 35, 90] {
++            for shift in [-3i32, -1, 1, 3] {
++                for changed in [false, true] {
++                    let previous = (0..count)
++                        .map(|i| row(i, i as f32 * 18.0))
++                        .collect::<Vec<_>>();
++                    let current = (0..count)
++                        .map(|i| {
++                            let content = usize::try_from(i as i32 + shift).unwrap_or(5001);
++                            let content = if changed && i == count / 2 {
++                                5000
++                            } else {
++                                content
++                            };
++                            row(
++                                content,
++                                i as f32 * 18.0 + if i % 2 == 0 { 0.25 } else { 0.0 },
++                            )
++                        })
++                        .collect::<Vec<_>>();
++                    let a = previous.iter().collect::<Vec<_>>();
++                    let b = current.iter().collect::<Vec<_>>();
++                    assert_eq!(scroll_delta(&a, &b, 10), reference(&a, &b, 10));
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn ambiguous_large_scene_falls_back_without_unbounded_search() {
++        let previous = (0..1000)
++            .map(|i| row(i, i as f32 * 18.0))
++            .collect::<Vec<_>>();
++        let current = (0..1000)
++            .map(|i| row(i + 1000, i as f32 * 18.0))
++            .collect::<Vec<_>>();
++        assert_eq!(
++            scroll_delta(
++                &previous.iter().collect::<Vec<_>>(),
++                &current.iter().collect::<Vec<_>>(),
++                1000
++            ),
++            None
++        );
 +    }
 +}
 +
@@ -1125,7 +1438,7 @@ index f04d33c6..d787dfe0 100644
  
      struct WithExecutor<P, E> {
 diff --git a/vendor/iced/renderer/src/fallback.rs b/vendor/iced/renderer/src/fallback.rs
-index 5f746648..706ea950 100644
+index 5f746648..1afe9a7b 100644
 --- a/vendor/iced/renderer/src/fallback.rs
 +++ b/vendor/iced/renderer/src/fallback.rs
 @@ -11,6 +11,18 @@ use crate::graphics::text;
@@ -1222,7 +1535,7 @@ index 5f746648..706ea950 100644
              _ => unreachable!(),
          }
      }
-@@ -389,6 +434,23 @@ where
+@@ -389,6 +434,55 @@ where
              _ => unreachable!(),
          }
      }
@@ -1243,10 +1556,42 @@ index 5f746648..706ea950 100644
 +            _ => unreachable!(),
 +        }
 +    }
++
++    fn begin_warm_up_offscreen(
++        &mut self,
++        renderer: &mut Self::Renderer,
++        viewport: &graphics::Viewport,
++        background_color: Color,
++    ) -> Result<(), compositor::OffscreenWarmUpError> {
++        match (self, renderer) {
++            (Self::Primary(compositor), Renderer::Primary(renderer)) => {
++                compositor.begin_warm_up_offscreen(renderer, viewport, background_color)
++            }
++            (Self::Secondary(compositor), Renderer::Secondary(renderer)) => {
++                compositor.begin_warm_up_offscreen(renderer, viewport, background_color)
++            }
++            _ => unreachable!(),
++        }
++    }
++
++    fn poll_warm_up_offscreen(
++        &mut self,
++        renderer: &mut Self::Renderer,
++    ) -> Result<Option<compositor::OffscreenWarmUpEvidence>, compositor::OffscreenWarmUpError> {
++        match (self, renderer) {
++            (Self::Primary(compositor), Renderer::Primary(renderer)) => {
++                compositor.poll_warm_up_offscreen(renderer)
++            }
++            (Self::Secondary(compositor), Renderer::Secondary(renderer)) => {
++                compositor.poll_warm_up_offscreen(renderer)
++            }
++            _ => unreachable!(),
++        }
++    }
  }
  
  #[cfg(feature = "wgpu-bare")]
-@@ -640,3 +702,107 @@ where
+@@ -640,3 +734,109 @@ where
  {
      type Compositor = Compositor<A::Compositor, B::Compositor>;
  }
@@ -1294,7 +1639,9 @@ index 5f746648..706ea950 100644
 +        "{timestamp_us},{event},{elapsed_us},{}",
 +        csv_escape(&detail.to_string())
 +    );
-+    let _ = trace.writer.flush();
++    if event == "fallback_present" {
++        let _ = trace.writer.flush();
++    }
 +}
 +
 +fn trace() -> Option<&'static Mutex<PerfTrace>> {
@@ -1614,7 +1961,7 @@ index 431488be..5e11e92c 100644
      application(State::default, update, view).run()
  }
 diff --git a/vendor/iced/tiny_skia/src/engine.rs b/vendor/iced/tiny_skia/src/engine.rs
-index af14962d..a19502ac 100644
+index af14962d..39e1c363 100644
 --- a/vendor/iced/tiny_skia/src/engine.rs
 +++ b/vendor/iced/tiny_skia/src/engine.rs
 @@ -2,7 +2,8 @@ use crate::Primitive;
@@ -1627,7 +1974,7 @@ index af14962d..a19502ac 100644
  
  #[derive(Debug)]
  pub struct Engine {
-@@ -14,6 +15,56 @@ pub struct Engine {
+@@ -14,6 +15,61 @@ pub struct Engine {
      pub(crate) vector_pipeline: crate::vector::Pipeline,
  }
  
@@ -1657,7 +2004,12 @@ index af14962d..a19502ac 100644
 +                    format_args!("bounds={}", format_rect(bounds)),
 +                );
 +            }
-+            adjust_clip_mask(self.mask, bounds);
++            if let Some(previous) = self.bounds {
++                clear_mask_region(self.mask, previous);
++                fill_clip_mask(self.mask, bounds);
++            } else {
++                adjust_clip_mask(self.mask, bounds);
++            }
 +            self.bounds = Some(bounds);
 +            self.rebuilds += 1;
 +        } else {
@@ -1684,7 +2036,7 @@ index af14962d..a19502ac 100644
  impl Engine {
      pub fn new() -> Self {
          Self {
-@@ -25,18 +76,75 @@ impl Engine {
+@@ -25,18 +81,75 @@ impl Engine {
          }
      }
  
@@ -1761,7 +2113,7 @@ index af14962d..a19502ac 100644
              return;
          }
  
-@@ -123,12 +231,29 @@ impl Engine {
+@@ -123,12 +236,29 @@ impl Engine {
                      pixmap.as_ref(),
                      &tiny_skia::PixmapPaint::default(),
                      tiny_skia::Transform::default(),
@@ -1793,7 +2145,7 @@ index af14962d..a19502ac 100644
  
          pixels.fill_path(
              &path,
-@@ -287,7 +412,7 @@ impl Engine {
+@@ -287,7 +417,7 @@ impl Engine {
          text: &Text,
          transformation: Transformation,
          pixels: &mut tiny_skia::PixmapMut<'_>,
@@ -1802,7 +2154,7 @@ index af14962d..a19502ac 100644
          clip_bounds: Rectangle,
      ) {
          match text {
-@@ -302,6 +427,17 @@ impl Engine {
+@@ -302,6 +432,17 @@ impl Engine {
                  let Some(clip_bounds) =
                      clip_bounds.intersection(&(*local_clip_bounds * transformation))
                  else {
@@ -1820,7 +2172,7 @@ index af14962d..a19502ac 100644
                      return;
                  };
  
-@@ -309,24 +445,48 @@ impl Engine {
+@@ -309,24 +450,48 @@ impl Engine {
                      Rectangle::new(*position, paragraph.min_bounds) * transformation;
  
                  if !clip_bounds.intersects(&physical_bounds) {
@@ -1876,7 +2228,7 @@ index af14962d..a19502ac 100644
                  );
              }
              Text::Editor {
-@@ -344,15 +504,14 @@ impl Engine {
+@@ -344,15 +509,14 @@ impl Engine {
                      return;
                  };
  
@@ -1894,7 +2246,7 @@ index af14962d..a19502ac 100644
                  );
              }
              Text::Cached {
-@@ -369,20 +528,61 @@ impl Engine {
+@@ -369,20 +533,61 @@ impl Engine {
                  ellipsis,
                  clip_bounds: local_clip_bounds,
              } => {
@@ -1962,7 +2314,7 @@ index af14962d..a19502ac 100644
                  self.text_pipeline.draw_cached(
                      content,
                      *bounds,
-@@ -396,8 +596,9 @@ impl Engine {
+@@ -396,8 +601,9 @@ impl Engine {
                      *wrapping,
                      *ellipsis,
                      pixels,
@@ -1973,7 +2325,7 @@ index af14962d..a19502ac 100644
                  );
              }
              Text::Raw {
-@@ -423,16 +624,19 @@ impl Engine {
+@@ -423,16 +629,19 @@ impl Engine {
                      return;
                  }
  
@@ -1996,7 +2348,7 @@ index af14962d..a19502ac 100644
                  );
              }
          }
-@@ -443,7 +647,7 @@ impl Engine {
+@@ -443,7 +652,7 @@ impl Engine {
          primitive: &Primitive,
          transformation: Transformation,
          pixels: &mut tiny_skia::PixmapMut<'_>,
@@ -2005,7 +2357,7 @@ index af14962d..a19502ac 100644
          clip_bounds: Rectangle,
      ) {
          match primitive {
-@@ -463,8 +667,11 @@ impl Engine {
+@@ -463,8 +672,11 @@ impl Engine {
                      return;
                  }
  
@@ -2019,7 +2371,7 @@ index af14962d..a19502ac 100644
  
                  pixels.fill_path(
                      path,
-@@ -494,8 +701,11 @@ impl Engine {
+@@ -494,8 +706,11 @@ impl Engine {
                      return;
                  }
  
@@ -2033,7 +2385,7 @@ index af14962d..a19502ac 100644
  
                  pixels.stroke_path(
                      path,
-@@ -513,7 +723,7 @@ impl Engine {
+@@ -513,7 +728,7 @@ impl Engine {
          image: &Image,
          _transformation: Transformation,
          _pixels: &mut tiny_skia::PixmapMut<'_>,
@@ -2042,7 +2394,7 @@ index af14962d..a19502ac 100644
          _clip_bounds: Rectangle,
      ) {
          match image {
-@@ -529,9 +739,6 @@ impl Engine {
+@@ -529,9 +744,6 @@ impl Engine {
                      return;
                  };
  
@@ -2052,7 +2404,7 @@ index af14962d..a19502ac 100644
                  let center = bounds.center();
                  let radians = f32::from(image.rotation);
  
-@@ -548,7 +755,7 @@ impl Engine {
+@@ -548,7 +760,7 @@ impl Engine {
                      image.opacity,
                      _pixels,
                      transform,
@@ -2061,7 +2413,7 @@ index af14962d..a19502ac 100644
                  );
              }
              #[cfg(feature = "svg")]
-@@ -559,8 +766,11 @@ impl Engine {
+@@ -559,8 +771,11 @@ impl Engine {
                      return;
                  }
  
@@ -2075,7 +2427,32 @@ index af14962d..a19502ac 100644
  
                  let center = physical_bounds.center();
                  let radians = f32::from(svg.rotation);
-@@ -788,3 +998,10 @@ pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
+@@ -775,7 +990,24 @@ fn rounded_box_sdf(to_center: Vector, size: tiny_skia::Size, radii: &[f32]) -> f
+ 
+ pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
+     clip_mask.clear();
++    fill_clip_mask(clip_mask, bounds);
++}
+ 
++fn clear_mask_region(mask: &mut tiny_skia::Mask, bounds: Rectangle) {
++    // Include a conservative pixel fringe while retaining the same tiny-skia
++    // path rasterizer for fractional rectangle coverage.
++    let width = mask.width() as usize;
++    let left = (bounds.x.floor() - 1.0).clamp(0.0, mask.width() as f32) as usize;
++    let right = ((bounds.x + bounds.width).ceil() + 1.0).clamp(0.0, mask.width() as f32) as usize;
++    let top = (bounds.y.floor() - 1.0).clamp(0.0, mask.height() as f32) as usize;
++    let bottom =
++        ((bounds.y + bounds.height).ceil() + 1.0).clamp(0.0, mask.height() as f32) as usize;
++    for row in top..bottom {
++        mask.data_mut()[row * width + left..row * width + right].fill(0);
++    }
++}
++
++fn fill_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
+     let path = tiny_skia::PathBuilder::from_rect(
+         tiny_skia::Rect::from_xywh(bounds.x, bounds.y, bounds.width, bounds.height)
+             .expect("Create clip rectangle"),
+@@ -788,3 +1020,35 @@ pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
          tiny_skia::Transform::default(),
      );
  }
@@ -2085,6 +2462,31 @@ index af14962d..a19502ac 100644
 +        "[{:.1},{:.1},{:.1},{:.1}]",
 +        rect.x, rect.y, rect.width, rect.height
 +    )
++}
++
++#[cfg(test)]
++mod clip_mask_tests {
++    use super::*;
++
++    #[test]
++    fn reused_mask_matches_full_clear_for_fractional_and_clipped_rectangles() {
++        let mut actual = tiny_skia::Mask::new(64, 48).unwrap();
++        actual.data_mut().fill(113);
++        let mut expected = actual.clone();
++        let mut cached = ClipMask::new(&mut actual);
++        for i in 0..200 {
++            let bounds = Rectangle {
++                x: ((i * 17) % 81) as f32 - 10.25,
++                y: ((i * 11) % 61) as f32 - 8.75,
++                width: ((i * 3) % 40) as f32 + 0.25,
++                height: ((i * 7) % 35) as f32 + 0.75,
++            };
++            adjust_clip_mask(&mut expected, bounds);
++            assert_eq!(cached.set(bounds).data(), expected.data(), "{bounds:?}");
++            assert_eq!(cached.set(bounds).data(), expected.data());
++        }
++        assert_eq!(cached.stats().reuses, 200);
++    }
 +}
 diff --git a/vendor/iced/tiny_skia/src/layer.rs b/vendor/iced/tiny_skia/src/layer.rs
 index 04c930e7..c9799993 100644
@@ -2580,7 +2982,7 @@ index 04c930e7..c9799993 100644
 +    }
 +}
 diff --git a/vendor/iced/tiny_skia/src/lib.rs b/vendor/iced/tiny_skia/src/lib.rs
-index e72702c8..570b3472 100644
+index e72702c8..1f2784c6 100644
 --- a/vendor/iced/tiny_skia/src/lib.rs
 +++ b/vendor/iced/tiny_skia/src/lib.rs
 @@ -6,6 +6,7 @@ mod engine;
@@ -2646,14 +3048,13 @@ index e72702c8..570b3472 100644
          self.layers.flush();
 +        let text_stats_before = self.engine.text_stats();
 +        let mut stats = DrawStats::default();
- 
--        for &damage_bounds in damage {
--            let damage_bounds = damage_bounds * scale_factor;
++
 +        for scroll in scrolls {
 +            copy_scroll_region(pixels, *scroll, scale_factor);
 +        }
  
--            let path = tiny_skia::PathBuilder::from_rect(
+-        for &damage_bounds in damage {
+-            let damage_bounds = damage_bounds * scale_factor;
 +        let damage_regions = coalesce_overlapping_regions(
 +            damage
 +                .iter()
@@ -2673,12 +3074,13 @@ index e72702c8..570b3472 100644
 +                    ),
 +                );
 +            }
-+
+ 
+-            let path = tiny_skia::PathBuilder::from_rect(
 +            pixels.fill_rect(
                  tiny_skia::Rect::from_xywh(
                      damage_bounds.x,
                      damage_bounds.y,
-@@ -80,112 +130,472 @@ impl Renderer {
+@@ -80,112 +130,515 @@ impl Renderer {
                      damage_bounds.height,
                  )
                  .expect("Create damage rectangle"),
@@ -2832,12 +3234,15 @@ index e72702c8..570b3472 100644
                  }
 +                render_span.finish();
 +            }
-+
-+            if !layer.primitives.is_empty() {
-+                let render_span = debug::render(debug::Primitive::Triangle);
  
 -                if !layer.primitives.is_empty() {
 -                    let render_span = debug::render(debug::Primitive::Triangle);
++            if !layer.primitives.is_empty() {
++                let render_span = debug::render(debug::Primitive::Triangle);
+ 
+-                    for group in &layer.primitives {
+-                        let Some(group_bounds) =
+-                            (group.clip_bounds() * scale_factor).intersection(&layer_bounds)
 +                for group in &layer.primitives {
 +                    let group_transformation = scale * group.transformation();
 +                    let Some(group_bounds) =
@@ -2845,10 +3250,7 @@ index e72702c8..570b3472 100644
 +                    else {
 +                        continue;
 +                    };
- 
--                    for group in &layer.primitives {
--                        let Some(group_bounds) =
--                            (group.clip_bounds() * scale_factor).intersection(&layer_bounds)
++
 +                    for primitive in group.as_slice() {
 +                        let primitive_bounds = primitive.visible_bounds() * group_transformation;
 +
@@ -2943,9 +3345,7 @@ index e72702c8..570b3472 100644
 -                    let render_span = debug::render(debug::Primitive::Image);
 +                render_span.finish();
 +            }
- 
--                    for group in &layer.text {
--                        for text in group.as_slice() {
++
 +            if !layer.text.is_empty() {
 +                let render_span = debug::render(debug::Primitive::Image);
 +                stats.text_groups += layer.text.len();
@@ -3002,7 +3402,9 @@ index e72702c8..570b3472 100644
 +                            }
 +                            continue;
 +                        }
-+
+ 
+-                    for group in &layer.text {
+-                        for text in group.as_slice() {
 +                        let Some(visible_bounds) = text_bounds.intersection(&group_bounds) else {
 +                            continue;
 +                        };
@@ -3069,10 +3471,11 @@ index e72702c8..570b3472 100644
          self.engine.trim();
 +        stats.clip_mask = clip_mask.stats();
 +        stats.text_pipeline = self.engine.text_stats().saturating_delta(text_stats_before);
++        trace::flush();
 +        stats
-+    }
-+}
-+
+     }
+ }
+ 
 +fn collect_clip_regions(regions: &[Rectangle], bounds: Rectangle) -> Vec<Rectangle> {
 +    coalesce_overlapping_regions(
 +        regions
@@ -3122,9 +3525,9 @@ index e72702c8..570b3472 100644
 +        if region.width >= 1.0 && region.height >= 1.0 {
 +            f(index, region);
 +        }
-     }
- }
- 
++    }
++}
++
 +fn quad_visible_bounds(quad: &renderer::Quad) -> Rectangle {
 +    if quad.shadow.color.a > 0.0 {
 +        quad.bounds.expand(
@@ -3185,6 +3588,48 @@ index e72702c8..570b3472 100644
 +        return;
 +    };
 +
++    // A window with an opaque background can scroll in place. Keep the original
++    // SourceOver path for translucent pixels and clipped rectangles: a raw copy
++    // would change their composition over the destination.
++    if x >= 0
++        && source_y >= 0
++        && target_y >= 0
++        && x as u64 + width as u64 <= pixels.width() as u64
++        && source_y as u64 + copy_height as u64 <= pixels.height() as u64
++        && target_y as u64 + copy_height as u64 <= pixels.height() as u64
++    {
++        let stride = pixels.width() as usize * 4;
++        let row_bytes = width as usize * 4;
++        let source_start = source_y as usize * stride + x as usize * 4;
++        let target_start = target_y as usize * stride + x as usize * 4;
++        let opaque = (0..copy_height as usize).all(|row| {
++            pixels.as_ref().data()
++                [source_start + row * stride..source_start + row * stride + row_bytes]
++                .chunks_exact(4)
++                .all(|pixel| pixel[3] == 255)
++        });
++        if opaque {
++            let data = pixels.data_mut();
++            if x == 0 && row_bytes == stride {
++                data.copy_within(
++                    source_start..source_start + copy_height as usize * stride,
++                    target_start,
++                );
++            } else if target_start < source_start {
++                for row in 0..copy_height as usize {
++                    let start = source_start + row * stride;
++                    data.copy_within(start..start + row_bytes, target_start + row * stride);
++                }
++            } else {
++                for row in (0..copy_height as usize).rev() {
++                    let start = source_start + row * stride;
++                    data.copy_within(start..start + row_bytes, target_start + row * stride);
++                }
++            }
++            return;
++        }
++    }
++
 +    let Some(snapshot) = pixels.as_ref().clone_rect(source) else {
 +        return;
 +    };
@@ -3202,7 +3647,7 @@ index e72702c8..570b3472 100644
  impl core::Renderer for Renderer {
      fn start_layer(&mut self, bounds: Rectangle) {
          self.layers.push_clip(bounds);
-@@ -412,3 +822,213 @@ impl renderer::Headless for Renderer {
+@@ -412,3 +865,290 @@ impl renderer::Headless for Renderer {
          window::compositor::screenshot(self, &viewport, background_color)
      }
  }
@@ -3210,6 +3655,83 @@ index e72702c8..570b3472 100644
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
++
++    #[test]
++    fn in_place_scroll_matches_snapshot_composition_exactly() {
++        for alpha in [127, 255] {
++            for scale in [1.0, 1.5, 2.0] {
++                for delta in [-4.0, 4.0] {
++                    for bounds in [
++                        Rectangle {
++                            x: 0.0,
++                            y: 0.0,
++                            width: 32.0,
++                            height: 32.0,
++                        },
++                        Rectangle {
++                            x: 3.0,
++                            y: 2.0,
++                            width: 20.0,
++                            height: 24.0,
++                        },
++                        Rectangle {
++                            x: -2.0,
++                            y: 0.0,
++                            width: 20.0,
++                            height: 24.0,
++                        },
++                    ] {
++                        let mut actual = tiny_skia::Pixmap::new(64, 64).unwrap();
++                        for (i, pixel) in actual.pixels_mut().iter_mut().enumerate() {
++                            *pixel = tiny_skia::PremultipliedColorU8::from_rgba(
++                                (i % 97) as u8,
++                                (i % 113) as u8,
++                                (i % 127) as u8,
++                                alpha,
++                            )
++                            .unwrap();
++                        }
++                        let mut expected = actual.clone();
++                        let physical = bounds * scale;
++                        let dy = (delta * scale).round() as i32;
++                        let x = physical.x.round() as i32;
++                        let y = physical.y.round() as i32;
++                        let h = physical.height.round() as u32 - dy.unsigned_abs();
++                        let source = tiny_skia::IntRect::from_xywh(
++                            x,
++                            if dy < 0 { y - dy } else { y },
++                            physical.width.round() as u32,
++                            h,
++                        )
++                        .unwrap();
++                        if let Some(snapshot) = expected.as_ref().clone_rect(source) {
++                            expected.draw_pixmap(
++                                x,
++                                if dy < 0 { y } else { y + dy },
++                                snapshot.as_ref(),
++                                &tiny_skia::PixmapPaint::default(),
++                                tiny_skia::Transform::identity(),
++                                None,
++                            );
++                        }
++                        copy_scroll_region(
++                            &mut actual.as_mut(),
++                            layer::Scroll {
++                                bounds,
++                                delta: core::Vector::new(0.0, delta),
++                            },
++                            scale,
++                        );
++                        assert_eq!(
++                            actual.data(),
++                            expected.data(),
++                            "alpha={alpha} scale={scale} delta={delta} bounds={bounds:?}"
++                        );
++                    }
++                }
++            }
++        }
++    }
 +
 +    #[test]
 +    fn fractional_damage_bounds_are_expanded_to_physical_pixels() {
@@ -3417,7 +3939,7 @@ index e72702c8..570b3472 100644
 +    }
 +}
 diff --git a/vendor/iced/tiny_skia/src/raster.rs b/vendor/iced/tiny_skia/src/raster.rs
-index bc3323d6..ff173e8e 100644
+index bc3323d6..9e0d8d20 100644
 --- a/vendor/iced/tiny_skia/src/raster.rs
 +++ b/vendor/iced/tiny_skia/src/raster.rs
 @@ -45,14 +45,48 @@ impl Pipeline {
@@ -3484,7 +4006,24 @@ index bc3323d6..ff173e8e 100644
              image,
              &tiny_skia::PixmapPaint {
                  quality,
-@@ -106,16 +140,19 @@ impl Cache {
+@@ -82,6 +116,16 @@ impl Pipeline {
+ struct Cache {
+     entries: FxHashMap<raster::Id, Option<Entry>>,
+     hits: FxHashSet<raster::Id>,
++    resampled: FxHashMap<(raster::Id, u32, u32), ResampledEntry>,
++    resampled_pixels: usize,
++    clock: u64,
++    oversized: Option<tiny_skia::Pixmap>,
++}
++
++#[derive(Debug)]
++struct ResampledEntry {
++    pixmap: tiny_skia::Pixmap,
++    last_used: u64,
+ }
+ 
+ impl Cache {
+@@ -106,16 +150,19 @@ impl Cache {
              }
  
              let mut buffer = vec![0u32; image.width() as usize * image.height() as usize];
@@ -3504,17 +4043,66 @@ index bc3323d6..ff173e8e 100644
                  pixels: buffer,
              }));
          }
-@@ -142,11 +179,249 @@ impl Cache {
+@@ -141,12 +188,373 @@ impl Cache {
+     fn trim(&mut self) {
          self.entries.retain(|key, _| self.hits.contains(key));
          self.hits.clear();
-     }
++        self.oversized = None;
++        self.resampled
++            .retain(|(id, _, _), _| self.entries.contains_key(id));
++        self.resampled_pixels = self
++            .resampled
++            .values()
++            .map(|entry| entry.pixmap.width() as usize * entry.pixmap.height() as usize)
++            .sum();
++    }
 +
 +    fn resample_straight_alpha(
-+        &self,
++        &mut self,
 +        handle: &raster::Handle,
 +        size: Size<u32>,
-+    ) -> Option<tiny_skia::Pixmap> {
-+        let entry = self.entries.get(&handle.id())?.as_ref()?;
++    ) -> Option<&tiny_skia::Pixmap> {
++        const MAX_ENTRIES: usize = 128;
++        const MAX_PIXELS: usize = 4 * 1024 * 1024;
++        let key = (handle.id(), size.width, size.height);
++        let pixels = size.width as usize * size.height as usize;
++        self.clock = self.clock.wrapping_add(1);
++        if !self.resampled.contains_key(&key) {
++            let entry = self.entries.get(&handle.id())?.as_ref()?;
++            let pixmap = Self::resample_entry(entry, size)?;
++            if pixels > MAX_PIXELS {
++                self.oversized = Some(pixmap);
++                return self.oversized.as_ref();
++            }
++            while !self.resampled.is_empty()
++                && (self.resampled.len() >= MAX_ENTRIES
++                    || self.resampled_pixels.saturating_add(pixels) > MAX_PIXELS)
++            {
++                let oldest = self
++                    .resampled
++                    .iter()
++                    .min_by_key(|(_, entry)| entry.last_used)
++                    .map(|(key, _)| *key)?;
++                if let Some(removed) = self.resampled.remove(&oldest) {
++                    self.resampled_pixels -=
++                        removed.pixmap.width() as usize * removed.pixmap.height() as usize;
++                }
++            }
++            self.resampled_pixels += pixels;
++            let _ = self.resampled.insert(
++                key,
++                ResampledEntry {
++                    pixmap,
++                    last_used: self.clock,
++                },
++            );
++        }
++        let entry = self.resampled.get_mut(&key)?;
++        entry.last_used = self.clock;
++        Some(&entry.pixmap)
++    }
++
++    fn resample_entry(entry: &Entry, size: Size<u32>) -> Option<tiny_skia::Pixmap> {
 +        let width = size.width;
 +        let height = size.height;
 +
@@ -3571,9 +4159,9 @@ index bc3323d6..ff173e8e 100644
 +        }
 +
 +        tiny_skia::Pixmap::from_vec(pixels, tiny_skia::IntSize::from_wh(width, height)?)
-+    }
-+}
-+
+     }
+ }
+ 
 +fn lerp(a: f32, b: f32, t: f32) -> f32 {
 +    a * (1.0 - t) + b * t
 +}
@@ -3589,8 +4177,8 @@ index bc3323d6..ff173e8e 100644
 +
 +fn to_unorm8(value: f32) -> u8 {
 +    value.clamp(0.0, 255.0).round() as u8
- }
- 
++}
++
  #[derive(Debug)]
  struct Entry {
      width: u32,
@@ -3652,12 +4240,90 @@ index bc3323d6..ff173e8e 100644
 +mod tests {
 +    use super::*;
 +
++    #[test]
++    fn resample_cache_matches_original_pixels_for_scales_transparency_and_hits() {
++        let rgba = vec![
++            255, 0, 0, 0, 0, 255, 0, 64, 0, 0, 255, 127, 255, 255, 255, 255,
++        ];
++        let handle = raster::Handle::from_rgba(2, 2, rgba);
++        let mut cache = Cache::default();
++        let _ = cache.allocate(&handle).unwrap();
++        for size in [
++            Size::new(1, 1),
++            Size::new(2, 2),
++            Size::new(3, 5),
++            Size::new(8, 8),
++        ] {
++            let reference = Cache::resample_entry(
++                cache.entries.get(&handle.id()).unwrap().as_ref().unwrap(),
++                size,
++            )
++            .unwrap();
++            let miss = cache.resample_straight_alpha(&handle, size).unwrap();
++            assert_eq!(miss.data(), reference.data());
++            let allocation = miss.data().as_ptr();
++            let hit = cache.resample_straight_alpha(&handle, size).unwrap();
++            assert_eq!(hit.data(), reference.data());
++            assert_eq!(
++                hit.data().as_ptr(),
++                allocation,
++                "cache hit reuses the exact raster"
++            );
++        }
++    }
++
++    #[test]
++    fn resample_cache_limits_entries_and_discards_unreferenced_sources() {
++        let handle = raster::Handle::from_rgba(4, 4, source_rgba());
++        let mut cache = Cache::default();
++        let _ = cache.allocate(&handle).unwrap();
++        for width in 1..=160 {
++            let _ = cache
++                .resample_straight_alpha(&handle, Size::new(width, 1))
++                .unwrap();
++        }
++        assert_eq!(cache.resampled.len(), 128);
++        assert!(cache.resampled_pixels <= 4 * 1024 * 1024);
++        assert!(!cache.resampled.contains_key(&(handle.id(), 1, 1)));
++        cache.trim();
++        assert_eq!(cache.resampled.len(), 128);
++        cache.trim();
++        assert!(cache.resampled.is_empty());
++        assert_eq!(cache.resampled_pixels, 0);
++    }
++
++    #[test]
++    fn resample_cache_separates_sources_and_enforces_pixel_budget() {
++        let red = raster::Handle::from_rgba(1, 1, vec![255, 0, 0, 127]);
++        let blue = raster::Handle::from_rgba(1, 1, vec![0, 0, 255, 127]);
++        let mut cache = Cache::default();
++        let _ = cache.allocate(&red).unwrap();
++        let _ = cache.allocate(&blue).unwrap();
++        let red_bytes = cache
++            .resample_straight_alpha(&red, Size::new(1, 1))
++            .unwrap()
++            .data()
++            .to_vec();
++        let blue_bytes = cache
++            .resample_straight_alpha(&blue, Size::new(1, 1))
++            .unwrap()
++            .data()
++            .to_vec();
++        assert_ne!(red_bytes, blue_bytes);
++        for width in [1024, 1025, 1026, 1027, 1028] {
++            let _ = cache
++                .resample_straight_alpha(&red, Size::new(width, 1024))
++                .unwrap();
++            assert!(cache.resampled_pixels <= 4 * 1024 * 1024);
++        }
++    }
++
 +    fn source_rgba() -> Vec<u8> {
 +        vec![
-+            255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 0, 0, 0,
-+            255, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-+            0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255,
-+            255, 0, 0, 0, 255, 255, 255, 255, 255,
++            255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255,
++            255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 255, 255,
++            255, 255, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255,
++            255, 255,
 +        ]
 +    }
 +
@@ -3671,10 +4337,7 @@ index bc3323d6..ff173e8e 100644
 +            .collect()
 +    }
 +
-+    fn draw_reference(
-+        bounds: Rectangle,
-+        legacy_integer_source_offset: bool,
-+    ) -> tiny_skia::Pixmap {
++    fn draw_reference(bounds: Rectangle, legacy_integer_source_offset: bool) -> tiny_skia::Pixmap {
 +        let rgba = source_rgba();
 +        let source_pixels = tiny_skia_pixmap_bytes(&rgba);
 +        let source = tiny_skia::PixmapRef::from_bytes(bytemuck::cast_slice(&source_pixels), 4, 4)
@@ -3755,7 +4418,7 @@ index bc3323d6..ff173e8e 100644
 +    }
 +}
 diff --git a/vendor/iced/tiny_skia/src/text.rs b/vendor/iced/tiny_skia/src/text.rs
-index b9e3eb46..c1e73981 100644
+index b9e3eb46..86c97166 100644
 --- a/vendor/iced/tiny_skia/src/text.rs
 +++ b/vendor/iced/tiny_skia/src/text.rs
 @@ -1,4 +1,5 @@
@@ -3764,15 +4427,16 @@ index b9e3eb46..c1e73981 100644
  use crate::core::text::{Alignment, Ellipsis, Shaping, Wrapping};
  use crate::core::{Color, Font, Pixels, Point, Rectangle, Transformation};
  use crate::graphics::text::cache::{self, Cache};
-@@ -14,13 +15,44 @@ use std::collections::hash_map;
+@@ -14,14 +15,47 @@ use std::collections::hash_map;
  #[derive(Debug)]
  pub struct Pipeline {
      glyph_cache: GlyphCache,
 +    paragraph_raster_cache: ParagraphRasterCache,
 +    swash_cache: cosmic_text::SwashCache,
      cache: RefCell<Cache>,
- }
- 
++    clip_scratch: Vec<u8>,
++}
++
 +#[derive(Debug, Clone, Copy, Default)]
 +pub(crate) struct PipelineStats {
 +    pub paragraph_raster_hits: u64,
@@ -3798,8 +4462,8 @@ index b9e3eb46..c1e73981 100644
 +            glyph_misses: self.glyph_misses.saturating_sub(previous.glyph_misses),
 +        }
 +    }
-+}
-+
+ }
+ 
  impl Pipeline {
      pub fn new() -> Self {
          Pipeline {
@@ -3807,9 +4471,11 @@ index b9e3eb46..c1e73981 100644
 +            paragraph_raster_cache: ParagraphRasterCache::new(),
 +            swash_cache: cosmic_text::SwashCache::new(),
              cache: RefCell::new(Cache::new()),
++            clip_scratch: Vec::new(),
          }
      }
-@@ -34,6 +66,7 @@ impl Pipeline {
+ 
+@@ -34,6 +68,7 @@ impl Pipeline {
              .load_font(bytes);
  
          self.cache = RefCell::new(Cache::new());
@@ -3817,7 +4483,7 @@ index b9e3eb46..c1e73981 100644
      }
  
      pub fn draw_paragraph(
-@@ -44,23 +77,46 @@ impl Pipeline {
+@@ -44,23 +79,49 @@ impl Pipeline {
          pixels: &mut tiny_skia::PixmapMut<'_>,
          clip_mask: Option<&tiny_skia::Mask>,
          transformation: Transformation,
@@ -3844,6 +4510,7 @@ index b9e3eb46..c1e73981 100644
 -            transformation,
 -        );
 +            &mut self.swash_cache,
++            &mut self.clip_scratch,
 +        ) {
 +            let position = position * transformation;
 +
@@ -3855,6 +4522,7 @@ index b9e3eb46..c1e73981 100644
 +                &tiny_skia::PixmapPaint::default(),
 +                clip_mask,
 +                clip_bounds,
++                &mut self.clip_scratch,
 +            );
 +        } else {
 +            draw(
@@ -3868,12 +4536,13 @@ index b9e3eb46..c1e73981 100644
 +                clip_mask,
 +                transformation,
 +                clip_bounds,
++                &mut self.clip_scratch,
 +            );
 +        }
      }
  
      pub fn draw_editor(
-@@ -71,6 +127,7 @@ impl Pipeline {
+@@ -71,6 +132,7 @@ impl Pipeline {
          pixels: &mut tiny_skia::PixmapMut<'_>,
          clip_mask: Option<&tiny_skia::Mask>,
          transformation: Transformation,
@@ -3881,7 +4550,7 @@ index b9e3eb46..c1e73981 100644
      ) {
          let Some(editor) = editor.upgrade() else {
              return;
-@@ -81,12 +138,14 @@ impl Pipeline {
+@@ -81,12 +143,15 @@ impl Pipeline {
          draw(
              font_system.raw(),
              &mut self.glyph_cache,
@@ -3893,10 +4562,11 @@ index b9e3eb46..c1e73981 100644
              clip_mask,
              transformation,
 +            clip_bounds,
++            &mut self.clip_scratch,
          );
      }
  
-@@ -106,6 +165,7 @@ impl Pipeline {
+@@ -106,6 +171,7 @@ impl Pipeline {
          pixels: &mut tiny_skia::PixmapMut<'_>,
          clip_mask: Option<&tiny_skia::Mask>,
          transformation: Transformation,
@@ -3904,7 +4574,7 @@ index b9e3eb46..c1e73981 100644
      ) {
          let line_height = f32::from(line_height);
  
-@@ -144,12 +204,14 @@ impl Pipeline {
+@@ -144,12 +210,15 @@ impl Pipeline {
          draw(
              font_system,
              &mut self.glyph_cache,
@@ -3916,10 +4586,11 @@ index b9e3eb46..c1e73981 100644
              clip_mask,
              transformation,
 +            clip_bounds,
++            &mut self.clip_scratch,
          );
      }
  
-@@ -161,52 +223,102 @@ impl Pipeline {
+@@ -161,52 +230,104 @@ impl Pipeline {
          pixels: &mut tiny_skia::PixmapMut<'_>,
          clip_mask: Option<&tiny_skia::Mask>,
          transformation: Transformation,
@@ -3938,6 +4609,7 @@ index b9e3eb46..c1e73981 100644
              clip_mask,
              transformation,
 +            clip_bounds,
++            &mut self.clip_scratch,
          );
      }
  
@@ -3969,6 +4641,7 @@ index b9e3eb46..c1e73981 100644
      clip_mask: Option<&tiny_skia::Mask>,
      transformation: Transformation,
 +    clip_bounds: Option<Rectangle>,
++    clip_scratch: &mut Vec<u8>,
  ) {
      let position = position * transformation;
 -
@@ -4027,7 +4700,7 @@ index b9e3eb46..c1e73981 100644
                  let pixmap =
                      tiny_skia::PixmapRef::from_bytes(buffer, placement.width, placement.height)
                          .expect("Create glyph pixel map");
-@@ -214,34 +326,379 @@ fn draw(
+@@ -214,34 +335,401 @@ fn draw(
                  let opacity =
                      color.a * glyph.color_opt.map(|c| c.a() as f32 / 255.0).unwrap_or(1.0);
  
@@ -4047,6 +4720,7 @@ index b9e3eb46..c1e73981 100644
 -                    tiny_skia::Transform::identity(),
                      clip_mask,
 +                    clip_bounds,
++                    clip_scratch,
                  );
              }
          }
@@ -4061,6 +4735,7 @@ index b9e3eb46..c1e73981 100644
 +    paint: &tiny_skia::PixmapPaint,
 +    clip_mask: Option<&tiny_skia::Mask>,
 +    clip_bounds: Option<Rectangle>,
++    clip_scratch: &mut Vec<u8>,
 +) {
 +    let Some(clip_bounds) = clip_bounds else {
 +        pixels.draw_pixmap(
@@ -4084,25 +4759,43 @@ index b9e3eb46..c1e73981 100644
 +        && source.width() == pixmap.width()
 +        && source.height() == pixmap.height()
 +    {
++        pixels.draw_pixmap(x, y, pixmap, paint, tiny_skia::Transform::identity(), None);
++        return;
++    }
++
++    let row_bytes = source.width() as usize * 4;
++    if source.x() == 0 && source.width() == pixmap.width() {
++        let start = source.y() as usize * row_bytes;
++        let end = start + source.height() as usize * row_bytes;
++        let cropped = tiny_skia::PixmapRef::from_bytes(
++            &pixmap.data()[start..end],
++            source.width(),
++            source.height(),
++        )
++        .expect("contiguous cropped pixel buffer dimensions");
 +        pixels.draw_pixmap(
 +            x,
-+            y,
-+            pixmap,
++            y + source.y(),
++            cropped,
 +            paint,
 +            tiny_skia::Transform::identity(),
 +            None,
 +        );
 +        return;
 +    }
-+
-+    let Some(cropped) = pixmap.clone_rect(source) else {
-+        return;
-+    };
++    clip_scratch.clear();
++    clip_scratch.reserve(row_bytes * source.height() as usize);
++    for row in source.y() as usize..source.bottom() as usize {
++        let start = (row * pixmap.width() as usize + source.x() as usize) * 4;
++        clip_scratch.extend_from_slice(&pixmap.data()[start..start + row_bytes]);
++    }
++    let cropped = tiny_skia::PixmapRef::from_bytes(clip_scratch, source.width(), source.height())
++        .expect("cropped pixel buffer dimensions");
 +
 +    pixels.draw_pixmap(
 +        x + source.x(),
 +        y + source.y(),
-+        cropped.as_ref(),
++        cropped,
 +        paint,
 +        tiny_skia::Transform::identity(),
 +        None,
@@ -4276,6 +4969,7 @@ index b9e3eb46..c1e73981 100644
 +        font_system: &mut cosmic_text::FontSystem,
 +        glyph_cache: &mut GlyphCache,
 +        swash_cache: &mut cosmic_text::SwashCache,
++        clip_scratch: &mut Vec<u8>,
 +    ) -> Option<ParagraphRasterRef<'_>> {
 +        if scale <= 0.0 || !scale.is_finite() {
 +            self.bypasses = self.bypasses.saturating_add(1);
@@ -4324,6 +5018,7 @@ index b9e3eb46..c1e73981 100644
 +            None,
 +            Transformation::scale(scale),
 +            None,
++            clip_scratch,
 +        );
 +        let raster = crop_transparent_padding(&pixmap);
 +        let raster_pixels = raster.pixel_count();
@@ -4412,7 +5107,7 @@ index b9e3eb46..c1e73981 100644
  }
  
  impl GlyphCache {
-@@ -263,6 +720,7 @@ impl GlyphCache {
+@@ -263,6 +751,7 @@ impl GlyphCache {
          let key = (cache_key, [r, g, b]);
  
          if let hash_map::Entry::Vacant(entry) = self.entries.entry(key) {
@@ -4420,7 +5115,7 @@ index b9e3eb46..c1e73981 100644
              // TODO: Outline support
              let image = swash.get_image_uncached(font_system, cache_key)?;
  
-@@ -316,6 +774,8 @@ impl GlyphCache {
+@@ -316,6 +805,8 @@ impl GlyphCache {
              }
  
              let _ = entry.insert((buffer, image.placement));
@@ -4429,7 +5124,7 @@ index b9e3eb46..c1e73981 100644
          }
  
          let _ = self.recently_used.insert(key);
-@@ -342,3 +802,90 @@ impl GlyphCache {
+@@ -342,3 +833,186 @@ impl GlyphCache {
          }
      }
  }
@@ -4437,6 +5132,104 @@ index b9e3eb46..c1e73981 100644
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
++
++    #[test]
++    fn clipped_draw_matches_allocating_reference_with_transparency_and_opacity() {
++        let mut source = tiny_skia::Pixmap::new(13, 9).unwrap();
++        for (index, pixel) in source.pixels_mut().iter_mut().enumerate() {
++            *pixel = tiny_skia::ColorU8::from_rgba(
++                (index * 7) as u8,
++                (index * 13) as u8,
++                (index * 3) as u8,
++                (index * 11) as u8,
++            )
++            .premultiply();
++        }
++        let mut scratch = Vec::new();
++        for opacity in [0.0, 0.37, 1.0] {
++            for (x, y) in [(-3, -2), (2, 3), (20, 20)] {
++                for clip in [
++                    Rectangle {
++                        x: 0.0,
++                        y: 0.0,
++                        width: 30.0,
++                        height: 30.0,
++                    },
++                    Rectangle {
++                        x: 4.2,
++                        y: 4.3,
++                        width: 7.5,
++                        height: 5.2,
++                    },
++                    Rectangle {
++                        x: 0.0,
++                        y: 5.0,
++                        width: 30.0,
++                        height: 2.0,
++                    },
++                ] {
++                    let mut expected = tiny_skia::Pixmap::new(30, 30).unwrap();
++                    expected.fill(tiny_skia::Color::from_rgba8(31, 47, 63, 127));
++                    let mut actual = expected.clone();
++                    let paint = tiny_skia::PixmapPaint {
++                        opacity,
++                        ..Default::default()
++                    };
++                    if let Some(rect) =
++                        clipped_source_rect(x, y, source.width(), source.height(), clip)
++                    {
++                        let cropped = source.clone_rect(rect).unwrap();
++                        expected.as_mut().draw_pixmap(
++                            x + rect.x(),
++                            y + rect.y(),
++                            cropped.as_ref(),
++                            &paint,
++                            tiny_skia::Transform::identity(),
++                            None,
++                        );
++                    }
++                    draw_pixmap_clipped(
++                        &mut actual.as_mut(),
++                        x,
++                        y,
++                        source.as_ref(),
++                        &paint,
++                        None,
++                        Some(clip),
++                        &mut scratch,
++                    );
++                    assert_eq!(
++                        actual.data(),
++                        expected.data(),
++                        "opacity={opacity}, position={x},{y}, clip={clip:?}"
++                    );
++                }
++            }
++        }
++        let capacity = scratch.capacity();
++        assert!(capacity > 0);
++        let mut target = tiny_skia::Pixmap::new(30, 30).unwrap();
++        draw_pixmap_clipped(
++            &mut target.as_mut(),
++            0,
++            0,
++            source.as_ref(),
++            &Default::default(),
++            None,
++            Some(Rectangle {
++                x: 1.0,
++                y: 1.0,
++                width: 2.0,
++                height: 2.0,
++            }),
++            &mut scratch,
++        );
++        assert_eq!(
++            scratch.capacity(),
++            capacity,
++            "repeated clipping reuses allocation"
++        );
++    }
 +
 +    #[test]
 +    fn crop_transparent_padding_keeps_only_nontransparent_pixels() {
@@ -4481,8 +5274,7 @@ index b9e3eb46..c1e73981 100644
 +            height: 18.0,
 +        };
 +
-+        let source =
-+            clipped_source_rect(4, -4, 64, 32, clip_bounds).expect("visible source rect");
++        let source = clipped_source_rect(4, -4, 64, 32, clip_bounds).expect("visible source rect");
 +
 +        assert_eq!(source.x(), 4);
 +        assert_eq!(source.y(), 4);
@@ -4499,8 +5291,7 @@ index b9e3eb46..c1e73981 100644
 +            height: 100.0,
 +        };
 +
-+        let source =
-+            clipped_source_rect(8, 12, 24, 18, clip_bounds).expect("visible source rect");
++        let source = clipped_source_rect(8, 12, 24, 18, clip_bounds).expect("visible source rect");
 +
 +        assert_eq!(source.x(), 0);
 +        assert_eq!(source.y(), 0);
@@ -4522,10 +5313,10 @@ index b9e3eb46..c1e73981 100644
 +}
 diff --git a/vendor/iced/tiny_skia/src/trace.rs b/vendor/iced/tiny_skia/src/trace.rs
 new file mode 100644
-index 00000000..137596b0
+index 00000000..38c79ba1
 --- /dev/null
 +++ b/vendor/iced/tiny_skia/src/trace.rs
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,104 @@
 +use std::fmt;
 +use std::fs::{File, OpenOptions};
 +use std::io::{BufWriter, Write};
@@ -4558,7 +5349,19 @@ index 00000000..137596b0
 +        "{timestamp_us},{event},{elapsed_us},{}",
 +        csv_escape(&detail.to_string())
 +    );
-+    let _ = trace.writer.flush();
++    // Primitive events are buffered together; present is the visibility barrier
++    // used by the handoff probe. Do not perform a file flush per primitive.
++    if event == "tiny_skia_present" {
++        let _ = trace.writer.flush();
++    }
++}
++
++pub(crate) fn flush() {
++    if let Some(trace) = trace()
++        && let Ok(mut trace) = trace.lock()
++    {
++        let _ = trace.writer.flush();
++    }
 +}
 +
 +fn trace() -> Option<&'static Mutex<PerfTrace>> {
@@ -4591,9 +5394,7 @@ index 00000000..137596b0
 +            csv_escape(&format!("path={}", path.display()))
 +        );
 +
-+        Some(Self {
-+            writer,
-+        })
++        Some(Self { writer })
 +    }
 +}
 +
@@ -4621,7 +5422,7 @@ index 00000000..137596b0
 +        .map_or(0, |duration| duration.as_micros())
 +}
 diff --git a/vendor/iced/tiny_skia/src/window/compositor.rs b/vendor/iced/tiny_skia/src/window/compositor.rs
-index f5a27220..7d96052d 100644
+index f5a27220..b6a0e06a 100644
 --- a/vendor/iced/tiny_skia/src/window/compositor.rs
 +++ b/vendor/iced/tiny_skia/src/window/compositor.rs
 @@ -4,10 +4,13 @@ use crate::core::{Color, Rectangle, Size};
@@ -4631,14 +5432,23 @@ index f5a27220..7d96052d 100644
 -use crate::{Layer, Renderer};
 +use crate::{Layer, Renderer, trace};
  
-+use std::cell::RefCell;
++use std::cell::{Cell, RefCell};
  use std::collections::VecDeque;
  use std::num::NonZeroU32;
-+use std::sync::{Mutex, OnceLock};
++use std::sync::{Arc, Mutex, OnceLock};
 +use std::time::Instant;
  
  pub struct Compositor {
      context: softbuffer::Context<Box<dyn compositor::Display>>,
+@@ -23,7 +26,7 @@ pub struct Surface {
+ #[derive(Clone)]
+ struct Frame {
+     background: Color,
+-    layers: Vec<Layer>,
++    layers: Arc<[Layer]>,
+ }
+ 
+ impl crate::graphics::Compositor for Compositor {
 @@ -120,6 +123,15 @@ impl crate::graphics::Compositor for Compositor {
      ) -> Vec<u8> {
          screenshot(renderer, viewport, background_color)
@@ -4664,39 +5474,42 @@ index f5a27220..7d96052d 100644
      let physical_size = viewport.physical_size();
  
      let mut buffer = surface
-@@ -157,6 +171,21 @@ pub fn present(
+@@ -157,6 +171,24 @@ pub fn present(
          }
      };
  
-+    let scrolls = last_frame
++    let scroll_started = Instant::now();
++    let layer_scrolls = last_frame
 +        .filter(|last_frame| last_frame.background == background)
 +        .map(|last_frame| {
-+            damage::collect_scrolls(
-+                last_frame
-+                    .layers
-+                    .iter()
-+                    .zip(renderer.layers())
-+                    .filter_map(|(previous, current)| Layer::scroll(previous, current)),
-+            )
++            last_frame
++                .layers
++                .iter()
++                .zip(renderer.layers())
++                .map(|(previous, current)| Layer::scroll(previous, current))
++                .collect::<Vec<_>>()
 +        })
 +        .unwrap_or_default();
++    let scrolls = damage::collect_scrolls(layer_scrolls.iter().copied().flatten());
++    let scroll_us = scroll_started.elapsed().as_micros();
 +
 +    let damage_started = Instant::now();
 +    let damage_summary = RefCell::new(crate::layer::DamageSummary::default());
++    let layer_index = Cell::new(0);
      let damage = last_frame
          .and_then(|last_frame| {
              (last_frame.background == background).then(|| {
-@@ -164,11 +193,21 @@ pub fn present(
+@@ -164,23 +196,55 @@ pub fn present(
                      &last_frame.layers,
                      renderer.layers(),
                      |layer| vec![layer.bounds],
 -                    Layer::damage,
 +                    |previous, current| {
-+                        let (damage, summary) = Layer::damage_with_scroll_summary(
-+                            previous,
-+                            current,
-+                            accepted_scroll(previous, current, &scrolls),
-+                        );
++                        let index = layer_index.get();
++                        layer_index.set(index + 1);
++                        let scroll = layer_scrolls[index].filter(|scroll| scrolls.contains(scroll));
++                        let (damage, summary) =
++                            Layer::damage_with_scroll_summary(previous, current, scroll);
 +                        damage_summary.borrow_mut().extend(summary);
 +                        damage
 +                    },
@@ -4706,14 +5519,26 @@ index f5a27220..7d96052d 100644
          .unwrap_or_else(|| vec![Rectangle::with_size(viewport.logical_size())]);
 +    let damage_us = damage_started.elapsed().as_micros();
 +    let raw_damage_count = damage.len();
++    let snapshot_started = Instant::now();
++    let snapshot_us;
++    let mut grouping_us = 0;
  
      if damage.is_empty() {
          if let Some(last_frame) = last_frame {
-@@ -180,7 +219,22 @@ pub fn present(
-             layers: renderer.layers().to_vec(),
+             surface.frames.push_front(last_frame.clone());
+         }
++        snapshot_us = snapshot_started.elapsed().as_micros();
+     } else {
+         surface.frames.push_front(Frame {
+             background,
+-            layers: renderer.layers().to_vec(),
++            layers: Arc::from(renderer.layers()),
          });
- 
+-
 -        let damage = damage::group(damage, Rectangle::with_size(viewport.logical_size()));
++        snapshot_us = snapshot_started.elapsed().as_micros();
++
++        let grouping_started = Instant::now();
 +        let bounds = Rectangle::with_size(viewport.logical_size());
 +        let grouped_damage = damage::group(damage, bounds);
 +        let grouped_damage_count = grouped_damage.len();
@@ -4722,6 +5547,7 @@ index f5a27220..7d96052d 100644
 +        let (damage, damage_strategy) =
 +            damage::collapse_fragmented(grouped_damage, bounds, damage_summary);
 +        let damage_area = damage.iter().map(Rectangle::area).sum::<f32>();
++        grouping_us = grouping_started.elapsed().as_micros();
 +
 +        if trace::enabled() {
 +            trace::event(
@@ -4733,7 +5559,7 @@ index f5a27220..7d96052d 100644
  
          let mut pixels = tiny_skia::PixmapMut::from_bytes(
              bytemuck::cast_slice_mut(&mut buffer),
-@@ -189,17 +243,96 @@ pub fn present(
+@@ -189,17 +253,86 @@ pub fn present(
          )
          .expect("Create pixel map");
  
@@ -4791,7 +5617,7 @@ index f5a27220..7d96052d 100644
 +        "tiny_skia_present",
 +        present_started.elapsed().as_micros(),
 +        format_args!(
-+            "damage_us={damage_us} os_present_us={} frame_delta_us={} frame_fps={:.1} physical={}x{} scale={:.2} result={}",
++            "damage_us={damage_us} scroll_us={scroll_us} snapshot_us={snapshot_us} grouping_us={grouping_us} os_present_us={} frame_delta_us={} frame_fps={:.1} physical={}x{} scale={:.2} result={}",
 +            os_present_started.elapsed().as_micros(),
 +            present_delta_us
 +                .map(|delta| delta.to_string())
@@ -4819,16 +5645,6 @@ index f5a27220..7d96052d 100644
 +    let delta = last_present.map(|last| now.duration_since(last).as_micros());
 +    *last_present = Some(now);
 +    delta
-+}
-+
-+fn accepted_scroll(
-+    previous: &Layer,
-+    current: &Layer,
-+    scrolls: &[crate::layer::Scroll],
-+) -> Option<crate::layer::Scroll> {
-+    let scroll = Layer::scroll(previous, current)?;
-+
-+    scrolls.iter().copied().find(|accepted| *accepted == scroll)
  }
  
  pub fn screenshot(
@@ -4850,7 +5666,7 @@ index f5a27220..7d96052d 100644
 +        .join(";")
 +}
 diff --git a/vendor/iced/wgpu/src/lib.rs b/vendor/iced/wgpu/src/lib.rs
-index 6c88aa8e..0f340370 100644
+index 6c88aa8e..9ede6d58 100644
 --- a/vendor/iced/wgpu/src/lib.rs
 +++ b/vendor/iced/wgpu/src/lib.rs
 @@ -61,6 +61,7 @@ pub use geometry::Geometry;
@@ -4861,7 +5677,64 @@ index 6c88aa8e..0f340370 100644
  use crate::graphics::mesh;
  use crate::graphics::text::{Editor, Paragraph};
  use crate::graphics::{Shell, Viewport};
-@@ -172,6 +173,71 @@ impl Renderer {
+@@ -89,6 +90,48 @@ pub struct Renderer {
+     image_cache: std::cell::RefCell<image::Cache>,
+ 
+     staging_belt: wgpu::util::StagingBelt,
++    offscreen_warm_up: Option<OffscreenWarmUp>,
++}
++
++const OFFSCREEN_WARM_UP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
++
++struct OffscreenWarmUp {
++    _texture: wgpu::Texture,
++    submission: wgpu::SubmissionIndex,
++    completed: std::sync::Arc<std::sync::atomic::AtomicBool>,
++    started: std::time::Instant,
++    evidence: OffscreenWarmUpEvidence,
++}
++
++fn warm_up_completed(
++    completed: bool,
++    elapsed: std::time::Duration,
++) -> Result<bool, OffscreenWarmUpError> {
++    if completed {
++        Ok(true)
++    } else if elapsed >= OFFSCREEN_WARM_UP_TIMEOUT {
++        Err(OffscreenWarmUpError::Timeout)
++    } else {
++        Ok(false)
++    }
++}
++
++#[cfg(test)]
++mod warm_up_tests {
++    use super::*;
++
++    #[test]
++    fn gpu_completion_must_be_observed_before_warmup_succeeds() {
++        assert_eq!(
++            warm_up_completed(false, std::time::Duration::ZERO),
++            Ok(false)
++        );
++        assert_eq!(
++            warm_up_completed(false, OFFSCREEN_WARM_UP_TIMEOUT),
++            Err(OffscreenWarmUpError::Timeout)
++        );
++        assert_eq!(warm_up_completed(true, OFFSCREEN_WARM_UP_TIMEOUT), Ok(true));
++    }
+ }
+ 
+ impl Renderer {
+@@ -116,6 +159,7 @@ impl Renderer {
+                 engine.device.clone(),
+                 buffer::MAX_WRITE_SIZE as u64,
+             ),
++            offscreen_warm_up: None,
+ 
+             engine,
+         }
+@@ -172,6 +216,122 @@ impl Renderer {
          submission
      }
  
@@ -4872,6 +5745,31 @@ index 6c88aa8e..0f340370 100644
 +        viewport: &Viewport,
 +        background_color: Color,
 +    ) -> Result<OffscreenWarmUpEvidence, OffscreenWarmUpError> {
++        self.begin_warm_up_offscreen(viewport, background_color)?;
++        let warm_up = self.offscreen_warm_up.as_ref().expect("started warm-up");
++        let result = self.engine.device.poll(wgpu::PollType::Wait {
++            submission_index: Some(warm_up.submission.clone()),
++            timeout: Some(OFFSCREEN_WARM_UP_TIMEOUT),
++        });
++        if let Err(error) = result {
++            self.offscreen_warm_up = None;
++            return Err(OffscreenWarmUpError::Failed(error.to_string()));
++        }
++        self.poll_warm_up_offscreen()?
++            .ok_or(OffscreenWarmUpError::Timeout)
++    }
++
++    /// Submits warm-up primitives while leaving completion to nonblocking polling.
++    pub fn begin_warm_up_offscreen(
++        &mut self,
++        viewport: &Viewport,
++        background_color: Color,
++    ) -> Result<(), OffscreenWarmUpError> {
++        if self.offscreen_warm_up.is_some() {
++            return Err(OffscreenWarmUpError::Failed(
++                "warm-up already pending".into(),
++            ));
++        }
 +        let size = viewport.physical_size();
 +
 +        if size.width == 0 || size.height == 0 {
@@ -4903,37 +5801,63 @@ index 6c88aa8e..0f340370 100644
 +        let submission = self.engine.queue.submit([encoder.finish()]);
 +        self.staging_belt.recall();
 +
-+        let poll = self.engine.device.poll(wgpu::PollType::Wait {
-+            submission_index: Some(submission),
-+            timeout: None,
++        let completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
++        let signal = completed.clone();
++        self.engine.queue.on_submitted_work_done(move || {
++            signal.store(true, std::sync::atomic::Ordering::Release);
 +        });
++        self.offscreen_warm_up = Some(OffscreenWarmUp {
++            _texture: texture,
++            submission,
++            completed,
++            started,
++            evidence: OffscreenWarmUpEvidence {
++                renderer_family: crate::core::backend::RendererFamily::Wgpu,
++                adapter: None,
++                backend: None,
++                width: size.width,
++                height: size.height,
++                passes,
++                elapsed_us: 0,
++                submission_completed: false,
++            },
++        });
++        Ok(())
++    }
 +
-+        let submission_completed = match poll {
-+            Ok(status) => {
-+                matches!(
-+                    status,
-+                    wgpu::PollStatus::WaitSucceeded | wgpu::PollStatus::QueueEmpty
-+                )
-+            }
-+            Err(error) => return Err(OffscreenWarmUpError::Failed(error.to_string())),
++    /// Polls the device without waiting and rejects stalled warm-ups after a deadline.
++    pub fn poll_warm_up_offscreen(
++        &mut self,
++    ) -> Result<Option<OffscreenWarmUpEvidence>, OffscreenWarmUpError> {
++        if let Err(error) = self.engine.device.poll(wgpu::PollType::Poll) {
++            self.offscreen_warm_up = None;
++            return Err(OffscreenWarmUpError::Failed(error.to_string()));
++        }
++        let Some(warm_up) = self.offscreen_warm_up.as_ref() else {
++            return Err(OffscreenWarmUpError::Failed("no pending warm-up".into()));
 +        };
-+
-+        Ok(OffscreenWarmUpEvidence {
-+            renderer_family: crate::core::backend::RendererFamily::Wgpu,
-+            adapter: None,
-+            backend: None,
-+            width: size.width,
-+            height: size.height,
-+            passes,
-+            elapsed_us: started.elapsed().as_micros(),
-+            submission_completed,
-+        })
++        match warm_up_completed(
++            warm_up.completed.load(std::sync::atomic::Ordering::Acquire),
++            warm_up.started.elapsed(),
++        ) {
++            Ok(true) => {
++                let mut warm_up = self.offscreen_warm_up.take().expect("pending warm-up");
++                warm_up.evidence.elapsed_us = warm_up.started.elapsed().as_micros();
++                warm_up.evidence.submission_completed = true;
++                Ok(Some(warm_up.evidence))
++            }
++            Ok(false) => Ok(None),
++            Err(error) => {
++                self.offscreen_warm_up = None;
++                Err(error)
++            }
++        }
 +    }
 +
      /// Renders the current surface to an offscreen buffer.
      ///
      /// Returns RGBA bytes of the texture data.
-@@ -639,6 +705,30 @@ impl Renderer {
+@@ -639,6 +799,30 @@ impl Renderer {
          });
      }
  
@@ -4979,7 +5903,7 @@ index a3df7c7a..10a9fe51 100644
                  let font_size = (buffer.metrics().font_size / hint_factor).round() as u32;
  
 diff --git a/vendor/iced/wgpu/src/window/compositor.rs b/vendor/iced/wgpu/src/window/compositor.rs
-index 31af6daa..92415a5e 100644
+index 31af6daa..52309d33 100644
 --- a/vendor/iced/wgpu/src/window/compositor.rs
 +++ b/vendor/iced/wgpu/src/window/compositor.rs
 @@ -140,7 +140,19 @@ impl Compositor {
@@ -5003,7 +5927,7 @@ index 31af6daa..92415a5e 100644
  
          log::info!("Selected format: {format:?} with alpha mode: {alpha_mode:?}");
  
-@@ -358,6 +370,21 @@ impl graphics::Compositor for Compositor {
+@@ -358,6 +370,43 @@ impl graphics::Compositor for Compositor {
      ) -> Vec<u8> {
          renderer.screenshot(viewport, background_color)
      }
@@ -5021,6 +5945,28 @@ index 31af6daa..92415a5e 100644
 +        evidence.backend = Some(format!("{:?}", information.backend));
 +
 +        Ok(evidence)
++    }
++
++    fn begin_warm_up_offscreen(
++        &mut self,
++        renderer: &mut Self::Renderer,
++        viewport: &Viewport,
++        background_color: Color,
++    ) -> Result<(), compositor::OffscreenWarmUpError> {
++        renderer.begin_warm_up_offscreen(viewport, background_color)
++    }
++
++    fn poll_warm_up_offscreen(
++        &mut self,
++        renderer: &mut Self::Renderer,
++    ) -> Result<Option<compositor::OffscreenWarmUpEvidence>, compositor::OffscreenWarmUpError> {
++        let Some(mut evidence) = renderer.poll_warm_up_offscreen()? else {
++            return Ok(None);
++        };
++        let information = self.adapter.get_info();
++        evidence.adapter = Some(information.name);
++        evidence.backend = Some(format!("{:?}", information.backend));
++        Ok(Some(evidence))
 +    }
  }
  
@@ -5099,7 +6045,7 @@ index 5dbb7c74..5204f46f 100644
  
  impl From<backend::Error> for Error {
 diff --git a/vendor/iced/winit/src/lib.rs b/vendor/iced/winit/src/lib.rs
-index a3da2ff3..87ed59ea 100644
+index a3da2ff3..380c53bb 100644
 --- a/vendor/iced/winit/src/lib.rs
 +++ b/vendor/iced/winit/src/lib.rs
 @@ -31,6 +31,7 @@ pub mod conversion;
@@ -5153,20 +6099,29 @@ index a3da2ff3..87ed59ea 100644
  
          runner.error.map(Err).unwrap_or(Ok(()))
      }
-@@ -468,6 +475,409 @@ enum Control {
+@@ -468,6 +475,418 @@ enum Control {
      SetAutomaticWindowTabbing(bool),
  }
  
-+struct PendingBackendHandoff<C> {
++struct PendingBackendHandoff<C: Compositor> {
 +    compositor: C,
++    renderers: FxHashMap<window::Id, C::Renderer>,
 +    sender: oneshot::Sender<backend::StrictHandoffOutcome>,
 +    phase: backend::StrictHandoffPhase,
 +    commit_after: Option<StdInstant>,
 +}
 +
-+struct PreparingBackendHandoff<C> {
++struct PreparingBackendHandoff<C: Compositor> {
 +    receiver: oneshot::Receiver<Result<C, backend::Error>>,
 +    sender: oneshot::Sender<backend::StrictHandoffOutcome>,
++    warming: Option<WarmingBackendHandoff<C>>,
++}
++
++struct WarmingBackendHandoff<C: Compositor> {
++    compositor: C,
++    renderers: FxHashMap<window::Id, C::Renderer>,
++    remaining: Vec<window::Id>,
++    started: StdInstant,
 +}
 +
 +struct RetainedBackendHandoff<P, C>
@@ -5563,7 +6518,7 @@ index a3da2ff3..87ed59ea 100644
  async fn run_instance<P>(
      mut program: program::Instance<P>,
      mut runtime: Runtime<P::Executor, Proxy<P::Message>, Action<P::Message>>,
-@@ -483,6 +893,7 @@ async fn run_instance<P>(
+@@ -483,6 +902,7 @@ async fn run_instance<P>(
  ) where
      P: Program + 'static,
      P::Theme: theme::Base,
@@ -5571,7 +6526,7 @@ index a3da2ff3..87ed59ea 100644
  {
      use winit::event;
      use winit::event_loop::ControlFlow;
-@@ -491,6 +902,10 @@ async fn run_instance<P>(
+@@ -491,6 +911,10 @@ async fn run_instance<P>(
      let mut is_window_opening = !is_daemon;
  
      let mut compositor = None;
@@ -5582,7 +6537,7 @@ index a3da2ff3..87ed59ea 100644
      let mut events = Vec::new();
      let mut messages = Vec::new();
      let mut actions = 0;
-@@ -545,6 +960,14 @@ async fn run_instance<P>(
+@@ -545,6 +969,15 @@ async fn run_instance<P>(
              break;
          };
  
@@ -5592,12 +6547,13 @@ index a3da2ff3..87ed59ea 100644
 +            &mut window_manager,
 +            renderer_settings,
 +            &mut events,
++            &mut user_interfaces,
 +        );
 +
          match event {
              Event::WindowCreated {
                  id,
-@@ -727,6 +1150,9 @@ async fn run_instance<P>(
+@@ -727,6 +1160,9 @@ async fn run_instance<P>(
                              &proxy,
                              &mut runtime,
                              &mut compositor,
@@ -5607,7 +6563,7 @@ index a3da2ff3..87ed59ea 100644
                              &mut events,
                              &mut messages,
                              &mut clipboard,
-@@ -760,6 +1186,29 @@ async fn run_instance<P>(
+@@ -760,6 +1196,29 @@ async fn run_instance<P>(
                              continue;
                          }
  
@@ -5637,7 +6593,7 @@ index a3da2ff3..87ed59ea 100644
                          // Window was resized between redraws
                          if window.surface_version != window.state.surface_version() {
                              #[cfg(feature = "hinting")]
-@@ -790,6 +1239,7 @@ async fn run_instance<P>(
+@@ -790,6 +1249,7 @@ async fn run_instance<P>(
                              user_interfaces.get_mut(&id).expect("Get user interface");
  
                          let interact_span = debug::interact(id);
@@ -5645,7 +6601,7 @@ index a3da2ff3..87ed59ea 100644
                          let mut redraw_count = 0;
  
                          let state = loop {
-@@ -847,6 +1297,9 @@ async fn run_instance<P>(
+@@ -847,6 +1307,9 @@ async fn run_instance<P>(
                                          &proxy,
                                          &mut runtime,
                                          &mut compositor,
@@ -5655,7 +6611,7 @@ index a3da2ff3..87ed59ea 100644
                                          &mut events,
                                          &mut messages,
                                          &mut clipboard,
-@@ -899,8 +1352,17 @@ async fn run_instance<P>(
+@@ -899,8 +1362,17 @@ async fn run_instance<P>(
                              }
                          };
                          interact_span.finish();
@@ -5673,7 +6629,7 @@ index a3da2ff3..87ed59ea 100644
                          interface.draw(
                              &mut window.renderer,
                              window.state.theme(),
-@@ -910,6 +1372,10 @@ async fn run_instance<P>(
+@@ -910,6 +1382,10 @@ async fn run_instance<P>(
                              cursor,
                          );
                          draw_span.finish();
@@ -5684,7 +6640,7 @@ index a3da2ff3..87ed59ea 100644
  
                          if let user_interface::State::Updated {
                              redraw_request,
-@@ -935,60 +1401,204 @@ async fn run_instance<P>(
+@@ -935,60 +1411,214 @@ async fn run_instance<P>(
                          window.draw_preedit();
  
                          let present_span = debug::present(id);
@@ -5796,11 +6752,7 @@ index a3da2ff3..87ed59ea 100644
 -                                    window.raw.request_redraw();
                                  }
 -                                compositor::SurfaceError::Occluded => {
--                                    present_span.finish();
- 
--                                    // Do nothing and wait for window to become visible again
--                                }
--                                _ => {
++
 +                                commit_pending_handoff = pending_backend_handoff.is_some();
 +                            }
 +                            Err(error) => {
@@ -5817,7 +6769,7 @@ index a3da2ff3..87ed59ea 100644
 +
                                      present_span.finish();
  
--                                    log::error!("Error {error:?} when presenting surface.");
+-                                    // Do nothing and wait for window to become visible again
 +                                    backend_handoff_after_present =
 +                                        Some(BackendHandoffAfterPresent::Failed {
 +                                            awaiting,
@@ -5862,21 +6814,20 @@ index a3da2ff3..87ed59ea 100644
 +                                            present_span.finish();
 +
 +                                            log::error!("Error {error:?} when presenting surface.");
- 
--                                    // Try rendering all windows again next frame.
--                                    for (_id, window) in window_manager.iter_mut() {
--                                        window.raw.request_redraw();
++
 +                                            // Try rendering all windows again next frame.
 +                                            for (_id, window) in window_manager.iter_mut() {
 +                                                window.raw.request_redraw();
 +                                            }
 +                                        }
-                                     }
++                                    }
                                  }
--                            },
+-                                _ => {
+-                                    present_span.finish();
 +                            }
 +                        }
-+
+ 
+-                                    log::error!("Error {error:?} when presenting surface.");
 +                        if let Some(after_present) = backend_handoff_after_present {
 +                            match after_present {
 +                                BackendHandoffAfterPresent::Complete { awaiting, evidence } => {
@@ -5905,7 +6856,10 @@ index a3da2ff3..87ed59ea 100644
 +                                }
 +                            }
 +                        }
-+
+ 
+-                                    // Try rendering all windows again next frame.
+-                                    for (_id, window) in window_manager.iter_mut() {
+-                                        window.raw.request_redraw();
 +                        if commit_pending_handoff {
 +                            if pending_backend_handoff
 +                                .as_ref()
@@ -5913,8 +6867,19 @@ index a3da2ff3..87ed59ea 100644
 +                                .is_some_and(|commit_after| StdInstant::now() < commit_after)
 +                            {
 +                                for (_id, window) in window_manager.iter_mut() {
-+                                    window.raw.request_redraw();
-+                                }
++                                    let delay = pending_backend_handoff
++                                        .as_ref()
++                                        .and_then(|pending| pending.commit_after)
++                                        .map(|deadline| {
++                                            deadline.saturating_duration_since(StdInstant::now())
++                                        })
++                                        .unwrap_or_default();
++                                    let next = Instant::now() + delay;
++                                    if window.redraw_at.is_none_or(|scheduled| scheduled > next) {
++                                        window.request_redraw(window::RedrawRequest::At(next));
+                                     }
+                                 }
+-                            },
 +                            } else if let Some(pending) = pending_backend_handoff.take() {
 +                                commit_backend_handoff(
 +                                    pending,
@@ -5927,7 +6892,7 @@ index a3da2ff3..87ed59ea 100644
                          }
                      }
                      event::Event::WindowEvent {
-@@ -1000,6 +1610,16 @@ async fn run_instance<P>(
+@@ -1000,6 +1630,16 @@ async fn run_instance<P>(
                              && !is_window_opening
                              && window_manager.is_empty()
                          {
@@ -5944,7 +6909,7 @@ index a3da2ff3..87ed59ea 100644
                              control_sender
                                  .start_send(Control::Exit)
                                  .expect("Send control action");
-@@ -1038,6 +1658,9 @@ async fn run_instance<P>(
+@@ -1038,6 +1678,9 @@ async fn run_instance<P>(
                                  &proxy,
                                  &mut runtime,
                                  &mut compositor,
@@ -5954,7 +6919,7 @@ index a3da2ff3..87ed59ea 100644
                                  &mut events,
                                  &mut messages,
                                  &mut clipboard,
-@@ -1067,7 +1690,20 @@ async fn run_instance<P>(
+@@ -1067,7 +1710,20 @@ async fn run_instance<P>(
                              actions = 0;
                          }
  
@@ -5976,7 +6941,7 @@ index a3da2ff3..87ed59ea 100644
                              continue;
                          }
  
-@@ -1170,6 +1806,9 @@ async fn run_instance<P>(
+@@ -1170,6 +1826,9 @@ async fn run_instance<P>(
                                      &proxy,
                                      &mut runtime,
                                      &mut compositor,
@@ -5986,7 +6951,7 @@ index a3da2ff3..87ed59ea 100644
                                      &mut events,
                                      &mut messages,
                                      &mut clipboard,
-@@ -1199,71 +1838,971 @@ async fn run_instance<P>(
+@@ -1199,71 +1858,1222 @@ async fn run_instance<P>(
                      _ => {}
                  }
              }
@@ -6035,6 +7000,7 @@ index a3da2ff3..87ed59ea 100644
 -    view_span.finish();
 +    let PendingBackendHandoff {
 +        compositor: mut prepared_compositor,
++        mut renderers,
 +        sender,
 +        phase,
 +        commit_after: _,
@@ -6139,7 +7105,9 @@ index a3da2ff3..87ed59ea 100644
 +        let size = window.state.physical_size();
 +
 +        let rendering_state = window::RenderingState {
-+            renderer: prepared_compositor.create_renderer(renderer_settings),
++            renderer: renderers
++                .remove(&id)
++                .unwrap_or_else(|| prepared_compositor.create_renderer(renderer_settings)),
 +            surface: prepared_compositor.create_surface(
 +                window.raw.clone(),
 +                size.width,
@@ -6189,6 +7157,10 @@ index a3da2ff3..87ed59ea 100644
 +    window_manager: &mut window::Manager<P, C>,
 +    renderer_settings: renderer::Settings,
 +    events: &mut Vec<(window::Id, core::Event)>,
++    user_interfaces: &mut FxHashMap<
++        window::Id,
++        UserInterface<'_, P::Message, P::Theme, P::Renderer>,
++    >,
 +) where
 +    P: Program,
 +    C: Compositor<Renderer = P::Renderer>,
@@ -6198,19 +7170,36 @@ index a3da2ff3..87ed59ea 100644
 +        return;
 +    };
 +
-+    for (_id, window) in window_manager.iter_mut() {
-+        window.raw.request_redraw();
++    if preparing.warming.is_some() {
++        drive_warming_backend_handoff(
++            preparing_backend_handoff,
++            pending_backend_handoff,
++            window_manager,
++            events,
++        );
++        return;
 +    }
 +
-+    let Some(result) = preparing.receiver.try_recv().ok().flatten() else {
-+        return;
++    let result = match preparing.receiver.try_recv() {
++        Ok(Some(result)) => result,
++        Ok(None) => return,
++        Err(_) => {
++            let preparing = preparing_backend_handoff.take().expect("preparing handoff");
++            let _ = preparing.sender.send(Err(strict_handoff_error(
++                backend::StrictHandoffPhase::Preparing,
++                backend::StrictHandoffFailureCategory::Prepare,
++                backend::StrictRollbackStatus::NotNeeded,
++                "backend preparation worker stopped without a result",
++            )));
++            return;
++        }
 +    };
 +
 +    let Some(preparing) = preparing_backend_handoff.take() else {
 +        return;
 +    };
 +
-+    let mut phase = backend::StrictHandoffPhase::Warming;
++    let phase = backend::StrictHandoffPhase::Warming;
 +
 +    log::info!("Warming backend handoff: {phase:?}");
 +
@@ -6240,7 +7229,7 @@ index a3da2ff3..87ed59ea 100644
 +
 +    let information = prepared_compositor.information();
 +    let renderer_family = strict_renderer_family(&information);
-+    let (viewport, background_color) = window_manager
++    let (viewport, _background_color) = window_manager
 +        .first()
 +        .map(|window| {
 +            let physical_size = window.state.physical_size();
@@ -6292,27 +7281,136 @@ index a3da2ff3..87ed59ea 100644
 +        return;
 +    }
 +
-+    let mut pending_renderer = prepared_compositor.create_renderer(renderer_settings);
 +    let warm_started = StdInstant::now();
++    let mut renderers = FxHashMap::default();
++    // Geometry caches encode the renderer family. Isolate the temporary GPU
++    // draw from the software frames that continue until commit.
++    graphics::cache::invalidate_all();
++    let warm_result = (|| {
++        for (id, window) in window_manager.iter_mut() {
++            let mut renderer = prepared_compositor.create_renderer(renderer_settings);
++            #[cfg(feature = "hinting")]
++            {
++                use crate::core::Renderer as _;
++                renderer.hint(window.state.scale_factor());
++            }
++            let interface = user_interfaces.get_mut(&id).ok_or_else(|| {
++                compositor::OffscreenWarmUpError::Failed(
++                    "window UI is unavailable for warm-up".into(),
++                )
++            })?;
++            interface.draw(
++                &mut renderer,
++                window.state.theme(),
++                &renderer::Style {
++                    text_color: window.state.text_color(),
++                },
++                window.state.cursor(),
++            );
++            let size = window.state.physical_size();
++            let viewport = Viewport::with_physical_size(
++                Size::new(size.width.max(1), size.height.max(1)),
++                window.state.scale_factor(),
++            );
++            prepared_compositor.begin_warm_up_offscreen(
++                &mut renderer,
++                &viewport,
++                window.state.background_color(),
++            )?;
++            let _ = renderers.insert(id, renderer);
++        }
++        Ok::<_, compositor::OffscreenWarmUpError>(())
++    })();
++    graphics::cache::invalidate_all();
++    if let Err(error) = warm_result {
++        let elapsed_us = warm_started.elapsed().as_micros();
++        trace_offscreen_warm_up_failure(
++            phase,
++            renderer_family,
++            Some(&information.adapter),
++            Some(&information.backend),
++            warm_size.width,
++            warm_size.height,
++            elapsed_us,
++            &error,
++        );
 +
-+    match prepared_compositor.warm_up_offscreen(&mut pending_renderer, &viewport, background_color)
-+    {
-+        Ok(evidence) => {
-+            trace_offscreen_warm_up_evidence("backend_handoff_warm_complete", phase, &evidence);
++        let _ = preparing.sender.send(Err(strict_handoff_error(
++            phase,
++            backend::StrictHandoffFailureCategory::WarmUp,
++            backend::StrictRollbackStatus::NotNeeded,
++            error.to_string(),
++        )));
++        return;
++    }
++
++    *preparing_backend_handoff = Some(PreparingBackendHandoff {
++        receiver: preparing.receiver,
++        sender: preparing.sender,
++        warming: Some(WarmingBackendHandoff {
++            compositor: prepared_compositor,
++            remaining: renderers.keys().copied().collect(),
++            renderers,
++            started: warm_started,
++        }),
++    });
++    drive_warming_backend_handoff(
++        preparing_backend_handoff,
++        pending_backend_handoff,
++        window_manager,
++        events,
++    );
++}
++
++fn drive_warming_backend_handoff<P, C>(
++    preparing_backend_handoff: &mut Option<PreparingBackendHandoff<C>>,
++    pending_backend_handoff: &mut Option<PendingBackendHandoff<C>>,
++    window_manager: &mut window::Manager<P, C>,
++    events: &mut Vec<(window::Id, core::Event)>,
++) where
++    P: Program,
++    C: Compositor<Renderer = P::Renderer>,
++    P::Theme: theme::Base,
++{
++    let Some(preparing) = preparing_backend_handoff.as_mut() else {
++        return;
++    };
++    let Some(warming) = preparing.warming.as_mut() else {
++        return;
++    };
++    let phase = backend::StrictHandoffPhase::Warming;
++    match poll_warm_renderers(&mut warming.renderers, &mut warming.remaining, |renderer| {
++        warming.compositor.poll_warm_up_offscreen(renderer)
++    }) {
++        Ok(true) => {}
++        Ok(false) => {
++            for (_, window) in window_manager.iter_mut() {
++                let next = Instant::now() + std::time::Duration::from_millis(16);
++                if window.redraw_at.is_none_or(|scheduled| scheduled > next) {
++                    window.request_redraw(window::RedrawRequest::At(next));
++                }
++            }
++            return;
 +        }
 +        Err(error) => {
-+            let elapsed_us = warm_started.elapsed().as_micros();
++            let information = warming.compositor.information();
++            let size = warming
++                .remaining
++                .last()
++                .and_then(|id| window_manager.get(*id))
++                .map(|window| window.state.physical_size())
++                .unwrap_or(Size::new(0, 0));
 +            trace_offscreen_warm_up_failure(
 +                phase,
-+                renderer_family,
++                strict_renderer_family(&information),
 +                Some(&information.adapter),
 +                Some(&information.backend),
-+                warm_size.width,
-+                warm_size.height,
-+                elapsed_us,
++                size.width,
++                size.height,
++                warming.started.elapsed().as_micros(),
 +                &error,
 +            );
-+
++            let preparing = preparing_backend_handoff.take().expect("preparing handoff");
 +            let _ = preparing.sender.send(Err(strict_handoff_error(
 +                phase,
 +                backend::StrictHandoffFailureCategory::WarmUp,
@@ -6322,8 +7420,10 @@ index a3da2ff3..87ed59ea 100644
 +            return;
 +        }
 +    }
++    let preparing = preparing_backend_handoff.take().expect("preparing handoff");
++    let warming = preparing.warming.expect("warmed renderers");
 +
-+    phase = backend::StrictHandoffPhase::CommitPending;
++    let phase = backend::StrictHandoffPhase::CommitPending;
 +
 +    if trace::enabled() {
 +        trace::event(
@@ -6334,7 +7434,8 @@ index a3da2ff3..87ed59ea 100644
 +    }
 +
 +    *pending_backend_handoff = Some(PendingBackendHandoff {
-+        compositor: prepared_compositor,
++        compositor: warming.compositor,
++        renderers: warming.renderers,
 +        sender: preparing.sender,
 +        phase,
 +        commit_after: backend_commit_pending_delay_deadline(),
@@ -6365,13 +7466,125 @@ index a3da2ff3..87ed59ea 100644
 +    }
 +}
 +
-+fn cancel_preparing_backend_handoff<C>(
++fn poll_warm_renderers<R>(
++    renderers: &mut FxHashMap<window::Id, R>,
++    remaining: &mut Vec<window::Id>,
++    mut poll: impl FnMut(
++        &mut R,
++    ) -> Result<
++        Option<compositor::OffscreenWarmUpEvidence>,
++        compositor::OffscreenWarmUpError,
++    >,
++) -> Result<bool, compositor::OffscreenWarmUpError> {
++    while let Some(id) = remaining.last().copied() {
++        let renderer = renderers.get_mut(&id).expect("warm renderer");
++        let Some(evidence) = poll(renderer)? else {
++            return Ok(false);
++        };
++        if !evidence.submission_completed
++            || evidence.renderer_family != backend::RendererFamily::Wgpu
++        {
++            return Err(compositor::OffscreenWarmUpError::Failed(
++                "offscreen warm-up did not prove a completed GPU submission".into(),
++            ));
++        }
++        trace_offscreen_warm_up_evidence(
++            "backend_handoff_warm_complete",
++            backend::StrictHandoffPhase::Warming,
++            &evidence,
++        );
++        let _ = remaining.pop();
++    }
++    Ok(true)
++}
++
++#[cfg(test)]
++mod warm_handoff_tests {
++    use super::*;
++
++    fn evidence() -> compositor::OffscreenWarmUpEvidence {
++        compositor::OffscreenWarmUpEvidence {
++            renderer_family: backend::RendererFamily::Wgpu,
++            adapter: None,
++            backend: None,
++            width: 100,
++            height: 80,
++            passes: 1,
++            elapsed_us: 1,
++            submission_completed: true,
++        }
++    }
++
++    #[test]
++    fn pending_warmup_preserves_renderers_and_completed_windows_for_commit() {
++        let first = window::Id::unique();
++        let second = window::Id::unique();
++        let mut renderers = FxHashMap::from_iter([(first, 0), (second, 0)]);
++        let mut remaining = vec![first, second];
++        let mut polls = 0;
++        assert!(
++            !poll_warm_renderers(&mut renderers, &mut remaining, |state| {
++                polls += 1;
++                *state += 1;
++                Ok((polls == 1).then(evidence))
++            })
++            .unwrap()
++        );
++        assert_eq!(remaining, vec![first]);
++        assert_eq!(renderers.len(), 2);
++        assert_eq!(renderers[&first], 1);
++        assert_eq!(renderers[&second], 1);
++        assert!(
++            poll_warm_renderers(&mut renderers, &mut remaining, |state| {
++                *state += 1;
++                Ok(Some(evidence()))
++            })
++            .unwrap()
++        );
++        assert!(remaining.is_empty());
++        assert_eq!(renderers[&first], 2);
++        assert_eq!(
++            renderers[&second], 1,
++            "completed renderer must not be recreated or polled twice"
++        );
++    }
++
++    #[test]
++    fn warmup_timeout_and_unproven_submission_do_not_allow_commit() {
++        let id = window::Id::unique();
++        let mut renderers = FxHashMap::from_iter([(id, ())]);
++        let mut remaining = vec![id];
++        assert_eq!(
++            poll_warm_renderers(&mut renderers, &mut remaining, |_| Err(
++                compositor::OffscreenWarmUpError::Timeout
++            )),
++            Err(compositor::OffscreenWarmUpError::Timeout)
++        );
++        let mut unproven = evidence();
++        unproven.submission_completed = false;
++        assert!(
++            poll_warm_renderers(&mut renderers, &mut remaining, |_| Ok(Some(
++                unproven.clone()
++            )))
++            .is_err()
++        );
++        assert_eq!(remaining, vec![id]);
++        assert_eq!(renderers.len(), 1);
++    }
++}
++
++fn cancel_preparing_backend_handoff<C: Compositor>(
 +    preparing_backend_handoff: &mut Option<PreparingBackendHandoff<C>>,
 +    message: &str,
 +) {
 +    if let Some(preparing) = preparing_backend_handoff.take() {
++        let phase = if preparing.warming.is_some() {
++            backend::StrictHandoffPhase::Warming
++        } else {
++            backend::StrictHandoffPhase::Preparing
++        };
 +        let _ = preparing.sender.send(Err(strict_handoff_error(
-+            backend::StrictHandoffPhase::Preparing,
++            phase,
 +            backend::StrictHandoffFailureCategory::Cancelled,
 +            backend::StrictRollbackStatus::NotNeeded,
 +            message,
@@ -6379,7 +7592,7 @@ index a3da2ff3..87ed59ea 100644
 +    }
 +}
 +
-+fn cancel_pending_backend_handoff<C>(
++fn cancel_pending_backend_handoff<C: Compositor>(
 +    pending_backend_handoff: &mut Option<PendingBackendHandoff<C>>,
 +    message: &str,
 +) {
@@ -6675,7 +7888,10 @@ index a3da2ff3..87ed59ea 100644
 +    compositor: &mut Option<C>,
 +    window_manager: &mut window::Manager<P, C>,
 +    present_frame_sequences: &mut FxHashMap<window::Id, u64>,
-+    user_interfaces: &mut FxHashMap<window::Id, UserInterface<'_, P::Message, P::Theme, P::Renderer>>,
++    user_interfaces: &mut FxHashMap<
++        window::Id,
++        UserInterface<'_, P::Message, P::Theme, P::Renderer>,
++    >,
 +    renderer_settings: renderer::Settings,
 +) where
 +    P: Program,
@@ -6707,10 +7923,7 @@ index a3da2ff3..87ed59ea 100644
 +            .expect("Remove user interface");
 +
 +        let layout_span = debug::layout(window_id);
-+        let _ = user_interfaces.insert(
-+            window_id,
-+            ui.relayout(logical_size, &mut window.renderer),
-+        );
++        let _ = user_interfaces.insert(window_id, ui.relayout(logical_size, &mut window.renderer));
 +        layout_span.finish();
 +
 +        current_compositor.configure_surface(
@@ -6792,7 +8005,10 @@ index a3da2ff3..87ed59ea 100644
 +    compositor: &mut Option<C>,
 +    window_manager: &mut window::Manager<P, C>,
 +    present_frame_sequences: &mut FxHashMap<window::Id, u64>,
-+    user_interfaces: &mut FxHashMap<window::Id, UserInterface<'_, P::Message, P::Theme, P::Renderer>>,
++    user_interfaces: &mut FxHashMap<
++        window::Id,
++        UserInterface<'_, P::Message, P::Theme, P::Renderer>,
++    >,
 +    renderer_settings: renderer::Settings,
 +) where
 +    P: Program,
@@ -7008,7 +8224,7 @@ index a3da2ff3..87ed59ea 100644
                          }
                      }
                  }
-@@ -1287,6 +2826,9 @@ fn run_action<'a, P, C>(
+@@ -1287,6 +3097,9 @@ fn run_action<'a, P, C>(
      _proxy: &Proxy<P::Message>,
      runtime: &mut Runtime<P::Executor, Proxy<P::Message>, Action<P::Message>>,
      compositor: &mut Option<C>,
@@ -7018,7 +8234,7 @@ index a3da2ff3..87ed59ea 100644
      events: &mut Vec<(window::Id, core::Event)>,
      messages: &mut Vec<P::Message>,
      clipboard: &mut Clipboard,
-@@ -1299,7 +2841,7 @@ fn run_action<'a, P, C>(
+@@ -1299,7 +3112,7 @@ fn run_action<'a, P, C>(
      renderer_settings: &mut renderer::Settings,
  ) where
      P: Program,
@@ -7027,7 +8243,7 @@ index a3da2ff3..87ed59ea 100644
      P::Theme: theme::Base,
  {
      use crate::core::Renderer as _;
-@@ -1345,6 +2887,24 @@ fn run_action<'a, P, C>(
+@@ -1345,6 +3158,24 @@ fn run_action<'a, P, C>(
                  let _ = interfaces.remove(&id);
  
                  if window_manager.remove(id).is_some() {
@@ -7052,7 +8268,7 @@ index a3da2ff3..87ed59ea 100644
                      events.push((id, core::Event::Window(core::window::Event::Closed)));
                  }
  
-@@ -1724,6 +3284,16 @@ fn run_action<'a, P, C>(
+@@ -1724,6 +3555,16 @@ fn run_action<'a, P, C>(
          Action::Backend(action) => match action {
              #[cfg(not(target_arch = "wasm32"))]
              backend::Action::Configure(settings, sender) => {
@@ -7069,7 +8285,7 @@ index a3da2ff3..87ed59ea 100644
                  let shell = Shell::new(_proxy.clone());
  
                  let mut new_compositor = if let Some(window) = window_manager.first() {
-@@ -1740,6 +3310,9 @@ fn run_action<'a, P, C>(
+@@ -1740,6 +3581,9 @@ fn run_action<'a, P, C>(
                          }
                      }
                  } else {
@@ -7079,7 +8295,7 @@ index a3da2ff3..87ed59ea 100644
                      return;
                  };
  
-@@ -1760,10 +3333,124 @@ fn run_action<'a, P, C>(
+@@ -1760,10 +3604,125 @@ fn run_action<'a, P, C>(
  
                  *compositor = Some(new_compositor);
  
@@ -7168,6 +8384,7 @@ index a3da2ff3..87ed59ea 100644
 +                *preparing_backend_handoff = Some(PreparingBackendHandoff {
 +                    receiver: prepared_receiver,
 +                    sender,
++                    warming: None,
 +                });
 +
 +                runtime.run(
@@ -7204,7 +8421,7 @@ index a3da2ff3..87ed59ea 100644
          },
          Action::Event { window, event } => {
              events.push((window, event));
-@@ -1791,6 +3478,16 @@ fn run_action<'a, P, C>(
+@@ -1791,6 +3750,16 @@ fn run_action<'a, P, C>(
              }
          }
          Action::Exit => {
@@ -7223,10 +8440,10 @@ index a3da2ff3..87ed59ea 100644
                  .expect("Send control action");
 diff --git a/vendor/iced/winit/src/trace.rs b/vendor/iced/winit/src/trace.rs
 new file mode 100644
-index 00000000..68b1d865
+index 00000000..48b33d32
 --- /dev/null
 +++ b/vendor/iced/winit/src/trace.rs
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,113 @@
 +use crate::window;
 +
 +use rustc_hash::FxHashMap;
@@ -7263,7 +8480,11 @@ index 00000000..68b1d865
 +        "{timestamp_us},{event},{elapsed_us},{}",
 +        csv_escape(&detail.to_string())
 +    );
-+    let _ = trace.writer.flush();
++    // Keep phase evidence immediately observable to lifecycle probes, while
++    // batching interaction/draw detail until the frame is complete.
++    if event == "winit_redraw_frame" || !event.starts_with("winit_redraw_") {
++        let _ = trace.writer.flush();
++    }
 +}
 +
 +pub fn frame_delta_us(window: window::Id, now: Instant) -> Option<u128> {

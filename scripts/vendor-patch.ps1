@@ -175,7 +175,7 @@ function Convert-GitVendorPatch {
     param([string] $Content)
 
     $patchVendorPath = Get-PatchVendorPath
-    $lines = $Content -split "`r?`n", -1
+    $lines = $Content -split "`r?`n"
     $converted = $lines | ForEach-Object {
         if ($_ -like "diff --git a/* b/*") {
             $_ -replace "^diff --git a/", "diff --git a/$patchVendorPath/" -replace " b/", " b/$patchVendorPath/"

@@ -54,6 +54,10 @@ impl App {
     pub(super) fn update_shortcut(&mut self, shortcut: ShortcutCommand) -> Task<Message> {
         self.active_menu = None;
 
+        if let Some(action) = EditorAction::from_shortcut(shortcut) {
+            return self.update_editor(self.workspace.active_document_id, action);
+        }
+
         match shortcut {
             ShortcutCommand::ZoomIn => {
                 self.settings.zoom_in();
@@ -67,77 +71,6 @@ impl App {
                 self.settings.reset_zoom();
                 self.persist_settings()
             }
-            ShortcutCommand::FoldCurrent => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::FoldCurrent)
-            }
-            ShortcutCommand::UnfoldCurrent => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::UnfoldCurrent)
-            }
-            ShortcutCommand::ToggleCurrentFold => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::ToggleCurrentFold)
-            }
-            ShortcutCommand::FoldAll => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::FoldAll)
-            }
-            ShortcutCommand::UnfoldAll => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::UnfoldAll)
-            }
-            ShortcutCommand::GoToMatchingDelimiter => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::GoToMatchingDelimiter)
-            }
-            ShortcutCommand::SelectMatchingDelimiter => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::SelectMatchingDelimiter)
-            }
-            ShortcutCommand::NextFunction => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::NextFunction)
-            }
-            ShortcutCommand::PreviousFunction => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::PreviousFunction)
-            }
-            ShortcutCommand::SelectCurrentFunction => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::SelectCurrentFunction)
-            }
-            ShortcutCommand::SelectCurrentFunctionBody => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::SelectCurrentFunctionBody)
-            }
-            ShortcutCommand::AddCaretAbove => self.update_editor(
-                self.workspace.active_document_id,
-                EditorAction::AddCaretAbove,
-            ),
-            ShortcutCommand::AddCaretBelow => self.update_editor(
-                self.workspace.active_document_id,
-                EditorAction::AddCaretBelow,
-            ),
-            ShortcutCommand::SplitSelectionIntoLines => self.update_editor(
-                self.workspace.active_document_id,
-                EditorAction::SplitSelectionIntoLines,
-            ),
-            ShortcutCommand::ConvertSelectionToRectangle => self.update_editor(
-                self.workspace.active_document_id,
-                EditorAction::ConvertSelectionToRectangle,
-            ),
             ShortcutCommand::NewFile => self.update_file(Message::NewFile),
             ShortcutCommand::OpenFile => self.update_file(Message::OpenFile),
             ShortcutCommand::SaveFile => self.update_file(Message::SaveFile),
@@ -149,47 +82,7 @@ impl App {
             ShortcutCommand::AdvancedReplace => self.update_search(Message::ToggleAdvancedSearch(
                 crate::message::AdvancedSearchTab::Replace,
             )),
-            ShortcutCommand::Indent => {
-                let document_id = self.workspace.active_document_id;
-                let text = match self.settings.indentation {
-                    crate::core::IndentationMode::Tabs => "\t".to_owned(),
-                    crate::core::IndentationMode::Spaces(width) => " ".repeat(width as usize),
-                };
-
-                self.update_editor(document_id, EditorAction::InsertText(text))
-            }
-            ShortcutCommand::Unindent => {
-                let document_id = self.workspace.active_document_id;
-
-                self.update_editor(document_id, EditorAction::Unindent)
-            }
-            ShortcutCommand::Cut => {
-                self.update_editor(self.workspace.active_document_id, EditorAction::Cut)
-            }
-            ShortcutCommand::Copy => {
-                self.update_editor(self.workspace.active_document_id, EditorAction::Copy)
-            }
-            ShortcutCommand::Paste => {
-                self.update_editor(self.workspace.active_document_id, EditorAction::Paste)
-            }
-            ShortcutCommand::Undo => self.update_editor_command(Message::Undo),
-            ShortcutCommand::Redo => self.update_editor_command(Message::Redo),
-            ShortcutCommand::SelectAll => {
-                self.update_editor(self.workspace.active_document_id, EditorAction::SelectAll)
-            }
-            ShortcutCommand::DuplicateLine => self.update_editor(
-                self.workspace.active_document_id,
-                EditorAction::DuplicateLine,
-            ),
-            ShortcutCommand::DeleteLine => {
-                self.update_editor(self.workspace.active_document_id, EditorAction::DeleteLine)
-            }
-            ShortcutCommand::CopyLine => {
-                self.update_editor(self.workspace.active_document_id, EditorAction::CopyLine)
-            }
-            ShortcutCommand::CutLine => {
-                self.update_editor(self.workspace.active_document_id, EditorAction::CutLine)
-            }
+            _ => unreachable!("editor shortcuts are dispatched through EditorAction"),
         }
     }
 

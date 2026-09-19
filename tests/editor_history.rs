@@ -47,6 +47,34 @@ fn insert(
 }
 
 #[test]
+fn saving_ends_typing_group_and_undo_returns_to_saved_text() {
+    let mut buffer = EditorBuffer::from_text("a");
+    let mut history = EditorHistory::new("");
+    history.record_with_grouping(insert(0, 0, "a", caret(0, 1)));
+    history.mark_clean("a");
+    buffer.replace_range(
+        EditorRange::new(EditorPosition::new(0, 1), EditorPosition::new(0, 1)),
+        "b",
+    );
+    history.record_with_grouping(insert(0, 1, "b", caret(0, 2)));
+
+    history.undo(&mut buffer);
+    assert_eq!(buffer.text(), "a");
+    assert!(!history.is_dirty("a"));
+}
+
+#[test]
+fn invalidated_disk_checkpoint_stays_dirty_after_undo() {
+    let mut buffer = EditorBuffer::from_text("ab");
+    let mut history = EditorHistory::new("a");
+    history.record(insert(0, 1, "b", caret(0, 2)));
+    history.invalidate_clean_checkpoint();
+    history.undo(&mut buffer);
+    assert_eq!(buffer.text(), "a");
+    assert!(history.is_dirty("a"));
+}
+
+#[test]
 fn editor_history_record_undo_and_redo_restore_text_and_selection() {
     let mut buffer = EditorBuffer::from_text("hello");
     let mut history = EditorHistory::new(buffer.text());

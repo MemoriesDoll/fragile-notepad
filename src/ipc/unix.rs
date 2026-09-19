@@ -3,7 +3,7 @@ use super::{ActivationRequest, SHOW_SIGNAL, Signal, SingleInstanceConfig};
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -28,21 +28,32 @@ impl Drop for PrimaryInstance {
 }
 
 impl PrimaryInstance {
-    pub fn accept_signal(&self) -> io::Result<Signal> {
+    pub fn accept_signal_with(&self, admit: impl FnOnce(&Signal) -> bool) -> io::Result<Signal> {
         loop {
             match self.listener.accept() {
-                Ok((stream, _address)) => {
+                Ok((mut stream, _address)) => {
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
                     let mut payload = Vec::new();
-                    if stream
-                        .take(MAX_SIGNAL_BYTES)
+                    if (&mut stream)
+                        .take(super::MAX_SIGNAL_BYTES as u64 + 1)
                         .read_to_end(&mut payload)
                         .is_err()
                     {
                         continue;
                     }
 
-                    if let Some(request) = parse_signal_payload(&payload) {
-                        return Ok(Signal::Show(request));
+                    if let Ok(signal) = super::decode_signal(&payload) {
+                        let accepted = admit(&signal);
+                        let _ = stream.write_all(&[u8::from(accepted)]);
+                        return Ok(signal);
+                    }
+                    if payload.len() <= MAX_SIGNAL_BYTES as usize
+                        && let Some(request) = parse_signal_payload(&payload)
+                    {
+                        let signal = Signal::Show(request);
+                        let _ = admit(&signal);
+                        return Ok(signal);
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
@@ -56,7 +67,7 @@ impl PrimaryInstance {
     }
 }
 
-pub fn claim_or_signal(config: &SingleInstanceConfig) -> io::Result<Startup> {
+pub fn claim_or_signal(config: &SingleInstanceConfig, files: &[PathBuf]) -> io::Result<Startup> {
     let paths = InstancePaths::new(config);
     paths.ensure_dir()?;
 
@@ -72,7 +83,7 @@ pub fn claim_or_signal(config: &SingleInstanceConfig) -> io::Result<Startup> {
             }))
         }
         LockStatus::HeldByAnotherProcess => {
-            signal_existing_instance(&paths.socket_path)?;
+            signal_existing_instance(&paths.socket_path, files)?;
             Ok(Startup::Secondary)
         }
     }
@@ -111,13 +122,34 @@ fn acquire_lock(path: &PathBuf) -> io::Result<LockStatus> {
     }
 }
 
-fn signal_existing_instance(socket_path: &PathBuf) -> io::Result<()> {
+fn signal_existing_instance(socket_path: &PathBuf, files: &[PathBuf]) -> io::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(2);
-    let payload = signal_payload(&ActivationRequest::from_environment());
+    let request = ActivationRequest::from_environment();
+    let payload = if files.is_empty() {
+        signal_payload(&request)
+    } else {
+        super::encode_signal(files, &request)?
+    };
 
     loop {
         match UnixStream::connect(socket_path) {
-            Ok(mut stream) => return stream.write_all(&payload),
+            Ok(mut stream) => {
+                stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+                stream.write_all(&payload)?;
+                if !files.is_empty() {
+                    stream.shutdown(std::net::Shutdown::Write)?;
+                    stream.set_read_timeout(Some(Duration::from_secs(7)))?;
+                    let mut acknowledgement = [0];
+                    stream.read_exact(&mut acknowledgement)?;
+                    if acknowledgement != [1] {
+                        return Err(io::Error::new(
+                            io::ErrorKind::ConnectionAborted,
+                            "The running application could not accept the files (it may be closing). Retry after it exits.",
+                        ));
+                    }
+                }
+                return Ok(());
+            }
             Err(error) if is_transient_signal_error(&error) && Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(25));
             }
@@ -248,7 +280,18 @@ impl InstancePaths {
         DirBuilder::new()
             .recursive(true)
             .mode(0o700)
-            .create(&self.dir)
+            .create(&self.dir)?;
+        let metadata = fs::symlink_metadata(&self.dir)?;
+        if !metadata.is_dir()
+            || metadata.uid() != effective_user_id()
+            || metadata.mode() & 0o077 != 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "IPC directory must be private and owned by the current user",
+            ));
+        }
+        Ok(())
     }
 }
 

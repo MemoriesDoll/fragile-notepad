@@ -1,6 +1,7 @@
 use fragile_notepad::editor::widget::{EDITOR_FONT, EDITOR_FONT_ROUTE};
 use fragile_notepad::startup::{
-    STARTUP_PROBE_ENV, STARTUP_PROBE_OUTPUT_PREFIX, UI_READY_BUDGET, iced_settings,
+    STARTUP_FRAME_OUTPUT_PREFIX, STARTUP_PROBE_ENV, STARTUP_PROBE_OUTPUT_PREFIX, UI_READY_BUDGET,
+    iced_settings,
 };
 
 use iced::Backend;
@@ -18,6 +19,7 @@ const CI_UI_READY_BUDGET: Duration = Duration::from_millis(750);
 #[test]
 fn app_binary_reaches_first_view_within_startup_budget() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_fragile-notepad"))
+        .arg("--no-session")
         .env(STARTUP_PROBE_ENV, "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -26,11 +28,15 @@ fn app_binary_reaches_first_view_within_startup_budget() {
 
     let stdout = child.stdout.take().expect("startup probe stdout");
     let (sender, receiver) = mpsc::channel();
+    let (frame_sender, frame_receiver) = mpsc::channel();
 
     thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Some(value) = line.strip_prefix(STARTUP_PROBE_OUTPUT_PREFIX) {
                 let _ = sender.send(value.parse::<f64>());
+            }
+            if let Some(value) = line.strip_prefix(STARTUP_FRAME_OUTPUT_PREFIX) {
+                let _ = frame_sender.send(value.parse::<f64>());
                 return;
             }
         }
@@ -59,8 +65,13 @@ fn app_binary_reaches_first_view_within_startup_budget() {
         thread::sleep(Duration::from_millis(10));
     };
 
+    let frame = frame_receiver.recv_timeout(Duration::from_secs(5));
     let _ = child.kill();
     let _ = child.wait();
+    let frame_ms = frame
+        .expect("startup probe should render its first frame")
+        .expect("frame timing");
+    assert!(frame_ms >= elapsed.as_secs_f64() * 1000.0);
 
     let budget = startup_budget_for_environment();
 

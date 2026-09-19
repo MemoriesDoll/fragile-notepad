@@ -4,6 +4,78 @@ use fragile_notepad::core::search::{
 };
 
 #[test]
+fn literal_search_is_independent_of_every_chunk_split() {
+    for text in [
+        "aaaaaa",
+        "aab aa a",
+        "abcab abc",
+        "café CAFÉ caféx",
+        "ΣΟΣ σος",
+        "a\r\nb",
+    ] {
+        let boundaries: Vec<_> = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain([text.len()])
+            .collect();
+        for query in ["a", "aa", "abc", "café", "ΣΟΣ", "\r\n"] {
+            for case_sensitive in [false, true] {
+                for whole_word in [false, true] {
+                    let search = PreparedSearch::new(
+                        query,
+                        SearchOptions::normal(case_sensitive, whole_word),
+                    )
+                    .unwrap()
+                    .unwrap();
+                    let expected = search.matches(text);
+                    for &a in &boundaries {
+                        for &b in boundaries.iter().filter(|&&b| b >= a) {
+                            assert_eq!(
+                                search.matches_in_chunks([&text[..a], "", &text[a..b], &text[b..]]),
+                                expected,
+                                "text={text:?} query={query:?} splits={a},{b} sensitive={case_sensitive} whole={whole_word}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        compute_matches_in_chunks(["a", "b"], "a", SearchOptions::normal(true, true)).is_empty()
+    );
+    assert_eq!(
+        compute_matches_in_chunks(["aa", "aa"], "aa", SearchOptions::normal(true, false)),
+        vec![TextMatch::new(0, 2), TextMatch::new(2, 4)]
+    );
+}
+
+#[test]
+fn regex_replacement_preserves_match_context() {
+    for (query, text, replacement, expected) in [
+        (r"\B(foo)", "xfoo", "$1", "foo"),
+        (r"(foo)\B", "foox", "<$1>", "<foo>"),
+        (r"(?m)^(foo)$", "before\nfoo\nafter", "$1!", "foo!"),
+    ] {
+        let search = PreparedSearch::new(
+            query,
+            SearchOptions {
+                mode: SearchMode::Regex,
+                case_sensitive: true,
+                whole_word: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let found = search.matches(text)[0];
+        assert_eq!(
+            search.replacement_for_match(text, found, replacement),
+            expected
+        );
+    }
+}
+
+#[test]
 fn compute_matches_respects_case_sensitivity() {
     assert_eq!(
         compute_matches("Note note NOTE", "note", true),

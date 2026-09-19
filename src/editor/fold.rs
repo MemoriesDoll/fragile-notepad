@@ -366,6 +366,7 @@ fn brace_folds(buffer: &EditorBuffer, hints: &SyntaxHints) -> Vec<FoldRange> {
                         .iter()
                         .rposition(|(open, _)| matching_close(*open) == ch)
                     else {
+                        index += ch.len_utf8();
                         continue;
                     };
                     let (_, start_line) = stack.remove(index);

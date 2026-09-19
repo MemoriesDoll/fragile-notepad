@@ -4,6 +4,7 @@ mod atomic_write;
 pub mod chunked_file;
 pub mod file_cache;
 pub mod file_system;
+pub mod session_store;
 pub mod settings_store;
 
 pub use crate::message::{
@@ -14,4 +15,5 @@ pub use file_cache::{SMALL_FILE_CACHE_LIMIT, SmallFileCacheUpdate, update_small_
 pub use file_system::{
     LoadedFile, load_file, load_file_request, open_file, pick_file, save_file, save_file_as,
 };
-pub use settings_store::{load_settings, save_settings};
+pub use session_store::{flush_session, load_session, save_session};
+pub use settings_store::{flush_settings, load_settings, save_settings};

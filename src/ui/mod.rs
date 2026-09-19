@@ -84,8 +84,7 @@ pub fn view<'a>(
         toolbar::menu_bar(active_menu),
         toolbar::tool_bar(),
         tabs::view(workspace, dragged_tab, hovered_drop_tab),
-    ]
-    .height(Fill);
+    ];
 
     if chrome_animation.find_rendered_visible || is_find_visible {
         let find_height = animated_find_height(chrome_animation);

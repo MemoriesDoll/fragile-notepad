@@ -23,6 +23,7 @@ mod files;
 mod menu;
 mod rendering;
 mod search;
+mod session;
 mod settings;
 mod shortcuts;
 mod windowing;
@@ -39,9 +40,11 @@ pub struct App {
     find: FindState,
     settings: EditorSettings,
     outline_states: HashMap<DocumentId, OutlineState>,
+    outline_handles: HashMap<DocumentId, iced::task::Handle>,
     outline_registry_hash: u64,
     is_loading: bool,
     pending_save: Option<SaveRequest>,
+    pending_reloads: HashMap<DocumentId, crate::core::Document>,
     pending_save_all: VecDeque<crate::core::DocumentId>,
     pending_close_after_save: Option<crate::core::DocumentId>,
     pending_close_documents: VecDeque<crate::core::DocumentId>,
@@ -70,6 +73,16 @@ pub struct App {
     chrome_animation: ChromeAnimation,
     main_window_opened: bool,
     pending_startup_gpu_boost: bool,
+    session: session::SessionState,
+    settings_loaded: bool,
+    settings_read_failed: bool,
+    initial_settings_edits: u32,
+    settings_dirty: bool,
+    settings_flush_scheduled: bool,
+    loading_find_scheduled: bool,
+    analysis_in_flight: Option<(DocumentId, u64, String, usize)>,
+    load_handles: HashMap<DocumentId, iced::task::Handle>,
+    pending_search: Option<search::PendingSearch>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +128,13 @@ struct RevealAnimationInfo {
 
 impl App {
     pub fn new() -> (Self, Task<Message>) {
+        Self::new_with_options(crate::startup::StartupOptions {
+            files: Vec::new(),
+            restore_session: false,
+        })
+    }
+
+    pub fn new_with_options(options: crate::startup::StartupOptions) -> (Self, Task<Message>) {
         let (main_window_id, open) = window::open(window::Settings {
             exit_on_close_request: false,
             ..window::Settings::default()
@@ -126,9 +146,11 @@ impl App {
             find: FindState::new(),
             settings: EditorSettings::default(),
             outline_states: HashMap::new(),
+            outline_handles: HashMap::new(),
             outline_registry_hash,
             is_loading: false,
             pending_save: None,
+            pending_reloads: HashMap::new(),
             pending_save_all: VecDeque::new(),
             pending_close_after_save: None,
             pending_close_documents: VecDeque::new(),
@@ -157,11 +179,29 @@ impl App {
             chrome_animation: ChromeAnimation::new(),
             main_window_opened: false,
             pending_startup_gpu_boost: false,
+            session: session::SessionState::new(options),
+            settings_loaded: false,
+            settings_read_failed: false,
+            initial_settings_edits: 0,
+            settings_dirty: false,
+            settings_flush_scheduled: false,
+            loading_find_scheduled: false,
+            analysis_in_flight: None,
+            load_handles: HashMap::new(),
+            pending_search: None,
         };
 
         app.refresh_find_matches();
         let outline_task = app.schedule_outline_parse(app.workspace.active_document_id);
 
+        let session_task = if app.session.enabled {
+            Task::perform(
+                crate::services::session_store::load_session(),
+                Message::SessionLoaded,
+            )
+        } else {
+            Task::none()
+        };
         (
             app,
             Task::batch([
@@ -169,11 +209,42 @@ impl App {
                 iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
                 Task::perform(crate::services::load_settings(), Message::SettingsLoaded),
                 outline_task,
+                session_task,
             ]),
         )
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let track_session = self.session_should_track(&message);
+        if self.session.exiting
+            && !matches!(
+                message,
+                Message::ShutdownPersisted(_)
+                    | Message::SettingsPersisted(_)
+                    | Message::SessionPersisted(_)
+            )
+        {
+            if let Message::ForwardedFiles(_, _, receipt) = &message {
+                receipt.resolve(false);
+            }
+            return Task::none();
+        }
+        let task = self.update_traced(message);
+        let search_task = if self.session.exiting {
+            Task::none()
+        } else {
+            self.resume_pending_search()
+        };
+        let session_task = if track_session {
+            self.request_session_save()
+        } else {
+            Task::none()
+        };
+        let analysis = self.schedule_active_analysis();
+        Task::batch([task, search_task, session_task, analysis])
+    }
+
+    fn update_traced(&mut self, message: Message) -> Task<Message> {
         if let Some(perf_span) = crate::perf_trace::span("app_update", format_args!("{message:?}"))
         {
             let task = self.update_inner(message);
@@ -186,7 +257,46 @@ impl App {
     }
 
     fn update_inner(&mut self, message: Message) -> Task<Message> {
+        if !self.settings_loaded {
+            self.initial_settings_edits |= session::settings_edit_mask(&message);
+        }
         match message {
+            Message::ForwardedFiles(paths, request, receipt) => {
+                if !receipt.try_accept() {
+                    return Task::none();
+                }
+                Task::batch([self.open_paths(paths), self.show_main_window(request)])
+            }
+            Message::OpenPaths(paths) => self.open_paths(paths),
+            Message::StartupReady => {
+                self.session.ready = true;
+                self.restore_startup()
+            }
+            Message::StartupFrameReady => {
+                crate::startup::report_first_frame_ready();
+                Task::none()
+            }
+            Message::SessionLoaded(result) => self.session_loaded(result),
+            Message::SessionFlush => self.flush_session(),
+            Message::SessionPersisted(result) => self.session_persisted(result),
+            Message::ShutdownPersisted(result) => self.shutdown_persisted(result),
+            Message::SettingsFlush => self.flush_settings(),
+            Message::RefreshLoadingFind => {
+                self.loading_find_scheduled = false;
+                self.refresh_find_matches();
+                Task::none()
+            }
+            Message::DocumentAnalyzed(result) => {
+                self.analysis_in_flight = None;
+                if let Some(document) = self.workspace.document_mut(result.document_id) {
+                    if document.apply_analysis(result)
+                        && let Some(ranges) = self.session.folds.remove(&document.id)
+                    {
+                        document.restore_collapsed_folds(&ranges);
+                    }
+                }
+                Task::none()
+            }
             Message::None => Task::none(),
             Message::SingleInstanceShowRequested(request) => self.show_main_window(request),
             Message::Shortcut(shortcut) => self.update_shortcut(shortcut),
@@ -382,7 +492,29 @@ impl App {
                     self.main_window_opened = true;
                 }
 
-                let window_task = self.update_window(Message::WindowOpened(id));
+                let startup_task = if self.main_window_id == Some(id)
+                    && (self.session.enabled || !self.session.paths.is_empty())
+                {
+                    Task::perform(
+                        async {
+                            tokio::time::sleep(Duration::from_millis(16)).await;
+                        },
+                        |_| Message::StartupReady,
+                    )
+                } else {
+                    Task::none()
+                };
+                let probe_task =
+                    if self.main_window_id == Some(id) && crate::startup::startup_probe_enabled() {
+                        window::screenshot(id).map(|_| Message::StartupFrameReady)
+                    } else {
+                        Task::none()
+                    };
+                let window_task = Task::batch([
+                    self.update_window(Message::WindowOpened(id)),
+                    startup_task,
+                    probe_task,
+                ]);
 
                 if self.main_window_id == Some(id) && self.pending_startup_gpu_boost {
                     self.pending_startup_gpu_boost = false;
@@ -542,6 +674,21 @@ impl App {
     }
 
     fn schedule_outline_parse(&mut self, document_id: DocumentId) -> Task<Message> {
+        if document_id != self.workspace.active_document_id {
+            return Task::none();
+        }
+        let inactive = self
+            .outline_handles
+            .keys()
+            .copied()
+            .filter(|id| *id != document_id)
+            .collect::<Vec<_>>();
+        for id in inactive {
+            if let Some(handle) = self.outline_handles.remove(&id) {
+                handle.abort();
+            }
+            self.outline_states.remove(&id);
+        }
         let Some(document) = self.workspace.document(document_id) else {
             self.outline_states.remove(&document_id);
             return Task::none();
@@ -561,8 +708,7 @@ impl App {
             return Task::none();
         }
 
-        let request = outline_request_for_document(document, self.outline_registry_hash);
-        let metadata = OutlineSnapshotMetadata::from_request(&request);
+        let metadata = OutlineSnapshotMetadata::from_document(document, self.outline_registry_hash);
 
         if self
             .outline_states
@@ -572,13 +718,20 @@ impl App {
             return Task::none();
         }
 
+        let request = outline_request_for_document(document, self.outline_registry_hash);
+
         self.outline_states
             .insert(document_id, OutlineState::pending(&request));
 
-        Task::perform(
+        let (task, handle) = Task::perform(
             parse_outline_request(request),
             Message::OutlineParseCompleted,
         )
+        .abortable();
+        if let Some(previous) = self.outline_handles.insert(document_id, handle) {
+            previous.abort();
+        }
+        task
     }
 
     fn complete_outline_parse(&mut self, result: OutlineParseResult) -> Task<Message> {
@@ -600,6 +753,7 @@ impl App {
 
         self.outline_states
             .insert(metadata.document_id, OutlineState::ready(result));
+        self.outline_handles.remove(&metadata.document_id);
 
         Task::none()
     }
@@ -947,15 +1101,31 @@ fn single_instance_signals() -> impl iced::futures::Stream<Item = Message> {
 
         std::thread::spawn(move || {
             loop {
-                match instance.accept_signal() {
-                    Ok(Signal::Show(request)) => {
-                        if output
-                            .try_send(Message::SingleInstanceShowRequested(request))
-                            .is_err_and(|error| error.is_disconnected())
-                        {
-                            break;
-                        }
+                let mut disconnected = false;
+                let accepted = instance.accept_signal_with(|signal| {
+                    use iced::futures::SinkExt;
+                    let receipt = crate::ipc::AdmissionReceipt::new();
+                    let (paths, request) = match signal {
+                        Signal::Show(request) => (Vec::new(), request.clone()),
+                        Signal::OpenFiles(paths, request) => (paths.clone(), request.clone()),
+                    };
+                    if futures::executor::block_on(output.send(Message::ForwardedFiles(
+                        paths,
+                        request,
+                        receipt.clone(),
+                    )))
+                    .is_err()
+                    {
+                        disconnected = true;
+                        return false;
                     }
+                    receipt.wait_for_acceptance()
+                });
+                if disconnected {
+                    break;
+                }
+                match accepted {
+                    Ok(_) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                     Err(_error) => break,
                 }

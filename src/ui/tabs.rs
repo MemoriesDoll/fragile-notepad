@@ -3,7 +3,9 @@ use iced::advanced::mouse;
 use iced::advanced::renderer;
 use iced::advanced::widget::{Operation, Tree, tree};
 use iced::advanced::{Layout, Renderer as _, Shell, Widget};
-use iced::widget::{button, container, image, mouse_area, row, scrollable, text, tooltip};
+use iced::widget::{
+    button, container, image, mouse_area, responsive, row, scrollable, text, tooltip,
+};
 use iced::{Background, Border, Center, Color, Element, Event, Fill, Length, Rectangle, Size};
 
 use crate::core::{Document, DocumentId, Workspace};
@@ -13,6 +15,7 @@ use crate::ui::icons::tango::{self, TangoIcon};
 use crate::ui::{centered_button_content, styles};
 
 const TAB_HEIGHT: f32 = 27.0;
+const TAB_SCROLLBAR_HEIGHT: f32 = 10.0;
 const TAB_TOP_BAR_HEIGHT: f32 = 3.0;
 const TAB_LABEL_MAX_CHARS: usize = 28;
 const TAB_LABEL_MIN_WIDTH: f32 = 62.0;
@@ -40,24 +43,46 @@ pub fn view(
     dragged_tab: Option<DocumentId>,
     hovered_drop_tab: Option<DocumentId>,
 ) -> Element<'_, Message> {
-    let tabs =
-        workspace
-            .documents()
-            .iter()
-            .fold(row![].spacing(0).align_y(Center), |tabs, document| {
+    responsive(move |size| {
+        let needs_scroll = total_tab_width(workspace) > size.width;
+        let tabs = workspace.documents().iter().fold(
+            row![].spacing(0).align_y(Center),
+            |tabs, document| {
                 tabs.push(tab(
                     document,
                     document.id == workspace.active_document_id,
                     drag_visual(workspace, document, dragged_tab, hovered_drop_tab),
                 ))
-            });
+            },
+        );
+        let scrollable = if needs_scroll {
+            scrollable(tabs).horizontal().spacing(0)
+        } else {
+            scrollable(tabs).direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::hidden(),
+            ))
+        };
+        container(scrollable.width(Fill))
+            .padding([0, 0])
+            .height(if needs_scroll {
+                TAB_HEIGHT + TAB_SCROLLBAR_HEIGHT
+            } else {
+                TAB_HEIGHT + 1.0
+            })
+            .width(Fill)
+            .style(styles::tab_strip)
+    })
+    .height(Length::Shrink)
+    .width(Fill)
+    .into()
+}
 
-    container(scrollable(tabs).horizontal().width(Fill))
-        .padding([0, 0])
-        .height(TAB_HEIGHT + 1.0)
-        .width(Fill)
-        .style(styles::tab_strip)
-        .into()
+fn total_tab_width(workspace: &Workspace) -> f32 {
+    workspace
+        .documents()
+        .iter()
+        .map(|document| tab_label_width(&compact_tab_title(&tab_title(document))) + 72.0)
+        .sum()
 }
 
 fn tab(document: &Document, is_active: bool, drag_visual: DragVisual) -> Element<'_, Message> {

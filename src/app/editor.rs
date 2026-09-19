@@ -9,7 +9,7 @@ use crate::message::{ClipboardReadResult, Message, PasteRequest};
 
 use super::editor_ops::{
     add_adjacent_caret, backspace, convert_selection_to_rectangle, delete, delete_line,
-    duplicate_line, go_to_matching_delimiter, go_to_next_function, go_to_previous_function,
+    duplicate_line, go_to_matching_delimiter, go_to_next_function, go_to_previous_function, indent,
     join_lines, line_span_text, lowercase_selection, move_document_position, paste_clipboard_mode,
     paste_selection, replace_selection, select_current_function, select_current_function_body,
     select_delimiter_in_place, select_matching_delimiter, select_word_at, selected_text,
@@ -30,8 +30,21 @@ impl App {
         }
 
         let clipboard_task = self.clipboard_task(document_id, &action);
-        let entries = self.outline_entries_for_editor_action(document_id);
+        let entries = matches!(
+            action,
+            EditorAction::NextFunction
+                | EditorAction::PreviousFunction
+                | EditorAction::SelectCurrentFunction
+                | EditorAction::SelectCurrentFunctionBody
+        )
+        .then(|| self.outline_entries_for_editor_action(document_id))
+        .flatten();
+        let reveal_caret = action.mutates_document()
+            || matches!(action, EditorAction::MoveCaret(_) | EditorAction::Select(_));
         let changed = self.apply_editor_action(document_id, action, entries.as_deref());
+        if reveal_caret && let Some(document) = self.workspace.document_mut(document_id) {
+            document.ensure_caret_visible();
+        }
 
         if changed && document_id == self.workspace.active_document_id {
             self.refresh_find_matches();
@@ -56,13 +69,16 @@ impl App {
         if self
             .workspace
             .document(document_id)
-            .is_some_and(|document| document.is_loading_or_indexing())
+            .is_some_and(|document| !document.has_complete_text_index())
         {
             self.file_status = Some(String::from("Finish loading before editing."));
             return Task::none();
         }
 
         let changed = self.apply_paste_request(&request, text.as_ref());
+        if changed && let Some(document) = self.workspace.document_mut(document_id) {
+            document.ensure_caret_visible();
+        }
 
         if changed && document_id == self.workspace.active_document_id {
             self.refresh_find_matches();
@@ -102,7 +118,7 @@ impl App {
         if self
             .workspace
             .active_document()
-            .is_some_and(|document| document.is_loading_or_indexing())
+            .is_some_and(|document| !document.has_complete_text_index())
         {
             self.file_status = Some(String::from("Finish loading before editing."));
             return Task::none();
@@ -121,6 +137,9 @@ impl App {
         };
 
         if changed {
+            if let Some(document) = self.workspace.active_document_mut() {
+                document.ensure_caret_visible();
+            }
             self.refresh_find_matches();
             let document_id = self.workspace.active_document_id;
             return self.schedule_outline_parse(document_id);
@@ -139,7 +158,7 @@ impl App {
         let Some(document) = self.workspace.active_document_mut() else {
             return false;
         };
-        if document.is_loading_or_indexing() {
+        if !document.has_complete_text_index() {
             self.file_status = Some(String::from("Finish loading before editing."));
             return false;
         }
@@ -236,7 +255,7 @@ impl App {
                     crate::core::IndentationMode::Spaces(width) => " ".repeat(width as usize),
                 };
 
-                replace_selection(document, &text, false, tab_width)
+                indent(document, tab_width, &text)
             }
             EditorAction::Unindent => {
                 unindent(document, self.settings.indentation.width() as usize)
@@ -268,6 +287,16 @@ impl App {
             EditorAction::ScrollToRow(row) => {
                 let max = document.viewport.visible_row_count().saturating_sub(1);
                 document.scroll.first_visible_row = row.min(max);
+                false
+            }
+            EditorAction::ViewportChanged {
+                visible_rows,
+                text_width,
+                character_width_milli,
+            } => {
+                document.viewport_visible_rows = visible_rows.max(1);
+                document.viewport_text_width = text_width as f32;
+                document.viewport_character_width = character_width_milli as f32 / 1000.0;
                 false
             }
             EditorAction::ToggleFold(range) => {
@@ -379,7 +408,7 @@ impl App {
         let Some(document) = self.workspace.document(document_id) else {
             return false;
         };
-        if !document.is_loading_or_indexing() {
+        if document.has_complete_text_index() {
             return false;
         }
 

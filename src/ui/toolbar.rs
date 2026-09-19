@@ -283,7 +283,7 @@ fn window_cycle_item(label: &'static str, message: Message, state: WindowMenuSta
 }
 
 fn file_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
-    vec![
+    let mut entries = vec![
         menu_item(settings, "New", ShortcutCommand::NewFile, Message::NewFile),
         menu_item(
             settings,
@@ -311,7 +311,25 @@ fn file_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
         menu::item("Close", Message::CloseFile),
         menu::item("Close All", Message::CloseAllFiles),
         close_multiple_documents_menu(),
-    ]
+    ];
+    if !settings.open_history.is_empty() {
+        entries.push(menu::separator());
+        entries.push(menu::submenu(
+            "recent-files",
+            "Recent Files",
+            settings
+                .open_history
+                .iter()
+                .map(|path| {
+                    menu::item(
+                        path.to_string_lossy().into_owned(),
+                        Message::OpenPaths(vec![path.clone()]),
+                    )
+                })
+                .collect(),
+        ));
+    }
+    entries
 }
 
 fn edit_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {

@@ -1,5 +1,72 @@
 # Development
 
+## Files and sessions
+
+Launch with file paths, including several paths at once:
+
+```powershell
+fragile-notepad.exe "notes.txt" "src/main.rs"
+fragile-notepad.exe -- "-draft.txt"
+fragile-notepad.exe --no-session "notes.txt"
+```
+
+Relative paths resolve against the calling process's working directory. A second
+invocation forwards its paths to the existing application and activates its window.
+Forwarding succeeds only after the running application accepts the request. If
+it is saving its session and exiting, the command returns an error asking you to
+retry; the request is not silently acknowledged and dropped.
+`--help` and `--version` exit without opening a window. `--no-session` disables
+both restoration and session writes for that launch; it does not erase the previous
+session. When forwarding to an existing instance, its session policy remains active.
+
+By default, quitting preserves all tabs, including unsaved and untitled text, in
+`session.json` next to `settings.xml`. Sessions retain tab order, the selected tab,
+pins, encoding/line endings for recovery text, language, selection, scrolling, and
+collapsed folds. Individual dirty-tab closes still use Save/Discard/Cancel.
+Automatic language detection remains automatic after restoration. Older sessions
+without this metadata infer automatic detection when the saved language matches
+the file extension; explicit overrides are preserved in newly saved sessions.
+Session changes are checkpointed after two seconds and flushed before quit;
+a failed exit write leaves the application open. Crash recovery covers the last
+completed checkpoint, not necessarily the last two seconds of editing.
+
+Saved clean tabs reopen from disk only when selected. Missing files retain their
+session entries for retry; they are never overwritten with a partial load. Unsaved
+tabs retain their recovery text while deferred. Invalid or unsupported sessions
+are reported and preserved rather than replaced automatically. Session storage
+is bounded to 256 MiB serialized data and 10,000 tabs; exceeding either limit
+reports a save failure rather than silently omitting documents.
+Failed file loads remain read-only until a successful reload. Find All, Count,
+and Replace All in Open Documents load their captured target tabs before running;
+changing the request cancels it. If a target closes or fails to load, replacement
+is canceled before changing any document.
+
+The Recent Files menu retains the latest 16 opened/saved paths. History/settings
+writes are debounced and serialized, and startup merges early user changes before
+persisting. File reads run at most four at once; closing a loading tab aborts its
+task. Inactive documents defer full fold/outline analysis until selection.
+
+## Bulk-load and recovery profiling
+
+The following uses an isolated settings directory and synthetic files. Never point
+the profiler at your normal application configuration:
+
+```powershell
+$env:APPDATA="$PWD/target/many-files-investigation/profile"
+$env:LOCALAPPDATA=$env:APPDATA
+cargo run --release --no-default-features --example profile_many_files -- 100 rust64
+cargo run --release --no-default-features --example profile_many_files -- history
+cargo run --release --no-default-features --example profile_many_files -- outline
+cargo run --release --no-default-features --example profile_many_files -- recovery
+cargo run --release --no-default-features --example profile_many_files -- recovery verify
+```
+
+The recovery pair verifies 101 tabs and exact unsaved Unicode text across two real
+window lifecycles. Bulk-load output separates file-completion handler time,
+all-files-loaded time, persistence results, and a 16 ms UI heartbeat. Startup tests
+report first-view entry and a separate screenshot-completion milestone after
+layout/rendering; screenshot completion is not an OS presentation timestamp.
+
 ## Vendored Dependencies
 
 Fragile Notepad builds against Git checkouts under `vendor/`. Each vendor
@@ -178,6 +245,28 @@ For renderer performance changes, also run:
 cargo run --release --example profile_tiny_skia_text
 cargo run --release --example profile_render
 ```
+
+For the patched software backend hot paths, run without tracing so per-event
+diagnostics do not affect the measurements:
+
+```powershell
+cargo run --release --no-default-features --example profile_backend_hotspots
+cargo run --release --no-default-features --example profile_tiny_skia_text
+```
+
+`profile_backend_hotspots` measures the production scroll detector, cached image
+filtering, and damage compaction. Its nearest-filter numbers are a comparison;
+the optimization preserves the original linear-filter output. Pixel-equivalence
+regressions live in the vendored graphics and tiny-skia crates:
+
+```powershell
+cargo test --manifest-path vendor/iced/Cargo.toml -p iced_graphics --lib
+cargo test --manifest-path vendor/iced/Cargo.toml -p iced_tiny_skia --lib --features image
+```
+
+The application icon parity test also checks cached-frame equality at 100%,
+150%, and 200% scale. Re-export the iced patch after changing these vendor tests
+or implementation files so fresh checkouts include the same fixes.
 
 ## Backend Switch Probe
 

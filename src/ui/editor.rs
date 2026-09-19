@@ -29,6 +29,7 @@ pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element
         move |action| Message::EditorAction(document_id, action),
     )
     .id(EDITOR_ID)
+    .viewport_key(document_id.get())
     .height(Fill)
     .metrics(metrics)
     .scroll(document.scroll)

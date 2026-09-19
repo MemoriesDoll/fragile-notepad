@@ -1,4 +1,7 @@
-use crate::app::editor_ops::{backspace, delete, paste_selection, replace_selection};
+use crate::app::editor_ops::{
+    backspace, delete, indent, line_span_text, paste_selection, replace_ranges_for_search,
+    replace_selection, selected_text,
+};
 use crate::core::DocumentId;
 use crate::core::document::Document;
 use crate::editor::{EditorPosition, EditorSelection, SelectionSet};
@@ -31,6 +34,72 @@ fn document(text: &str, selection: EditorSelection) -> Document {
     document.refresh_after_text_change();
     document.mark_clean();
     document
+}
+
+#[test]
+fn multiline_linear_replacement_and_deletion_include_line_endings() {
+    let mut document = document("one\ntwo", selection(0, 0, 1, 3));
+    assert!(replace_selection(&mut document, "X", false, 4));
+    assert_eq!(document.text(), "X");
+    assert_eq!(document.selection_set().len(), 1);
+    assert!(document.undo());
+    assert!(delete(&mut document, 4));
+    assert_eq!(document.text(), "");
+    assert!(document.undo());
+    document.set_main_selection(selection(0, 3, 1, 0));
+    assert!(backspace(&mut document, 4));
+    assert_eq!(document.text(), "onetwo");
+}
+
+#[test]
+fn clipboard_preserves_blank_lines_and_original_line_endings() {
+    let document = document("one\r\n\r\ntwo\n", selection(0, 0, 3, 0));
+    assert_eq!(
+        selected_text(&document, 4).as_deref(),
+        Some("one\r\n\r\ntwo\n")
+    );
+    assert_eq!(
+        line_span_text(&document, 4).as_deref(),
+        Some("one\r\n\r\ntwo\n")
+    );
+}
+
+#[test]
+fn indent_preserves_selected_contents_direction_and_undo() {
+    let original = selection(2, 0, 0, 1);
+    let mut document = document("one\ntwo\nthree", original);
+    assert!(indent(&mut document, 2, "  "));
+    assert_eq!(document.text(), "  one\n  two\nthree");
+    assert_eq!(document.main_selection(), selection(2, 0, 0, 3));
+    assert!(document.undo());
+    assert_eq!(document.text(), "one\ntwo\nthree");
+    assert_eq!(document.main_selection(), original);
+}
+
+#[test]
+fn search_batch_is_one_undoable_transaction() {
+    let mut document = document("one one one", caret(0, 0));
+    let revision = document.revision();
+    let ranges = [0, 4, 8]
+        .into_iter()
+        .map(|column| {
+            (
+                crate::editor::EditorRange::new(position(0, column), position(0, column + 3)),
+                "X".to_owned(),
+            )
+        })
+        .collect();
+    assert!(replace_ranges_for_search(&mut document, ranges));
+    assert_eq!(document.text(), "X X X");
+    assert_eq!(document.selection_set().len(), 1);
+    assert_eq!(document.main_selection(), caret(0, 1));
+    assert_eq!(document.revision(), revision + 1);
+    assert!(document.undo());
+    assert_eq!(document.text(), "one one one");
+    assert!(!document.can_undo());
+    assert!(document.redo());
+    assert_eq!(document.selection_set().len(), 1);
+    assert_eq!(document.main_selection(), caret(0, 1));
 }
 
 #[test]

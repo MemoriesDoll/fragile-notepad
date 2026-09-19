@@ -222,14 +222,27 @@ fn render_icon(backend: &str, scale_factor: f32, rgba: &[u8]) -> Option<Vec<u8>>
 
     draw_icon(&mut renderer, rgba);
 
-    Some(renderer.screenshot(
+    let first = renderer.screenshot(
         Size::new(
             (SURFACE_SIZE as f32 * scale_factor).round() as u32,
             (SURFACE_SIZE as f32 * scale_factor).round() as u32,
         ),
         scale_factor,
         Color::TRANSPARENT,
-    ))
+    );
+    let cached = renderer.screenshot(
+        Size::new(
+            (SURFACE_SIZE as f32 * scale_factor).round() as u32,
+            (SURFACE_SIZE as f32 * scale_factor).round() as u32,
+        ),
+        scale_factor,
+        Color::TRANSPARENT,
+    );
+    assert_eq!(
+        first, cached,
+        "cached {backend} rendering changed pixels at scale {scale_factor}"
+    );
+    Some(first)
 }
 
 fn diff_stats(a: &[u8], b: &[u8]) -> (u8, f32, usize) {
@@ -317,7 +330,7 @@ fn tiny_skia_and_wgpu_render_real_icon_consistently() {
     for &(name, asset) in ICONS {
         let rgba = asset.rgba_bytes();
 
-        for scale_factor in [1.0, 2.0] {
+        for scale_factor in [1.0, 1.5, 2.0] {
             let Some(cpu) = render_icon("tiny-skia", scale_factor, rgba) else {
                 panic!("tiny-skia headless renderer should be available");
             };

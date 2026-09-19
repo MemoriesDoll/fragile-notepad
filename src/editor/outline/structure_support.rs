@@ -1,9 +1,15 @@
-use super::fsm::{ByteRange, DeclarationEvent, StructuralEvent, StructuralEventKind};
+#[cfg(test)]
+use super::fsm::{ByteRange, DeclarationEvent};
+#[cfg(test)]
+use super::fsm::{StructuralEvent, StructuralEventKind};
+#[cfg(test)]
 use super::scan::{
     indentation_before, leading_whitespace_len, line_ending_len_before, line_start_offset,
 };
+#[cfg(test)]
 use crate::editor::position_for_byte_offset;
 
+#[cfg(test)]
 pub(super) fn containing_container<'a>(
     containers: &'a [StructuralEvent],
     offset: usize,
@@ -21,6 +27,7 @@ pub(super) fn containing_container<'a>(
         .max_by_key(|event| event.body_range.map(|range| range.start).unwrap_or(0))
 }
 
+#[cfg(test)]
 pub(super) fn container_depth(containers: &[StructuralEvent], offset: usize) -> usize {
     containers
         .iter()
@@ -32,6 +39,7 @@ pub(super) fn container_depth(containers: &[StructuralEvent], offset: usize) -> 
         .count()
 }
 
+#[cfg(test)]
 pub(super) fn declaration_depth(declarations: &[DeclarationEvent], offset: usize) -> usize {
     declarations
         .iter()
@@ -44,6 +52,7 @@ pub(super) fn declaration_depth(declarations: &[DeclarationEvent], offset: usize
         .count()
 }
 
+#[cfg(test)]
 pub(super) fn indent_depth_before(text: &str, offset: usize) -> usize {
     let current_indent = indentation_before(text, offset);
     let current_line_start = line_start_offset(text, offset);
@@ -71,6 +80,7 @@ pub(super) fn indent_depth_before(text: &str, offset: usize) -> usize {
     depths.len()
 }
 
+#[cfg(test)]
 pub(super) fn editor_range(text: &str, range: ByteRange) -> Option<super::EditorRange> {
     Some(super::EditorRange::new(
         position_for_byte_offset(text, range.start)?,

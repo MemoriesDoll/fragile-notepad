@@ -21,11 +21,28 @@ pub fn load_file_chunks(
     request: FileLoadRequest,
 ) -> impl iced::futures::Stream<Item = FileLoadEvent> {
     iced::stream::channel(8, async move |sender| {
-        std::thread::spawn(move || load_file_on_thread(request, sender));
+        static LOAD_SLOTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+            std::sync::OnceLock::new();
+        let slots = LOAD_SLOTS
+            .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(4)))
+            .clone();
+        let Ok(permit) = slots.acquire_owned().await else {
+            return;
+        };
+        if sender.is_closed() {
+            return;
+        }
+        std::thread::spawn(move || {
+            let _permit = permit;
+            load_file_on_thread(request, sender);
+        });
     })
 }
 
 fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLoadEvent>) {
+    if sender.is_closed() {
+        return;
+    }
     let total_bytes = std::fs::metadata(&request.path)
         .ok()
         .map(|metadata| metadata.len());
@@ -69,6 +86,9 @@ fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLo
 
     first_read.truncate(read);
     while first_read.len() < UTF8_BOM_BYTES.len() {
+        if sender.is_closed() {
+            return;
+        }
         let mut byte = [0; 1];
         let read = match file.read(&mut byte) {
             Ok(read) => read,
@@ -113,6 +133,9 @@ fn load_utf8_chunks(
     let mut had_errors = false;
 
     loop {
+        if sender.is_closed() {
+            return;
+        }
         if send_decoded_chunk(
             &mut sender,
             &request,
@@ -124,8 +147,10 @@ fn load_utf8_chunks(
             false,
         ) {
             had_errors = true;
-            load_legacy_from_start(request, sender, total_bytes, had_errors);
-            return;
+            if encoding != TextEncoding::Utf8Bom {
+                load_legacy_from_start(request, sender, total_bytes, had_errors);
+                return;
+            }
         }
 
         let read = match file.read(&mut buffer) {
@@ -156,8 +181,10 @@ fn load_utf8_chunks(
         false,
     ) {
         had_errors = true;
-        load_legacy_from_start(request, sender, total_bytes, had_errors);
-        return;
+        if encoding != TextEncoding::Utf8Bom {
+            load_legacy_from_start(request, sender, total_bytes, had_errors);
+            return;
+        }
     }
 
     send_terminal(
@@ -190,6 +217,9 @@ fn load_utf16_chunks(
     let mut pending = strip_initial_utf16_bom(&first_read, encoding);
 
     loop {
+        if sender.is_closed() {
+            return;
+        }
         let output = decoder.decode(&pending, false);
         if !output.is_empty() {
             send_chunk(
@@ -284,12 +314,15 @@ fn load_windows_1252_chunks(
     let chunk_size = request.chunk_size.max(1);
     let mut buffer = vec![0; chunk_size];
     let mut bytes_read = first_read.len() as u64;
-    let mut decoder = encoding_rs::WINDOWS_1252.new_decoder();
+    let mut decoder = encoding_rs::WINDOWS_1252.new_decoder_without_bom_handling();
     let mut pending = first_read;
     let mut had_errors = forced_had_errors;
     let mut reset_next_chunk = reset_first_chunk;
 
     loop {
+        if sender.is_closed() {
+            return;
+        }
         if !pending.is_empty() {
             if send_decoded_chunk(
                 &mut sender,
@@ -403,7 +436,7 @@ fn send_decoded_chunk(
     let mut output = String::with_capacity(max_output);
     let (_, _, malformed) = decoder.decode_to_string(bytes, &mut output, last);
 
-    if !malformed && !output.is_empty() {
+    if !output.is_empty() || reset {
         send_chunk(sender, request, output, bytes_read, total_bytes, reset);
     }
 

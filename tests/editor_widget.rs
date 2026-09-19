@@ -29,6 +29,66 @@ fn caret(line: usize, column: usize) -> EditorSelection {
     EditorSelection::new(position, position)
 }
 
+#[test]
+fn document_boundary_keys_preserve_shift_selection() {
+    let shortcuts = ShortcutMap::default();
+    for (named, motion) in [
+        (key::Named::Home, CaretMotion::DocumentStart),
+        (key::Named::End, CaretMotion::DocumentEnd),
+    ] {
+        let key = keyboard::Key::Named(named);
+        assert_eq!(
+            key_action(&key, &key, keyboard::Modifiers::COMMAND, None, &shortcuts),
+            Some(EditorAction::MoveCaret(motion))
+        );
+        assert_eq!(
+            key_action(
+                &key,
+                &key,
+                keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
+                None,
+                &shortcuts
+            ),
+            Some(EditorAction::Select(motion))
+        );
+    }
+}
+
+#[test]
+fn every_default_shortcut_resolves_to_its_own_command() {
+    let shortcuts = ShortcutMap::default();
+    for command in ShortcutCommand::ALL {
+        let Some(binding) = shortcuts.binding(command) else {
+            continue;
+        };
+        let mut modifiers = keyboard::Modifiers::empty();
+        if binding.modifiers.primary {
+            modifiers |= keyboard::Modifiers::COMMAND;
+        }
+        if binding.modifiers.ctrl {
+            modifiers |= keyboard::Modifiers::CTRL;
+        }
+        if binding.modifiers.shift {
+            modifiers |= keyboard::Modifiers::SHIFT;
+        }
+        if binding.modifiers.alt {
+            modifiers |= keyboard::Modifiers::ALT;
+        }
+        if binding.modifiers.logo {
+            modifiers |= keyboard::Modifiers::LOGO;
+        }
+        let key = match binding.key {
+            ShortcutKey::Character(ch) => keyboard::Key::Character(ch.to_string().into()),
+            _ => continue,
+        };
+        assert_eq!(
+            shortcuts.resolve(&key, &key, modifiers),
+            Some(command),
+            "{command:?}"
+        );
+    }
+}
+
 fn syntax_settings(token: &str) -> highlighter::Settings {
     highlighter::Settings {
         token: token.to_owned(),

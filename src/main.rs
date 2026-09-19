@@ -7,7 +7,31 @@ use fragile_notepad::{
 };
 
 fn main() -> iced::Result {
+    let mut options = match startup::parse_arguments(
+        std::env::args_os().skip(1),
+        &std::env::current_dir()
+            .map_err(|error| iced::Error::WindowCreationFailed(Box::new(error)))?,
+    ) {
+        Ok(startup::StartupCommand::Launch(options)) => options,
+        Ok(startup::StartupCommand::Help) => {
+            attach_parent_console();
+            println!("{}", startup::CLI_HELP);
+            return Ok(());
+        }
+        Ok(startup::StartupCommand::Version) => {
+            attach_parent_console();
+            println!("fragile-notepad {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Err(error) => {
+            attach_parent_console();
+            return Err(iced::Error::WindowCreationFailed(Box::new(
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, error),
+            )));
+        }
+    };
     if startup::startup_probe_enabled() {
+        options.restore_session = false;
         startup::mark_startup_started();
     }
 
@@ -17,7 +41,8 @@ fn main() -> iced::Result {
         String::from("fragile-notepad")
     });
 
-    match ipc::claim_or_signal(&single_instance).map_err(|error| {
+    match ipc::claim_or_signal_with_files(&single_instance, &options.files).map_err(|error| {
+        attach_parent_console();
         iced::Error::WindowCreationFailed(Box::new(std::io::Error::new(
             error.kind(),
             format!("single-instance IPC initialization failed: {error}"),
@@ -27,10 +52,30 @@ fn main() -> iced::Result {
         ipc::Startup::Secondary => return Ok(()),
     }
 
-    iced::daemon(App::new, App::update, App::view)
-        .settings(startup::iced_settings())
-        .subscription(App::subscription)
-        .title(App::title)
-        .theme(App::theme)
-        .run()
+    iced::daemon(
+        move || App::new_with_options(options.clone()),
+        App::update,
+        App::view,
+    )
+    .settings(startup::iced_settings())
+    .subscription(App::subscription)
+    .title(App::title)
+    .theme(App::theme)
+    .run()
+}
+
+fn attach_parent_console() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::System::Console::{
+            ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE,
+        };
+        let output = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        if output.is_null() || output == INVALID_HANDLE_VALUE {
+            unsafe {
+                AttachConsole(ATTACH_PARENT_PROCESS);
+            }
+        }
+    }
 }

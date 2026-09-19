@@ -17,6 +17,7 @@ pub struct EditorHistory {
     current_revision: u64,
     clean_revision: Option<u64>,
     next_revision: u64,
+    grouping_boundary: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +37,7 @@ impl EditorHistory {
             current_revision: 0,
             clean_revision: Some(0),
             next_revision: 1,
+            grouping_boundary: 0,
         }
     }
 
@@ -72,7 +74,10 @@ impl EditorHistory {
         }
 
         if let Some(previous) = self.undo_stack.last_mut() {
-            if can_merge_adjacent_insert(&previous.transaction, &transaction) {
+            if previous.after_revision != self.grouping_boundary
+                && self.redo_stack.is_empty()
+                && can_merge_adjacent_insert(&previous.transaction, &transaction)
+            {
                 let after_revision = self.next_revision;
                 self.next_revision += 1;
                 previous.transaction.merge_adjacent_insert(transaction);
@@ -125,6 +130,18 @@ impl EditorHistory {
 
     pub fn mark_clean(&mut self, _text: &str) {
         self.clean_revision = Some(self.current_revision);
+        self.break_group();
+    }
+
+    /// Keep a save snapshot reachable by undo while its write is in flight.
+    pub fn break_group(&mut self) {
+        self.grouping_boundary = self.current_revision;
+    }
+
+    /// The previous disk checkpoint is no longer valid after a different snapshot is saved.
+    pub fn invalidate_clean_checkpoint(&mut self) {
+        self.clean_revision = None;
+        self.break_group();
     }
 
     pub fn is_dirty(&self, text: &str) -> bool {

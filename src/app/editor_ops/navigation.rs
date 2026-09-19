@@ -1,9 +1,10 @@
 use crate::core::Document;
+use crate::editor::layout::{byte_column_for, visual_column_for};
 use crate::editor::{
     CaretMotion, DelimiterMatch, EditorPosition, EditorSelection, FunctionEntry,
     containing_function, is_vertical_motion, matching_delimiter_near_caret, move_position,
-    move_position_with_column, next_function_after, outline_for_syntax, position_for_byte_offset,
-    previous_function_before, word_range_at_position,
+    next_function_after, outline_for_syntax, position_for_byte_offset, previous_function_before,
+    word_range_at_position,
 };
 
 pub(in crate::app) fn go_to_matching_delimiter(document: &mut Document) {
@@ -178,9 +179,33 @@ pub(in crate::app) fn move_document_position(
     }
 
     let position = document.buffer.clamp_position(position);
+    let tab_width = document.decorations.settings.indent_width;
+    let current_text = document.buffer.line(position.line).unwrap_or_default();
+    let current_column = visual_column_for(&current_text, position.column, tab_width);
     let preferred_column = document
         .preferred_vertical_column
-        .get_or_insert(position.column);
-
-    move_position_with_column(&document.buffer, position, motion, *preferred_column)
+        .get_or_insert(current_column);
+    let row = document
+        .viewport
+        .document_line_to_visible_row(position.line)
+        .unwrap_or(0);
+    let rows = match motion {
+        CaretMotion::PageUp | CaretMotion::PageDown => document.viewport_visible_rows.max(1),
+        _ => 1,
+    };
+    let target_row = match motion {
+        CaretMotion::Up | CaretMotion::PageUp => row.saturating_sub(rows),
+        _ => row
+            .saturating_add(rows)
+            .min(document.viewport.visible_row_count().saturating_sub(1)),
+    };
+    let target_line = document
+        .viewport
+        .visible_row_to_document_line(target_row)
+        .unwrap_or(position.line);
+    let target_text = document.buffer.line(target_line).unwrap_or_default();
+    EditorPosition::new(
+        target_line,
+        byte_column_for(&target_text, *preferred_column, tab_width),
+    )
 }
