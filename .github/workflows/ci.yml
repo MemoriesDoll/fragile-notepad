@@ -52,7 +52,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Install Linux windowing dependencies
+      - name: Install Linux windowing and software Vulkan dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -66,8 +66,17 @@ jobs:
             libxcb-render0-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            vulkan-tools \
             pkg-config \
-            xvfb
+            xvfb \
+            xauth
+
+      - name: Configure Linux software Vulkan adapter
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/setup-ci-vulkan.sh
 
       - name: Apply vendor patches
         if: runner.os == 'Windows'

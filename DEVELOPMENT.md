@@ -282,6 +282,14 @@ On Linux or macOS:
 bash scripts/ci.sh
 ```
 
+The GitHub Linux jobs install `libvulkan1`, `mesa-vulkan-drivers`, `vulkan-tools`,
+`xvfb`, and `xauth` in addition to the windowing libraries. Before validation,
+`scripts/setup-ci-vulkan.sh` selects Mesa Lavapipe, exports `WGPU_BACKEND=vulkan`
+and the Vulkan ICD variables for later steps, and verifies adapter enumeration.
+The parity test remains mandatory; this uses the wgpu pipeline with a software
+Vulkan adapter rather than opting out. A local Linux run needs an available
+Vulkan driver too; Xvfb supplies an X11 display, not a Vulkan adapter.
+
 Before handing off changes that touch editor rendering or a vendored patch, run:
 
 ```powershell

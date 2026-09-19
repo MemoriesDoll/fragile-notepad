@@ -80,7 +80,11 @@ cargo check --no-default-features
 Vendored package regression tests and live backend-switch scenarios are additional
 checks, not part of these scripts. Commands and environment requirements are in
 [DEVELOPMENT.md](DEVELOPMENT.md). On Linux, `scripts/ci.sh` uses `xvfb-run` when
-available. The icon parity test requires an available wgpu adapter in CI unless
+available. Both GitHub workflows install Mesa Lavapipe and select its Vulkan ICD
+with `scripts/setup-ci-vulkan.sh`, which runs `vulkaninfo --summary` before
+compilation. Linux GUI tests run under Xvfb, including the nightly release gates.
+This exercises wgpu on a software Vulkan device; it does not validate physical
+GPU drivers. The icon parity test requires an available wgpu adapter in CI unless
 `FRAGILE_ALLOW_WGPU_PARITY_SKIP=1` explicitly opts out; skipped GPU checks are not
 GPU-validation evidence.
 

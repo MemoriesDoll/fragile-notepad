@@ -110,7 +110,7 @@ jobs:
             ${{ runner.os }}-release-
             ${{ runner.os }}-cargo-
 
-      - name: Install Linux windowing dependencies
+      - name: Install Linux windowing and software Vulkan dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -124,7 +124,17 @@ jobs:
             libxcb-render0-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
-            pkg-config
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            vulkan-tools \
+            pkg-config \
+            xvfb \
+            xauth
+
+      - name: Configure Linux software Vulkan adapter
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/setup-ci-vulkan.sh
 
       - name: Apply vendor patches
         if: runner.os == 'Windows'
@@ -147,9 +157,19 @@ jobs:
         run: bash scripts/generate_icon_assets.sh
 
       - name: Validate release gates
+        if: runner.os != 'Linux'
         run: |
           cargo check
           cargo test
+          cargo check --no-default-features
+          cargo check --examples
+
+      - name: Validate Linux release gates
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo check
+          WINIT_UNIX_BACKEND=x11 xvfb-run -a cargo test
           cargo check --no-default-features
           cargo check --examples
 

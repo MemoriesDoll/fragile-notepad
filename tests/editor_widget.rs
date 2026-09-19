@@ -1765,7 +1765,7 @@ fn shortcut_defaults_assign_zoom_in_binding() {
 #[test]
 fn shortcut_default_zoom_in_resolves_shifted_plus_key() {
     let shortcuts = ShortcutMap::default();
-    let modifiers = keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT;
+    let modifiers = keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT;
 
     assert_eq!(
         shortcuts.resolve(
