@@ -10,7 +10,15 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 
 pub async fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
-    write_with_permissions(path, contents, false).await
+    // Reads follow symlinks; replace the same target without replacing the link.
+    // A dangling link or a loop must fail rather than silently become a file.
+    let target = match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) if metadata.file_type().is_symlink() => tokio::fs::canonicalize(path).await?,
+        Ok(_) => path.to_owned(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => path.to_owned(),
+        Err(error) => return Err(error),
+    };
+    write_with_permissions(&target, contents, false).await
 }
 
 pub async fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
@@ -18,6 +26,16 @@ pub async fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
 }
 
 async fn write_with_permissions(path: &Path, contents: &[u8], _private: bool) -> io::Result<()> {
+    #[cfg(unix)]
+    let permissions = if _private {
+        None
+    } else {
+        match tokio::fs::metadata(path).await {
+            Ok(metadata) => Some(metadata.permissions()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        }
+    };
     let temp_path = temp_path(path);
 
     if let Some(parent) = path.parent() {
@@ -27,12 +45,19 @@ async fn write_with_permissions(path: &Path, contents: &[u8], _private: bool) ->
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
-    if _private {
+    if _private || permissions.is_some() {
+        // Do not expose private contents while the replacement is being written.
         options.mode(0o600);
     }
     let mut file = options.open(&temp_path).await?;
     let write_result = async {
         file.write_all(contents).await?;
+        #[cfg(unix)]
+        if let Some(permissions) = permissions {
+            // Apply after writing (which can clear mode bits), before syncing
+            // and publishing the replacement. New files retain the usual umask.
+            file.set_permissions(permissions).await?;
+        }
         file.sync_all().await?;
         drop(file);
 
@@ -109,4 +134,127 @@ fn temp_path(path: &Path) -> PathBuf {
         unique,
         NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let path = temp_path(&std::env::temp_dir().join("fragile-atomic-write-test"));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn run(test: impl Future<Output = ()>) {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(test);
+    }
+
+    #[test]
+    fn new_and_existing_files_save_without_temporary_files_left_over() {
+        let directory = TestDirectory::new();
+        let path = directory.0.join("document.txt");
+        run(async {
+            write(&path, b"new").await.unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), b"new");
+            write(&path, b"updated").await.unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), b"updated");
+            assert_eq!(std::fs::read_dir(&directory.0).unwrap().count(), 1);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_unix_permissions_survive_save() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TestDirectory::new();
+        let path = directory.0.join("document.txt");
+        run(async {
+            for mode in [0o600, 0o640, 0o755] {
+                std::fs::write(&path, b"original").unwrap();
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+                write(&path, b"updated").await.unwrap();
+                assert_eq!(std::fs::read(&path).unwrap(), b"updated");
+                assert_eq!(
+                    std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                    mode
+                );
+            }
+            // Recovery/settings files always remain private, even if an older
+            // destination was more permissive.
+            write_private(&path, b"private").await.unwrap();
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saves_through_absolute_relative_and_chained_symlinks_update_target() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let directory = TestDirectory::new();
+        let target_dir = directory.0.join("targets");
+        std::fs::create_dir(&target_dir).unwrap();
+        let target = target_dir.join("document.txt");
+        std::fs::write(&target, b"original").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let absolute = directory.0.join("absolute.txt");
+        let relative = directory.0.join("relative.txt");
+        let chained = directory.0.join("chained.txt");
+        symlink(&target, &absolute).unwrap();
+        symlink("targets/document.txt", &relative).unwrap();
+        symlink("relative.txt", &chained).unwrap();
+        run(async {
+            for link in [&absolute, &relative, &chained] {
+                let link_target = std::fs::read_link(link).unwrap();
+                std::fs::write(&target, b"original").unwrap();
+                write(link, b"updated").await.unwrap();
+                assert_eq!(std::fs::read_link(link).unwrap(), link_target);
+                assert_eq!(std::fs::read(&target).unwrap(), b"updated");
+                assert_eq!(
+                    std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+            }
+            assert_eq!(std::fs::read_dir(&target_dir).unwrap().count(), 1);
+            assert_eq!(std::fs::read_dir(&directory.0).unwrap().count(), 4);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unresolved_symlinks_fail_without_replacing_links() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TestDirectory::new();
+        let dangling = directory.0.join("dangling.txt");
+        let cycle = directory.0.join("cycle.txt");
+        symlink("missing.txt", &dangling).unwrap();
+        symlink("cycle.txt", &cycle).unwrap();
+        run(async {
+            for link in [&dangling, &cycle] {
+                let target = std::fs::read_link(link).unwrap();
+                assert!(write(link, b"updated").await.is_err());
+                assert_eq!(std::fs::read_link(link).unwrap(), target);
+            }
+            assert_eq!(std::fs::read_dir(&directory.0).unwrap().count(), 2);
+        });
+    }
 }
