@@ -10,6 +10,8 @@ fragile-notepad.exe -- "-draft.txt"
 fragile-notepad.exe --no-session "notes.txt"
 ```
 
+The executable restores the previous session by default, then opens any paths
+supplied on the command line. Already-open paths select their existing tab.
 Relative paths resolve against the calling process's working directory. A second
 invocation forwards its paths to the existing application and activates its window.
 Forwarding succeeds only after the running application accepts the request. If
@@ -41,10 +43,31 @@ and Replace All in Open Documents load their captured target tabs before running
 changing the request cancels it. If a target closes or fails to load, replacement
 is canceled before changing any document.
 
-The Recent Files menu retains the latest 16 opened/saved paths. History/settings
-writes are debounced and serialized, and startup merges early user changes before
-persisting. File reads run at most four at once; closing a loading tab aborts its
-task. Inactive documents defer full fold/outline analysis until selection.
+The Recent Files menu retains the latest 16 opened/saved paths; it is separate
+from the saved session and does not limit the number of restored tabs.
+History/settings writes use a 250 ms debounce and an ordered latest-pending
+writer. Startup merges early user changes before persisting. File reads run at
+most four at once; closing a loading tab aborts its task. Fold analysis runs for
+the active document on a blocking worker, and outline parsing uses at most two
+blocking workers. Superseded outline tasks are aborted; a parse already running
+can finish, but its stale result is rejected. Full syntax/fold/outline analysis
+remains limited to documents at or below 1 MiB of decoded text.
+
+The tab strip reserves space below the labels for a visible horizontal scrollbar
+when the tabs overflow. When they fit, that strip disappears. Window resizing,
+opening/closing tabs, and title changes update this decision during layout.
+
+Configuration and cache locations are defined in [src/platform/paths.rs](src/platform/paths.rs):
+
+| Platform | Configuration (`settings.xml`, `session.json`) | Cache |
+| --- | --- | --- |
+| Windows | `%APPDATA%/FragileNotepad` | `%LOCALAPPDATA%/FragileNotepad/Cache`, falling back to `%APPDATA%/FragileNotepad/Cache` |
+| Linux/macOS | `$XDG_CONFIG_HOME/fragile-notepad`, otherwise `$HOME/.config/fragile-notepad` | `$XDG_CACHE_HOME/fragile-notepad`, otherwise `$HOME/.cache/fragile-notepad` |
+
+On Unix, session snapshots are written with owner-only file permissions. Clean
+file tabs store paths rather than copying disk contents; unsaved recovery text is
+stored in the session file. The raw small-file cache service is not populated by
+normal open/save operations.
 
 ## Bulk-load and recovery profiling
 
@@ -61,6 +84,31 @@ cargo run --release --no-default-features --example profile_many_files -- recove
 cargo run --release --no-default-features --example profile_many_files -- recovery verify
 ```
 
+On Linux/macOS, set an absolute isolated `XDG_CONFIG_HOME` containing a
+`many-files-investigation` directory component instead of `APPDATA`, for example:
+
+```bash
+export XDG_CONFIG_HOME="$PWD/target/many-files-investigation/profile"
+export XDG_CACHE_HOME="$PWD/target/many-files-investigation/cache"
+cargo run --release --no-default-features --example profile_many_files -- 100 rust64
+```
+
+Run these in a dedicated shell or restore the previous environment values when
+finished. `profile_many_files` is a diagnostic harness and closes its window
+automatically; use the application binary for an interactive inspection:
+
+```powershell
+cargo build --release --locked
+$files = Get-ChildItem "$env:APPDATA/fixtures/document_*.rs" | Sort-Object Name | Select-Object -First 50
+& .\target\release\fragile-notepad.exe --no-session @($files.FullName)
+```
+
+Available workloads are `text4` (4,080 bytes/file), `text64` (68,000), `rust64`
+(66,600), `rust900` (962,000), and `rust1100` (1,221,000). `model` measures handlers
+and widget construction without running the returned asynchronous tasks; `history`
+measures settings parsing/writes; `outline` measures declaration scaling. Neither
+`model` nor first-view timing alone measures all-files-ready latency.
+
 The recovery pair verifies 101 tabs and exact unsaved Unicode text across two real
 window lifecycles. Bulk-load output separates file-completion handler time,
 all-files-loaded time, persistence results, and a 16 ms UI heartbeat. Startup tests
@@ -72,7 +120,8 @@ layout/rendering; screenshot completion is not an OS presentation timestamp.
 Fragile Notepad builds against Git checkouts under `vendor/`. Each vendor
 directory is managed by the setup scripts and ignored by Git. Project-owned
 changes are stored as patch files under `patches/`, with the upstream base
-recorded in `BASE_REVISION`.
+recorded in `BASE_REVISION`. A patched vendor checkout is expected to be dirty;
+the root repository tracks its patch, not the checkout itself.
 
 Current vendors:
 
@@ -183,6 +232,15 @@ git add patches/encoding_rs/BASE_REVISION patches/encoding_rs/oem-code-pages.pat
 
   Re-run `.\scripts\setup-vendor.ps1 status` or `bash scripts/setup-vendor.sh
   status` before committing; each vendor should report `pin status: ok`.
+  Check that the exported iced patch matches the applied hunks without changing
+  the checkout:
+
+```powershell
+git -C vendor/iced apply --reverse --check -p3 ../../patches/iced/fragile-notepad-iced.patch
+```
+
+  A reverse check validates the patch's hunks, not unrelated vendor edits; review
+  the vendor status and include new source files in the export as well.
 - `refresh` optionally fetches a remote, checks out the requested upstream
   revision, records it as the new base, and reapplies the project patch.
 - `update` exports the current patch, reverses it to return to a clean upstream
@@ -242,7 +300,7 @@ entry point, and then build the release binary.
 For renderer performance changes, also run:
 
 ```powershell
-cargo run --release --example profile_tiny_skia_text
+cargo run --release --no-default-features --example profile_tiny_skia_text
 cargo run --release --example profile_render
 ```
 
@@ -262,6 +320,7 @@ regressions live in the vendored graphics and tiny-skia crates:
 ```powershell
 cargo test --manifest-path vendor/iced/Cargo.toml -p iced_graphics --lib
 cargo test --manifest-path vendor/iced/Cargo.toml -p iced_tiny_skia --lib --features image
+cargo test --manifest-path vendor/iced/Cargo.toml -p iced_winit -p iced_wgpu --lib
 ```
 
 The application icon parity test also checks cached-frame equality at 100%,
@@ -282,6 +341,13 @@ $env:CARGO_TARGET_DIR='target-codex-check'
 $env:FRAGILE_PERF_TRACE='1'
 cargo run --example backend_switch_probe -- --scenario=single-window
 ```
+
+The handoff submits the current UI offscreen for each window, polls GPU completion
+without waiting on the event loop, and retains those renderers for commit. The
+warm-up deadline is three seconds. Visible surface creation/configuration still
+runs at commit, so successful frame-order evidence is not a zero-stall guarantee.
+See [the rendering architecture](SEAMLESS_HYBRID_RENDERING.md) for the state flow,
+cache boundaries, and remaining platform-validation limits.
 
 On Windows, keep the generated result JSON and trace CSV from the run. Current
 Windows strict validation records `result=ok`, strict outcome success,

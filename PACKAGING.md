@@ -19,6 +19,10 @@ package contract.
 
 Run the vendor setup before building from a fresh clone:
 
+Use the Rust stable toolchain and Python with Pillow installed (the same asset
+tooling used by `.github/workflows/ci.yml`). Platform windowing dependencies must
+also be available; the Linux CI job lists the required X11/Wayland packages.
+
 ```powershell
 .\scripts\setup-vendor.ps1 apply
 ```
@@ -32,7 +36,8 @@ bash scripts/setup-vendor.sh apply
 ## Generated Assets
 
 RGBA icon files are generated from the tracked SVG/PNG sources. Regenerate them
-after changing any icon source:
+on a fresh checkout and after changing any icon source; the generated files are
+ignored by Git:
 
 ```powershell
 .\scripts\generate_icon_assets.ps1
@@ -62,7 +67,8 @@ On Linux or macOS:
 bash scripts/ci.sh
 ```
 
-For changes touching rendering, platform paths, or vendored patches, also run:
+The CI scripts run formatting, asset generation, and the following Cargo checks.
+For a manual equivalent, run:
 
 ```powershell
 cargo check
@@ -71,15 +77,35 @@ cargo check --examples
 cargo check --no-default-features
 ```
 
+Vendored package regression tests and live backend-switch scenarios are additional
+checks, not part of these scripts. Commands and environment requirements are in
+[DEVELOPMENT.md](DEVELOPMENT.md). On Linux, `scripts/ci.sh` uses `xvfb-run` when
+available. The icon parity test requires an available wgpu adapter in CI unless
+`FRAGILE_ALLOW_WGPU_PARITY_SKIP=1` explicitly opts out; skipped GPU checks are not
+GPU-validation evidence.
+
 ## Release Build
 
 After vendor setup, asset generation, and validation:
 
 ```powershell
-cargo build --release
+cargo build --release --locked
 ```
 
-The Windows release binary uses the GUI subsystem via `src/main.rs`. Runtime
-settings are stored under the platform config directory, and compiled outline
-cache data is stored under the platform cache directory; both paths are defined
-in `src/platform.rs`.
+The resulting binary is `target/release/fragile-notepad.exe` on Windows or
+`target/release/fragile-notepad` on Unix. Default features compile both renderers;
+use `cargo build --release --locked --no-default-features` for a software-only
+binary. Windows release builds use the GUI subsystem; `--help`, `--version`, and
+CLI error reporting attach to the parent console when necessary.
+
+Icons and syntax resources are embedded. Do not distribute `vendor/`, generated
+profiling fixtures, or personal settings/session files with the binary. The nightly
+workflow packages the executable in a Windows ZIP or Unix tarball; consult
+`.github/workflows/nightly.yml` for current artifact names and target platforms.
+
+Runtime settings and recovery snapshots use `settings.xml` and `session.json`
+under the platform config directory. Compiled outline cache data uses the platform
+cache directory. Both are resolved in [src/platform/paths.rs](src/platform/paths.rs),
+including on macOS, which currently follows the Unix XDG/fallback paths. See
+[Files and sessions](DEVELOPMENT.md#files-and-sessions) for exact locations,
+command-line forwarding, recovery limits, and `--no-session` behavior.
