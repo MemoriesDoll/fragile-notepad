@@ -66,11 +66,6 @@ pub(super) fn startup_gpu_boost_requested(settings: &EditorSettings) -> bool {
     )
 }
 
-pub(super) fn gpu_boost_policy_allows_hardware(settings: &EditorSettings) -> bool {
-    render_backend_policy(settings, std::env::var(RENDER_BACKEND_ENV).ok().as_deref())
-        != RenderBackendPolicy::Software
-}
-
 impl App {
     pub(super) fn request_gpu_boost(&mut self) -> Task<Message> {
         match start_gpu_boost(

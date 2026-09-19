@@ -13,14 +13,6 @@ pub struct RenderingDebugInfo {
     pub rendering_policy: String,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct AboutAnimationInfo {
-    pub progress: f32,
-    pub visual_progress: f32,
-    pub status: &'static str,
-    pub is_animating: bool,
-}
-
 struct LicenseEntry {
     name: &'static str,
     version: &'static str,
@@ -91,11 +83,7 @@ const LICENSES: &[LicenseEntry] = &[
     },
 ];
 
-pub fn view(
-    active_tab: AboutTab,
-    rendering: RenderingDebugInfo,
-    animation: AboutAnimationInfo,
-) -> Element<'static, Message> {
+pub fn view(active_tab: AboutTab, rendering: RenderingDebugInfo) -> Element<'static, Message> {
     stack![
         opaque(
             container(space::vertical())
@@ -103,7 +91,7 @@ pub fn view(
                 .height(Fill)
                 .style(styles::modal_scrim)
         ),
-        container(dialog(active_tab, rendering, animation))
+        container(dialog(active_tab, rendering))
             .width(Fill)
             .height(Fill)
             .center_x(Fill)
@@ -112,19 +100,15 @@ pub fn view(
     .into()
 }
 
-fn dialog(
-    active_tab: AboutTab,
-    rendering: RenderingDebugInfo,
-    animation: AboutAnimationInfo,
-) -> Element<'static, Message> {
+fn dialog(active_tab: AboutTab, rendering: RenderingDebugInfo) -> Element<'static, Message> {
     container(
         column![
-            header(animation),
+            header(),
             tabs(active_tab),
             rule::horizontal(1),
             match active_tab {
                 AboutTab::About => about_content(),
-                AboutTab::Debug => debug_content(rendering, animation),
+                AboutTab::Debug => debug_content(rendering),
                 AboutTab::Licenses => licenses_content(),
             },
             row![
@@ -147,16 +131,13 @@ fn dialog(
     .into()
 }
 
-fn header(animation: AboutAnimationInfo) -> Element<'static, Message> {
-    let logo_size = 52.0 + (4.0 * animation.visual_progress);
-    let logo_text_size = 20 + (2.0 * animation.visual_progress).round() as u32;
-
+fn header() -> Element<'static, Message> {
     row![
-        container(text("FN").size(logo_text_size))
-            .width(Length::Fixed(logo_size))
-            .height(Length::Fixed(logo_size))
-            .center_x(Length::Fixed(logo_size))
-            .center_y(Length::Fixed(logo_size))
+        container(text("FN").size(22))
+            .width(Length::Fixed(56.0))
+            .height(Length::Fixed(56.0))
+            .center_x(Length::Fixed(56.0))
+            .center_y(Length::Fixed(56.0))
             .style(styles::logo_placeholder),
         column![
             text(APP_NAME).size(22),
@@ -209,10 +190,7 @@ fn about_content() -> Element<'static, Message> {
     .into()
 }
 
-fn debug_content(
-    rendering: RenderingDebugInfo,
-    animation: AboutAnimationInfo,
-) -> Element<'static, Message> {
+fn debug_content(rendering: RenderingDebugInfo) -> Element<'static, Message> {
     let build_profile = if cfg!(debug_assertions) {
         "debug"
     } else {
@@ -262,11 +240,6 @@ fn debug_content(
                 &[
                     ("Current renderer", rendering.current_renderer),
                     ("Rendering policy", rendering.rendering_policy),
-                    ("About animation", animation.status.to_owned()),
-                    (
-                        "About animation progress",
-                        format!("{:.0}%", animation.progress * 100.0),
-                    ),
                     ("Iced startup backend", "software".to_owned()),
                     ("Startup renderer", "tiny-skia".to_owned()),
                     ("Antialiasing", "disabled at startup".to_owned()),

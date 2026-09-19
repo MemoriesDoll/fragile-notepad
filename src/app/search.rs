@@ -70,7 +70,7 @@ impl App {
             Message::HideFind => {
                 self.is_find_visible = false;
                 self.chrome_animation.find.set_visible(false);
-                Task::none()
+                operation::focus(crate::ui::editor::EDITOR_ID)
             }
             Message::FindNext => {
                 self.active_menu = None;
@@ -188,7 +188,7 @@ impl App {
                 .set_visible(self.is_inline_replace_visible);
             operation::focus(FIND_INPUT_ID)
         } else {
-            Task::none()
+            operation::focus(crate::ui::editor::EDITOR_ID)
         }
     }
 

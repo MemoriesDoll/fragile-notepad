@@ -1,0 +1,561 @@
+//! Short, event-driven transitions for transient UI surfaces.
+
+use std::time::{Duration, Instant};
+
+use iced::advanced::widget::{self, Tree, tree};
+use iced::advanced::{Layout, Renderer as _, Shell, Widget, layout, mouse, overlay, renderer};
+use iced::{Color, Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, window};
+
+use crate::message::Message;
+
+const ENTRANCE_DURATION: Duration = Duration::from_millis(150);
+
+/// Lift a newly mounted dialog into place without moving surrounding widgets.
+pub fn popup<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    Element::new(Motion::entrance(content.into(), 8.0, String::new()))
+}
+
+/// Drop a newly mounted menu into place.
+pub fn dropdown<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    dropdown_with_key(String::new(), content)
+}
+
+/// Replay the entrance when an existing menu position changes its contents.
+pub fn dropdown_with_key<'a>(
+    key: impl Into<String>,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    Element::new(Motion::entrance(content.into(), -5.0, key.into()))
+}
+
+/// Fade opaque content against its surrounding surface.
+///
+/// Iced does not expose group opacity. A clipped, theme-aware veil blends this
+/// content into a matching solid background instead. The caller owns progress
+/// and retains the widget until an exit reaches zero, preserving input state.
+pub fn fade<'a>(
+    content: impl Into<Element<'a, Message>>,
+    progress: f32,
+    background: fn(&Theme) -> Color,
+    interactive: bool,
+) -> Element<'a, Message> {
+    Element::new(Motion {
+        content: content.into(),
+        distance: 0.0,
+        key: String::new(),
+        fade: Some((progress.clamp(0.0, 1.0), background)),
+        interactive,
+    })
+}
+
+struct Motion<'a> {
+    content: Element<'a, Message>,
+    distance: f32,
+    key: String,
+    fade: Option<(f32, fn(&Theme) -> Color)>,
+    interactive: bool,
+}
+
+impl<'a> Motion<'a> {
+    fn entrance(content: Element<'a, Message>, distance: f32, key: String) -> Self {
+        Self {
+            content,
+            distance,
+            key,
+            fade: None,
+            interactive: true,
+        }
+    }
+}
+
+struct State {
+    key: String,
+    started: Option<Instant>,
+    progress: f32,
+}
+
+impl Widget<Message, Theme, Renderer> for Motion<'_> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<State>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(State {
+            key: self.key.clone(),
+            started: None,
+            progress: if self.fade.is_some() { 1.0 } else { 0.0 },
+        })
+    }
+
+    fn diff(&mut self, tree: &mut Tree) {
+        let state = tree.state.downcast_mut::<State>();
+        if state.key != self.key {
+            state.key.clone_from(&self.key);
+            state.started = None;
+            state.progress = 0.0;
+        }
+        tree.diff_children(std::slice::from_mut(&mut self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let progress = tree.state.downcast_ref::<State>().progress;
+        let offset = self.distance * (1.0 - progress).powi(3);
+        let content = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
+        // Move the actual child layout so touch, mouse, keyboard operations and
+        // nested overlays all agree with the visible bounds throughout motion.
+        layout::Node::with_children(
+            content.size(),
+            vec![content.translate(Vector::new(0.0, offset))],
+        )
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        if self.fade.is_none() {
+            let state = tree.state.downcast_mut::<State>();
+            if state.progress < 1.0 {
+                if let Event::Window(window::Event::RedrawRequested(now)) = event {
+                    let started = *state.started.get_or_insert(*now);
+                    let progress = (now.saturating_duration_since(started).as_secs_f32()
+                        / ENTRANCE_DURATION.as_secs_f32())
+                    .min(1.0);
+                    if progress != state.progress {
+                        state.progress = progress;
+                        shell.invalidate_layout();
+                    }
+                }
+                if state.progress < 1.0 {
+                    shell.request_redraw();
+                }
+            }
+        }
+
+        if !self.interactive && !matches!(event, Event::Window(window::Event::RedrawRequested(_))) {
+            return;
+        }
+
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout.child(0),
+            cursor,
+            renderer,
+            shell,
+            viewport,
+        );
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout.child(0),
+            cursor,
+            viewport,
+        );
+
+        if let Some((progress, background)) = self.fade {
+            if progress < 1.0 {
+                if let Some(bounds) = layout.bounds().intersection(viewport) {
+                    let mut color = background(theme);
+                    color.a *= 1.0 - progress;
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds,
+                            ..renderer::Quad::default()
+                        },
+                        color,
+                    );
+                }
+            }
+        }
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout.child(0),
+            renderer,
+            operation,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if !self.interactive {
+            return mouse::Interaction::None;
+        }
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout.child(0),
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'a>(
+        &'a mut self,
+        tree: &'a mut Tree,
+        layout: Layout<'a>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'a, Message, Theme, Renderer>> {
+        if !self.interactive {
+            return None;
+        }
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout.child(0),
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::advanced::graphics::core::shell::Waker;
+    use iced::advanced::renderer::Headless;
+    use iced::advanced::widget::operation::{self, Operation, Outcome, focusable};
+    use iced::widget::{Space, button, container, text_input};
+    use iced::{Fill, Point};
+
+    const VIEWPORT: Rectangle = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 320.0,
+        height: 240.0,
+    };
+
+    fn renderer() -> Renderer {
+        futures::executor::block_on(<Renderer as Headless>::new(
+            renderer::Settings::default(),
+            Some("tiny-skia"),
+        ))
+        .expect("CPU headless renderer must be available")
+    }
+
+    fn mount(content: &mut Element<'_, Message>, renderer: &Renderer) -> (Tree, layout::Node) {
+        // The vendored runtime diffs even a newly created tree before layout;
+        // Widget has no children() hook in this version of Iced.
+        let mut tree = Tree::empty();
+        tree.diff(content.as_widget_mut());
+        let node = relayout(content, &mut tree, renderer);
+        (tree, node)
+    }
+
+    fn relayout(
+        content: &mut Element<'_, Message>,
+        tree: &mut Tree,
+        renderer: &Renderer,
+    ) -> layout::Node {
+        content.as_widget_mut().layout(
+            tree,
+            renderer,
+            &layout::Limits::new(Size::ZERO, VIEWPORT.size()),
+        )
+    }
+
+    fn dispatch(
+        content: &mut Element<'_, Message>,
+        tree: &mut Tree,
+        node: &layout::Node,
+        renderer: &Renderer,
+        event: Event,
+        cursor: mouse::Cursor,
+    ) -> (window::RedrawRequest, Vec<Message>) {
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&window::Headless, Waker::noop(), &mut messages);
+        content.as_widget_mut().update(
+            tree,
+            &event,
+            Layout::new(node),
+            cursor,
+            renderer,
+            &mut shell,
+            &VIEWPORT,
+        );
+        let redraw = shell.redraw_request();
+        (redraw, messages)
+    }
+
+    #[test]
+    fn mounting_preserves_sizing_and_moves_clickable_child_bounds() {
+        let renderer = renderer();
+        let mut content = popup(
+            button(Space::new().width(Fill).height(20))
+                .width(Fill)
+                .padding(0)
+                .on_press(Message::None),
+        );
+        assert_eq!(content.as_widget().size().width, Fill);
+        let (mut tree, node) = mount(&mut content, &renderer);
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(node.size(), Size::new(320.0, 20.0));
+        assert_eq!(Layout::new(&node).child(0).bounds().y, 8.0);
+
+        // y=25 is outside the final button bounds but inside its moving bounds.
+        let cursor = mouse::Cursor::Available(Point::new(10.0, 25.0));
+        for pressed in [true, false] {
+            let event = if pressed {
+                mouse::Event::ButtonPressed(mouse::Button::Left)
+            } else {
+                mouse::Event::ButtonReleased(mouse::Button::Left)
+            };
+            let (_, messages) = dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Mouse(event),
+                cursor,
+            );
+            assert_eq!(messages.len(), usize::from(!pressed));
+        }
+    }
+
+    #[test]
+    fn zero_opacity_keeps_input_focus_operations_reachable() {
+        let renderer = renderer();
+        let id = widget::Id::new("motion-find-input");
+        let mut content = fade(
+            container(text_input("Find", "").id(id.clone())),
+            0.0,
+            |_| Color::WHITE,
+            false,
+        );
+        let (mut tree, node) = mount(&mut content, &renderer);
+        content.as_widget_mut().operate(
+            &mut tree,
+            Layout::new(&node),
+            &renderer,
+            &mut focusable::focus::<()>(id),
+        );
+        let mut count = focusable::count();
+        content.as_widget_mut().operate(
+            &mut tree,
+            Layout::new(&node),
+            &renderer,
+            &mut operation::black_box(&mut count),
+        );
+        match count.finish() {
+            Outcome::Some(count) => {
+                assert_eq!(count.total, 1);
+                assert_eq!(count.focused, Some(0));
+            }
+            _ => panic!("focus traversal must produce a count"),
+        }
+    }
+
+    #[test]
+    fn find_panel_keeps_initial_focus_while_expanding_from_zero_height() {
+        use crate::core::FindState;
+        use crate::ui::{find_panel, styles};
+        use iced::keyboard::{self, Key, Location, Modifiers, key};
+
+        let renderer = renderer();
+        let find = FindState::default();
+        let build = |progress| -> Element<'_, Message> {
+            container(fade(
+                find_panel::view(&find, false, false, 0.0),
+                progress,
+                styles::utility_bar_background,
+                true,
+            ))
+            .height(Length::Fixed(46.0 * progress))
+            .width(Fill)
+            .clip(true)
+            .into()
+        };
+        let mut content = build(0.0);
+        let mut tree = Tree::empty();
+        tree.diff(content.as_widget_mut());
+        let limits = layout::Limits::new(Size::ZERO, Size::new(1200.0, 240.0));
+        let node = content
+            .as_widget_mut()
+            .layout(&mut tree, &renderer, &limits);
+        assert_eq!(node.size().height, 0.0);
+        content.as_widget_mut().operate(
+            &mut tree,
+            Layout::new(&node),
+            &renderer,
+            &mut focusable::focus::<()>(widget::Id::new(find_panel::FIND_INPUT_ID)),
+        );
+
+        // Application animation frames rebuild the view and reconcile its tree.
+        for progress in [0.2, 0.7, 1.0] {
+            content = build(progress);
+            tree.diff(content.as_widget_mut());
+            content
+                .as_widget_mut()
+                .layout(&mut tree, &renderer, &limits);
+        }
+        let node = content
+            .as_widget_mut()
+            .layout(&mut tree, &renderer, &limits);
+        assert_eq!(node.size().height, 46.0);
+        let (_, messages) = dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Character("t".into()),
+                modified_key: Key::Character("t".into()),
+                physical_key: key::Physical::Code(key::Code::KeyT),
+                location: Location::Standard,
+                modifiers: Modifiers::empty(),
+                text: Some("t".into()),
+                repeat: false,
+            }),
+            mouse::Cursor::Unavailable,
+        );
+        assert!(
+            messages.iter().any(|message| {
+                matches!(message, Message::FindQueryChanged(query) if query == "t")
+            }),
+            "find input must accept typing after its initial zero-height focus: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn closing_fade_suppresses_clicks_and_pointer_interaction() {
+        let renderer = renderer();
+        for interactive in [false, true] {
+            let mut content = fade(
+                button("Action").on_press(Message::None),
+                0.5,
+                |_| Color::WHITE,
+                interactive,
+            );
+            let (mut tree, node) = mount(&mut content, &renderer);
+            let cursor = mouse::Cursor::Available(Point::new(10.0, 10.0));
+            let interaction = content.as_widget().mouse_interaction(
+                &tree,
+                Layout::new(&node),
+                cursor,
+                &VIEWPORT,
+                &renderer,
+            );
+            assert_eq!(
+                interaction,
+                if interactive {
+                    mouse::Interaction::Pointer
+                } else {
+                    mouse::Interaction::None
+                }
+            );
+            let mut emitted = Vec::new();
+            for event in [
+                mouse::Event::ButtonPressed(mouse::Button::Left),
+                mouse::Event::ButtonReleased(mouse::Button::Left),
+            ] {
+                let (_, messages) = dispatch(
+                    &mut content,
+                    &mut tree,
+                    &node,
+                    &renderer,
+                    Event::Mouse(event),
+                    cursor,
+                );
+                emitted.extend(messages);
+            }
+            assert_eq!(emitted.len(), usize::from(interactive));
+        }
+    }
+
+    #[test]
+    fn entrance_settles_without_redraw_and_restarts_only_for_changed_key() {
+        let renderer = renderer();
+        let make_menu = |key| dropdown_with_key(key, Space::new().width(100).height(40));
+        let mut content = make_menu("File");
+        let (mut tree, mut node) = mount(&mut content, &renderer);
+        let started = Instant::now();
+        for (elapsed, expected) in [
+            (Duration::ZERO, window::RedrawRequest::NextFrame),
+            (ENTRANCE_DURATION / 2, window::RedrawRequest::NextFrame),
+            (ENTRANCE_DURATION, window::RedrawRequest::Wait),
+            (ENTRANCE_DURATION * 2, window::RedrawRequest::Wait),
+        ] {
+            let (redraw, _) = dispatch(
+                &mut content,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(started + elapsed)),
+                mouse::Cursor::Unavailable,
+            );
+            assert_eq!(redraw, expected);
+            node = relayout(&mut content, &mut tree, &renderer);
+        }
+        assert_eq!(Layout::new(&node).child(0).bounds().y, 0.0);
+
+        content = make_menu("File");
+        tree.diff(content.as_widget_mut());
+        node = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(Layout::new(&node).child(0).bounds().y, 0.0);
+
+        content = make_menu("Edit");
+        tree.diff(content.as_widget_mut());
+        node = relayout(&mut content, &mut tree, &renderer);
+        assert_eq!(Layout::new(&node).child(0).bounds().y, -5.0);
+        let (redraw, _) = dispatch(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                started + ENTRANCE_DURATION * 3,
+            )),
+            mouse::Cursor::Unavailable,
+        );
+        assert_eq!(redraw, window::RedrawRequest::NextFrame);
+    }
+}

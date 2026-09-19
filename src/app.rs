@@ -29,7 +29,6 @@ mod shortcuts;
 mod windowing;
 
 const SYNTAX_PREWARM_VISIBLE_LINES: usize = 96;
-const ABOUT_OVERLAY_ANIMATION_DURATION: Duration = Duration::from_millis(180);
 const CHROME_REVEAL_ANIMATION_DURATION: Duration = Duration::from_millis(140);
 
 static SINGLE_INSTANCE: OnceLock<PrimaryInstance> = OnceLock::new();
@@ -69,7 +68,6 @@ pub struct App {
     keyboard_modifiers: keyboard::Modifiers,
     focused_window_id: Option<window::Id>,
     rendering: rendering::RenderingState,
-    about_animation: AboutOverlayAnimation,
     chrome_animation: ChromeAnimation,
     main_window_opened: bool,
     pending_startup_gpu_boost: bool,
@@ -89,19 +87,6 @@ pub struct App {
 enum CloseGoal {
     KeepOpen,
     ExitApp,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum AboutOverlayAnimation {
-    Idle,
-    WaitingForHardware {
-        boost_requested: bool,
-    },
-    Running {
-        started_at: Option<Instant>,
-        progress: f32,
-    },
-    Disabled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -175,7 +160,6 @@ impl App {
             keyboard_modifiers: keyboard::Modifiers::default(),
             focused_window_id: Some(main_window_id),
             rendering: rendering::RenderingState::Software,
-            about_animation: AboutOverlayAnimation::Idle,
             chrome_animation: ChromeAnimation::new(),
             main_window_opened: false,
             pending_startup_gpu_boost: false,
@@ -308,8 +292,7 @@ impl App {
             Message::ClipboardRead(request, result) => self.update_clipboard_read(request, result),
             Message::ClipboardWritten(_result) => Task::none(),
             Message::BackendBoostRequested => self.request_gpu_boost(),
-            Message::BackendBoostConfigured(result) => self.complete_backend_boost(result),
-            Message::AboutAnimationFrame(at) => self.update_about_animation_frame(at),
+            Message::BackendBoostConfigured(result) => self.complete_gpu_boost(result),
             Message::ChromeAnimationFrame(at) => self.update_chrome_animation_frame(at),
             Message::LanguageSelected(syntax_token) => self.update_language(syntax_token),
             Message::ToggleFunctionList => self.toggle_function_list(),
@@ -327,7 +310,6 @@ impl App {
             }
             Message::AboutClosed => {
                 self.is_about_visible = false;
-                self.about_animation = AboutOverlayAnimation::Idle;
                 Task::none()
             }
             Message::WindowListOpened => {
@@ -563,7 +545,6 @@ impl App {
                     current_renderer: self.rendering.label(),
                     rendering_policy: rendering::current_policy_label(&self.settings),
                 },
-                self.about_animation_info(),
                 self.is_window_list_visible
                     .then(|| self.window_list_entries()),
                 self.file_status.as_deref(),
@@ -597,11 +578,6 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let about_animation = if self.about_animation.needs_frames() {
-            window::frames().map(Message::AboutAnimationFrame)
-        } else {
-            Subscription::none()
-        };
         let chrome_animation = if self.chrome_animation.needs_frames() {
             window::frames().map(Message::ChromeAnimationFrame)
         } else {
@@ -613,7 +589,6 @@ impl App {
             event::listen_with(shortcuts::event_to_message),
             window::close_requests().map(Message::WindowCloseRequested),
             window::close_events().map(Message::WindowClosed),
-            about_animation,
             chrome_animation,
         ])
     }
@@ -786,98 +761,7 @@ impl App {
         self.is_about_visible = true;
         self.about_tab = AboutTab::About;
 
-        match self.rendering {
-            rendering::RenderingState::Hardware => {
-                self.start_about_animation();
-                Task::none()
-            }
-            rendering::RenderingState::PreparingHardware => {
-                self.about_animation = AboutOverlayAnimation::WaitingForHardware {
-                    boost_requested: false,
-                };
-                Task::none()
-            }
-            rendering::RenderingState::Software
-                if rendering::gpu_boost_policy_allows_hardware(&self.settings) =>
-            {
-                let should_request_boost = !matches!(
-                    self.about_animation,
-                    AboutOverlayAnimation::WaitingForHardware {
-                        boost_requested: true
-                    }
-                );
-
-                self.about_animation = AboutOverlayAnimation::WaitingForHardware {
-                    boost_requested: true,
-                };
-
-                if should_request_boost {
-                    Task::done(Message::BackendBoostRequested)
-                } else {
-                    Task::none()
-                }
-            }
-            rendering::RenderingState::Software | rendering::RenderingState::Failed(_) => {
-                self.about_animation = AboutOverlayAnimation::Disabled;
-                Task::none()
-            }
-        }
-    }
-
-    fn complete_backend_boost(
-        &mut self,
-        outcome: iced::backend::StrictHandoffOutcome,
-    ) -> Task<Message> {
-        let task = self.complete_gpu_boost(outcome);
-
-        if matches!(
-            self.about_animation,
-            AboutOverlayAnimation::WaitingForHardware { .. }
-        ) {
-            if self.rendering == rendering::RenderingState::Hardware {
-                self.start_about_animation();
-            } else {
-                self.about_animation = AboutOverlayAnimation::Disabled;
-            }
-        }
-
-        task
-    }
-
-    fn start_about_animation(&mut self) {
-        self.about_animation = AboutOverlayAnimation::Running {
-            started_at: None,
-            progress: 0.0,
-        };
-    }
-
-    fn update_about_animation_frame(&mut self, at: Instant) -> Task<Message> {
-        let AboutOverlayAnimation::Running {
-            started_at,
-            progress,
-        } = &mut self.about_animation
-        else {
-            return Task::none();
-        };
-
-        let started_at = match *started_at {
-            Some(started_at) => started_at,
-            None => {
-                *started_at = Some(at);
-                *progress = 0.0;
-                return Task::none();
-            }
-        };
-
-        let elapsed = at.saturating_duration_since(started_at);
-        *progress =
-            (elapsed.as_secs_f32() / ABOUT_OVERLAY_ANIMATION_DURATION.as_secs_f32()).min(1.0);
-
         Task::none()
-    }
-
-    fn about_animation_info(&self) -> ui::about_dialog::AboutAnimationInfo {
-        self.about_animation.into()
     }
 
     fn chrome_animation_info(&self) -> ui::ChromeAnimationInfo {
@@ -907,12 +791,6 @@ impl App {
         document.reveal_line(position.line);
 
         Task::none()
-    }
-}
-
-impl AboutOverlayAnimation {
-    fn needs_frames(self) -> bool {
-        matches!(self, Self::Running { progress, .. } if progress < 1.0)
     }
 }
 
@@ -952,10 +830,15 @@ impl RevealAnimation {
     fn set_visible(&mut self, visible: bool) {
         let target = if visible { 1.0 } else { 0.0 };
 
-        if self.target_visible == visible && (self.progress - target).abs() <= f32::EPSILON {
+        if (self.progress - target).abs() <= f32::EPSILON {
+            self.target_visible = visible;
             self.rendered_visible = visible;
             self.started_at = None;
             self.from = target;
+            return;
+        }
+
+        if self.target_visible == visible {
             return;
         }
 
@@ -1030,55 +913,6 @@ fn ease_out_cubic(progress: f32) -> f32 {
     let inverse = 1.0 - progress.clamp(0.0, 1.0);
 
     1.0 - (inverse * inverse * inverse)
-}
-
-impl From<AboutOverlayAnimation> for ui::about_dialog::AboutAnimationInfo {
-    fn from(animation: AboutOverlayAnimation) -> Self {
-        match animation {
-            AboutOverlayAnimation::Idle => Self {
-                progress: 0.0,
-                visual_progress: 1.0,
-                status: "idle",
-                is_animating: false,
-            },
-            AboutOverlayAnimation::WaitingForHardware { .. } => Self {
-                progress: 0.0,
-                visual_progress: 0.0,
-                status: "waiting for hardware",
-                is_animating: false,
-            },
-            AboutOverlayAnimation::Running {
-                started_at: None,
-                progress,
-            } => Self {
-                progress,
-                visual_progress: progress,
-                status: "armed after hardware",
-                is_animating: true,
-            },
-            AboutOverlayAnimation::Running {
-                started_at: Some(_),
-                progress,
-            } if progress >= 1.0 => Self {
-                progress,
-                visual_progress: 1.0,
-                status: "complete",
-                is_animating: false,
-            },
-            AboutOverlayAnimation::Running { progress, .. } => Self {
-                progress,
-                visual_progress: progress,
-                status: "running",
-                is_animating: true,
-            },
-            AboutOverlayAnimation::Disabled => Self {
-                progress: 0.0,
-                visual_progress: 1.0,
-                status: "disabled",
-                is_animating: false,
-            },
-        }
-    }
 }
 
 pub fn register_single_instance(instance: PrimaryInstance) {

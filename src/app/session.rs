@@ -281,7 +281,6 @@ impl App {
                     | Message::SettingsPersisted(_)
                     | Message::RuntimeEvent(..)
                     | Message::ChromeAnimationFrame(_)
-                    | Message::AboutAnimationFrame(_)
                     | Message::FileLoadProgress(_)
                     | Message::FileLoadChunk(_)
                     | Message::EditorAction(_, crate::editor::EditorAction::ViewportChanged { .. })

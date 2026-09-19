@@ -4,7 +4,7 @@ use iced::{Center, Element, Fill, FillPortion, Length};
 use crate::core::FindState;
 use crate::message::Message;
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
-use crate::ui::{centered_button_content, controls, styles};
+use crate::ui::{centered_button_content, controls, motion, styles};
 
 pub const FIND_INPUT_ID: &str = "fragile-notepad-find-input";
 const BODY_TEXT_SIZE: u32 = 14;
@@ -75,44 +75,55 @@ pub fn view(
     .align_y(Center)
     .width(Fill);
 
-    let mut rows = column![find_row].spacing(6).padding([6, 8]).width(Fill);
+    let mut rows = column![find_row.height(REPLACE_ROW_HEIGHT)]
+        .padding([6, 8])
+        .width(Fill);
 
     if is_replace_rendered_visible {
         rows = rows.push(
-            container(
-                row![
-                    space::horizontal().width(28),
-                    field_label("Replace"),
-                    text_input("Replacement", &find.replacement)
-                        .on_input(Message::FindReplacementChanged)
-                        .padding([7, 10])
-                        .size(BODY_TEXT_SIZE)
-                        .width(FillPortion(2))
-                        .style(styles::input),
-                    space::horizontal().width(86),
-                    controls::command_button(
-                        "Replace",
-                        SECONDARY_TEXT_SIZE,
-                        Message::ReplaceCurrent
-                    ),
-                    controls::primary_command_button(
-                        "All",
-                        SECONDARY_TEXT_SIZE,
-                        Message::ReplaceAll
-                    ),
-                    controls::command_button(
-                        "Advanced",
-                        SECONDARY_TEXT_SIZE,
-                        Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::Replace),
-                    ),
-                    space::horizontal(),
-                ]
-                .spacing(7)
-                .align_y(Center)
-                .width(Fill),
-            )
+            container(motion::fade(
+                column![
+                    space::vertical().height(6),
+                    row![
+                        space::horizontal().width(28),
+                        field_label("Replace"),
+                        text_input("Replacement", &find.replacement)
+                            .on_input(Message::FindReplacementChanged)
+                            .padding([7, 10])
+                            .size(BODY_TEXT_SIZE)
+                            .width(FillPortion(2))
+                            .style(styles::input),
+                        space::horizontal().width(86),
+                        controls::command_button(
+                            "Replace",
+                            SECONDARY_TEXT_SIZE,
+                            Message::ReplaceCurrent
+                        ),
+                        controls::primary_command_button(
+                            "All",
+                            SECONDARY_TEXT_SIZE,
+                            Message::ReplaceAll
+                        ),
+                        controls::command_button(
+                            "Advanced",
+                            SECONDARY_TEXT_SIZE,
+                            Message::ToggleAdvancedSearch(
+                                crate::message::AdvancedSearchTab::Replace
+                            ),
+                        ),
+                        space::horizontal(),
+                    ]
+                    .spacing(7)
+                    .align_y(Center)
+                    .height(REPLACE_ROW_HEIGHT)
+                    .width(Fill)
+                ],
+                replace_progress,
+                styles::utility_bar_background,
+                is_replace_visible,
+            ))
             .height(Length::Fixed(
-                REPLACE_ROW_HEIGHT * replace_progress.clamp(0.0, 1.0),
+                (REPLACE_ROW_HEIGHT + 6.0) * replace_progress.clamp(0.0, 1.0),
             ))
             .width(Fill)
             .clip(true),

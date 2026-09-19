@@ -27,9 +27,11 @@ GPU renderer back to tiny-skia.
 
 When saved settings load, a lazy/diagnostic policy requests a boost once the main
 window is open. With no saved settings, that load-time branch does not request a
-boost. Opening About can request a permitted boost. The app starts the About
-animation only after the strict handoff succeeds; failures leave software usable.
-Find, inline replace, and function-list visibility also have app-managed animations.
+boost. Opening About is immediate and does not request a backend change.
+Find, inline replace, and function-list visibility use short reveal/fade transitions;
+menus, custom settings dropdowns, and confirmation/window-list popups have brief
+entrance motion. These run on both renderers and request frames only while
+transitioning. The About dialog is static.
 
 The app states are `Software`, `PreparingHardware`, `Hardware`, and
 `Failed(RenderFailureCategory)`. Duplicate requests are suppressed while preparing

@@ -92,7 +92,6 @@ pub enum Message {
     ClipboardWritten(ClipboardWriteResult),
     BackendBoostRequested,
     BackendBoostConfigured(iced::backend::StrictHandoffOutcome),
-    AboutAnimationFrame(Instant),
     ChromeAnimationFrame(Instant),
     RuntimeEvent(event::Event, event::Status, window::Id),
     MenuToggled(Menu),

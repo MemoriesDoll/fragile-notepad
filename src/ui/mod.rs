@@ -4,11 +4,13 @@ pub mod about_dialog;
 pub mod advanced_search_panel;
 pub mod controls;
 pub mod dirty_close_dialog;
+pub mod dropdown;
 pub mod editor;
 pub mod find_panel;
 pub mod function_list_panel;
 pub mod icons;
 pub mod menu;
+pub mod motion;
 pub mod settings_panel;
 pub mod status_bar;
 pub mod styles;
@@ -25,8 +27,8 @@ use crate::message::{AboutTab, Menu, Message};
 use crate::ui::toolbar::WindowMenuState;
 use crate::ui::window_list_dialog::WindowListEntry;
 
-const FIND_PANEL_COLLAPSED_HEIGHT: f32 = 41.0;
-const FIND_PANEL_EXPANDED_HEIGHT: f32 = 76.0;
+const FIND_PANEL_COLLAPSED_HEIGHT: f32 = 46.0;
+const FIND_PANEL_EXPANDED_HEIGHT: f32 = 86.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChromeAnimationInfo {
@@ -68,7 +70,6 @@ pub fn view<'a>(
     dirty_close_document: Option<&'a Document>,
     about_tab: Option<AboutTab>,
     rendering_debug_info: about_dialog::RenderingDebugInfo,
-    about_animation_info: about_dialog::AboutAnimationInfo,
     window_list_entries: Option<Vec<WindowListEntry>>,
     file_status: Option<&'a str>,
     active_outline_state: Option<&'a OutlineState>,
@@ -90,11 +91,16 @@ pub fn view<'a>(
         let find_height = animated_find_height(chrome_animation);
 
         workbench = workbench.push(
-            container(find_panel::view(
-                find,
-                is_inline_replace_visible,
-                chrome_animation.inline_replace_rendered_visible,
-                chrome_animation.inline_replace_progress,
+            container(motion::fade(
+                find_panel::view(
+                    find,
+                    is_inline_replace_visible,
+                    chrome_animation.inline_replace_rendered_visible,
+                    chrome_animation.inline_replace_progress,
+                ),
+                chrome_animation.find_progress,
+                styles::utility_bar_background,
+                is_find_visible,
             ))
             .height(Length::Fixed(find_height))
             .width(Fill)
@@ -115,10 +121,15 @@ pub fn view<'a>(
 
                 row![
                     editor_surface,
-                    container(function_list_panel::view(document, active_outline_state))
-                        .width(Length::Fixed(function_list_width))
-                        .height(Fill)
-                        .clip(true),
+                    container(motion::fade(
+                        function_list_panel::view(document, active_outline_state),
+                        chrome_animation.function_list_progress,
+                        styles::editor_background,
+                        is_function_list_visible,
+                    ))
+                    .width(Length::Fixed(function_list_width))
+                    .height(Fill)
+                    .clip(true),
                 ]
                 .height(Fill)
                 .width(Fill)
@@ -171,7 +182,7 @@ pub fn view<'a>(
     if let Some(tab) = about_tab {
         stack![
             with_window_list,
-            about_dialog::view(tab, rendering_debug_info, about_animation_info)
+            about_dialog::view(tab, rendering_debug_info)
         ]
         .into()
     } else {

@@ -7,10 +7,10 @@ use iced::widget::{button, column, container, mouse_area, row, scrollable, space
 use iced::{Center, Element, Event, Fill, Length, Point, Rectangle, Size};
 
 use crate::core::{KeyBinding, ShortcutDisplay, ShortcutDisplayPart, ShortcutModifierIcon};
-use crate::message::{MenuPath, Message};
+use crate::message::{Menu, MenuPath, Message};
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::shortcut::{self, ShortcutIcon};
-use crate::ui::styles;
+use crate::ui::{motion, styles};
 
 const ROW_HEIGHT: f32 = 27.0;
 const PANEL_PADDING: u16 = 3;
@@ -159,20 +159,26 @@ pub fn separator() -> MenuNode {
     MenuNode::Separator
 }
 
-pub fn view<'a>(tree: MenuTree, active_path: &'a [String]) -> Element<'a, Message> {
+pub fn view<'a>(menu: Menu, tree: MenuTree, active_path: &'a [String]) -> Element<'a, Message> {
     let base_width = panel_width(&tree.entries, tree.width);
     let flyouts = active_flyouts(&tree.entries, active_path, tree.width);
-    let base = menu_panel(tree.entries, base_width, tree.max_height, active_path, 0);
+    let base = motion::dropdown_with_key(
+        format!("{menu:?}"),
+        menu_panel(tree.entries, base_width, tree.max_height, active_path, 0),
+    );
     let layers = flyouts
         .into_iter()
         .map(|flyout| {
             PositionedLayer::new(
-                menu_panel(
-                    flyout.entries,
-                    flyout.width,
-                    None,
-                    active_path,
-                    flyout.depth,
+                motion::dropdown_with_key(
+                    format!("{menu:?}/{:?}", &active_path[..flyout.depth]),
+                    menu_panel(
+                        flyout.entries,
+                        flyout.width,
+                        None,
+                        active_path,
+                        flyout.depth,
+                    ),
                 ),
                 flyout.x,
                 flyout.y,

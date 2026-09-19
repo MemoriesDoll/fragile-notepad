@@ -222,6 +222,7 @@ fn menu_drop_down<'a>(
     settings: &'a EditorSettings,
 ) -> Element<'a, Message> {
     menu::view(
+        menu_kind,
         menu_tree(menu_kind, window_menu_state, settings),
         active_path,
     )

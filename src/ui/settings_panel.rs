@@ -1,7 +1,5 @@
 use iced::highlighter;
-use iced::widget::{
-    button, column, container, pick_list, row, rule, scrollable, space, text, toggler,
-};
+use iced::widget::{button, column, container, row, rule, scrollable, space, text, toggler};
 use iced::{Center, Element, Fill, Length};
 
 use crate::core::{
@@ -10,6 +8,7 @@ use crate::core::{
 };
 use crate::message::{Message, SettingsCategory};
 use crate::settings_dialog::SettingsDialogState;
+use crate::ui::dropdown::dropdown;
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::shortcut::{self, ShortcutIcon};
 use crate::ui::{centered_fill_button_label, controls, styles};
@@ -108,36 +107,36 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
         pane_title("General"),
         option_row(
             "Startup appearance",
-            pick_list(
+            dropdown(
                 Some(settings.appearance),
                 APPEARANCE_OPTIONS,
                 appearance_label,
+                Message::DraftAppearanceSelected,
             )
-            .on_select(Message::DraftAppearanceSelected)
             .placeholder("Appearance")
             .width(220)
             .into(),
         ),
         option_row(
             "Default syntax theme",
-            pick_list(
+            dropdown(
                 Some(settings.syntax_theme),
                 highlighter::Theme::ALL,
                 highlighter::Theme::to_string,
+                Message::DraftThemeSelected,
             )
-            .on_select(Message::DraftThemeSelected)
             .placeholder("Syntax theme")
             .width(220)
             .into(),
         ),
         option_row(
             "Hardware acceleration",
-            pick_list(
+            dropdown(
                 Some(settings.hardware_acceleration),
                 HardwareAccelerationMode::ALL,
                 hardware_acceleration_label,
+                Message::DraftHardwareAccelerationSelected,
             )
-            .on_select(Message::DraftHardwareAccelerationSelected)
             .placeholder("Hardware acceleration")
             .width(220)
             .into(),
@@ -152,12 +151,12 @@ fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
         pane_title("Appearance"),
         option_row(
             "Color mode",
-            pick_list(
+            dropdown(
                 Some(settings.appearance),
                 APPEARANCE_OPTIONS,
                 appearance_label,
+                Message::DraftAppearanceSelected,
             )
-            .on_select(Message::DraftAppearanceSelected)
             .placeholder("Appearance")
             .width(220)
             .into(),
@@ -189,12 +188,12 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
         pane_title("Editor"),
         option_row(
             "Indentation",
-            pick_list(
+            dropdown(
                 Some(settings.indentation),
                 INDENTATION_OPTIONS,
                 indentation_label,
+                Message::DraftIndentationSelected,
             )
-            .on_select(Message::DraftIndentationSelected)
             .placeholder("Indentation")
             .width(220)
             .into(),

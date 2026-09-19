@@ -300,6 +300,14 @@ pub fn tab_active_edge(is_active: bool) -> impl Fn(&Theme) -> container::Style {
     }
 }
 
+pub fn utility_bar_background(theme: &Theme) -> Color {
+    VisualPalette::from_theme(theme).chrome_high
+}
+
+pub fn editor_background(theme: &Theme) -> Color {
+    VisualPalette::from_theme(theme).surface
+}
+
 pub fn utility_bar(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 
@@ -615,6 +623,77 @@ pub fn menu_dropdown_disabled(theme: &Theme) -> container::Style {
     container::Style {
         background: None,
         text_color: Some(palette.faint_text),
+        ..container::Style::default()
+    }
+}
+
+pub fn dropdown_trigger(
+    theme: &Theme,
+    is_open: bool,
+    is_focused: bool,
+    status: button::Status,
+) -> button::Style {
+    let palette = VisualPalette::from_theme(theme);
+    let highlighted = is_open || is_focused;
+
+    button::Style {
+        background: Some(Background::Color(match status {
+            button::Status::Hovered | button::Status::Pressed => palette.surface_low,
+            _ => palette.surface,
+        })),
+        text_color: palette.text,
+        border: border(
+            1.0,
+            if highlighted {
+                palette.accent
+            } else if matches!(status, button::Status::Hovered) {
+                palette.border
+            } else {
+                palette.border_soft
+            },
+            CONTROL_RADIUS,
+        ),
+        ..button::Style::default()
+    }
+}
+
+pub fn dropdown_option(
+    is_selected: bool,
+    is_highlighted: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let palette = VisualPalette::from_theme(theme);
+        let background = if is_highlighted
+            || matches!(status, button::Status::Hovered | button::Status::Pressed)
+        {
+            palette.accent_soft
+        } else if is_selected {
+            palette.surface_low
+        } else {
+            Color::TRANSPARENT
+        };
+
+        button::Style {
+            background: Some(Background::Color(background)),
+            text_color: if is_selected {
+                palette.accent
+            } else {
+                palette.text
+            },
+            border: border(0.0, Color::TRANSPARENT, CONTROL_RADIUS),
+            ..button::Style::default()
+        }
+    }
+}
+
+pub fn dropdown_menu(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+
+    container::Style {
+        background: Some(Background::Color(palette.overlay)),
+        text_color: Some(palette.text),
+        border: border(1.0, palette.border_soft, RADIUS),
+        shadow: elevation(palette, 4.0, 14.0),
         ..container::Style::default()
     }
 }

@@ -576,148 +576,29 @@ fn about_dialog_opens_switches_tabs_and_closes() {
 
     let _ = app.update(Message::AboutClosed);
     assert!(!app.is_about_visible);
-    assert_eq!(app.about_animation, crate::app::AboutOverlayAnimation::Idle);
 }
 
 #[test]
-fn about_open_waits_for_hardware_before_animation_starts() {
-    let _env = RenderBackendEnvGuard::new(None);
-    let (mut app, _) = App::new();
+fn about_opens_immediately_without_backend_work_in_every_rendering_state() {
+    use crate::app::rendering::{RenderFailureCategory, RenderingState};
 
-    app.settings.hardware_acceleration = HardwareAccelerationMode::Lazy;
-    let _boost_request_task = app.update(Message::AboutOpened);
+    for rendering in [
+        RenderingState::Software,
+        RenderingState::PreparingHardware,
+        RenderingState::Hardware,
+        RenderingState::Failed(RenderFailureCategory::Prepare),
+    ] {
+        let (mut app, _) = App::new();
+        app.rendering = rendering;
+        app.settings.hardware_acceleration = HardwareAccelerationMode::Lazy;
 
-    assert!(app.is_about_visible);
-    assert_eq!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::WaitingForHardware {
-            boost_requested: true
-        }
-    );
-    assert_eq!(
-        app.rendering,
-        crate::app::rendering::RenderingState::Software
-    );
+        let task = app.update_inner(Message::AboutOpened);
 
-    // Iced's public Task API does not expose the zero-unit Task::done output for
-    // synchronous test inspection, so this simulates runtime delivery of it.
-    let _ = app.update(Message::BackendBoostRequested);
-
-    assert_eq!(
-        app.rendering,
-        crate::app::rendering::RenderingState::PreparingHardware
-    );
-    assert_eq!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::WaitingForHardware {
-            boost_requested: true
-        }
-    );
-
-    let waiting_info = app.about_animation_info();
-    assert_eq!(waiting_info.progress, 0.0);
-    assert_eq!(waiting_info.visual_progress, 0.0);
-    assert!(!waiting_info.is_animating);
-}
-
-#[test]
-fn about_waiting_animation_ignores_frame_ticks_until_hardware_finishes() {
-    let _env = RenderBackendEnvGuard::new(None);
-    let (mut app, _) = App::new();
-
-    app.settings.hardware_acceleration = HardwareAccelerationMode::Lazy;
-    let _ = app.update(Message::AboutOpened);
-    let _ = app.update(Message::BackendBoostRequested);
-    let frame = std::time::Instant::now();
-
-    let _ = app.update(Message::AboutAnimationFrame(frame));
-    let _ = app.update(Message::AboutAnimationFrame(
-        frame + std::time::Duration::from_secs(1),
-    ));
-
-    assert_eq!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::WaitingForHardware {
-            boost_requested: true
-        }
-    );
-
-    let waiting_info = app.about_animation_info();
-    assert_eq!(waiting_info.progress, 0.0);
-    assert_eq!(waiting_info.visual_progress, 0.0);
-    assert!(!waiting_info.is_animating);
-}
-
-#[test]
-fn about_open_does_not_duplicate_existing_hardware_prepare() {
-    let (mut app, _) = App::new();
-
-    app.rendering = crate::app::rendering::RenderingState::PreparingHardware;
-    let task = app.update(Message::AboutOpened);
-
-    assert!(app.is_about_visible);
-    assert_eq!(task.units(), 0);
-    assert_eq!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::WaitingForHardware {
-            boost_requested: false
-        }
-    );
-}
-
-#[test]
-fn about_animation_starts_only_after_successful_hardware_completion() {
-    let (mut app, _) = App::new();
-
-    app.rendering = crate::app::rendering::RenderingState::PreparingHardware;
-    let _ = app.update(Message::AboutOpened);
-    let _ = app.update(Message::BackendBoostConfigured(strict_handoff_success()));
-
-    assert_eq!(
-        app.rendering,
-        crate::app::rendering::RenderingState::Hardware
-    );
-    assert!(matches!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::Running {
-            started_at: None,
-            progress: 0.0
-        }
-    ));
-
-    let first_frame = std::time::Instant::now();
-    let _ = app.update(Message::AboutAnimationFrame(first_frame));
-
-    assert!(matches!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::Running {
-            started_at: Some(_),
-            progress: 0.0
-        }
-    ));
-}
-
-#[test]
-fn about_animation_is_disabled_on_boost_failure() {
-    let (mut app, _) = App::new();
-
-    app.rendering = crate::app::rendering::RenderingState::PreparingHardware;
-    let _ = app.update(Message::AboutOpened);
-    let _ = app.update(Message::BackendBoostConfigured(strict_handoff_error(
-        backend::StrictHandoffFailureCategory::Prepare,
-    )));
-
-    assert!(app.is_about_visible);
-    assert_eq!(
-        app.rendering,
-        crate::app::rendering::RenderingState::Failed(
-            crate::app::rendering::RenderFailureCategory::Prepare
-        )
-    );
-    assert_eq!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::Disabled
-    );
+        assert!(app.is_about_visible);
+        assert_eq!(app.rendering, rendering);
+        assert!(!app.chrome_animation.needs_frames());
+        assert_eq!(task.units(), 0);
+    }
 }
 
 #[test]
@@ -737,10 +618,6 @@ fn about_dialog_remains_usable_after_boost_failure() {
             crate::app::rendering::RenderFailureCategory::RendererEvidenceMissing
         )
     );
-    assert_eq!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::Disabled
-    );
     assert!(
         app.file_status
             .as_deref()
@@ -752,46 +629,71 @@ fn about_dialog_remains_usable_after_boost_failure() {
 
     let _ = app.update(Message::AboutClosed);
     assert!(!app.is_about_visible);
-    assert_eq!(app.about_animation, crate::app::AboutOverlayAnimation::Idle);
 
     let _ = app.update(Message::AboutOpened);
     assert!(app.is_about_visible);
     assert_eq!(app.about_tab, AboutTab::About);
-    assert_eq!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::Disabled
-    );
 }
 
 #[test]
-fn about_animation_is_disabled_when_software_policy_forces_fallback() {
-    let _env = RenderBackendEnvGuard::new(Some("software"));
+fn chrome_find_closed_before_first_frame_is_removed_immediately() {
     let (mut app, _) = App::new();
 
-    let task = app.update(Message::AboutOpened);
+    let _ = app.update(Message::ToggleFind);
+    let _ = app.update(Message::HideFind);
 
-    assert!(app.is_about_visible);
-    assert_eq!(task.units(), 0);
-    assert_eq!(
-        app.rendering,
-        crate::app::rendering::RenderingState::Software
-    );
-    assert_eq!(
-        app.about_animation,
-        crate::app::AboutOverlayAnimation::Disabled
-    );
+    let closed = app.chrome_animation_info();
+    assert!(!closed.find_rendered_visible);
+    assert!(!closed.inline_replace_rendered_visible);
+    assert!(!app.chrome_animation.needs_frames());
 }
 
 #[test]
-fn about_close_resets_waiting_animation_state() {
+fn chrome_find_reversal_continues_from_visible_progress_and_finishes() {
     let (mut app, _) = App::new();
+    let first_frame = std::time::Instant::now();
+    let midway_frame = first_frame + std::time::Duration::from_millis(70);
 
-    app.rendering = crate::app::rendering::RenderingState::PreparingHardware;
-    let _ = app.update(Message::AboutOpened);
-    let _ = app.update(Message::AboutClosed);
+    let _ = app.update(Message::ToggleFind);
+    let _ = app.update(Message::ChromeAnimationFrame(first_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(midway_frame));
+    let midway = app.chrome_animation_info().find_progress;
+    assert!(midway > 0.0 && midway < 1.0);
 
-    assert!(!app.is_about_visible);
-    assert_eq!(app.about_animation, crate::app::AboutOverlayAnimation::Idle);
+    let _ = app.update(Message::HideFind);
+    assert_eq!(app.chrome_animation_info().find_progress, midway);
+    let _ = app.update(Message::ChromeAnimationFrame(midway_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(
+        midway_frame + std::time::Duration::from_millis(140),
+    ));
+
+    assert!(!app.chrome_animation_info().find_rendered_visible);
+    assert_eq!(app.chrome_animation_info().find_progress, 0.0);
+    assert!(!app.chrome_animation.needs_frames());
+}
+
+#[test]
+fn chrome_repeated_show_does_not_restart_running_transition() {
+    let (mut app, _) = App::new();
+    let first_frame = std::time::Instant::now();
+
+    let _ = app.update(Message::ShowInlineReplace);
+    let _ = app.update(Message::ChromeAnimationFrame(first_frame));
+    let _ = app.update(Message::ChromeAnimationFrame(
+        first_frame + std::time::Duration::from_millis(70),
+    ));
+    let midway = app.chrome_animation_info();
+    assert!(midway.find_progress > 0.0 && midway.find_progress < 1.0);
+
+    let _ = app.update(Message::ShowInlineReplace);
+    let _ = app.update(Message::ChromeAnimationFrame(
+        first_frame + std::time::Duration::from_millis(140),
+    ));
+
+    let opened = app.chrome_animation_info();
+    assert_eq!(opened.find_progress, 1.0);
+    assert_eq!(opened.inline_replace_progress, 1.0);
+    assert!(!app.chrome_animation.needs_frames());
 }
 
 #[test]

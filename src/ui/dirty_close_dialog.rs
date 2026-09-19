@@ -3,7 +3,7 @@ use iced::{Alignment, Center, Element, Fill, Length};
 
 use crate::core::Document;
 use crate::message::{DirtyCloseDecision, Message};
-use crate::ui::{centered_button_label, styles};
+use crate::ui::{centered_button_label, motion, styles};
 
 pub fn view(document: &Document) -> Element<'_, Message> {
     stack![
@@ -13,7 +13,7 @@ pub fn view(document: &Document) -> Element<'_, Message> {
                 .height(Fill)
                 .style(styles::modal_scrim)
         ),
-        container(dialog(document))
+        container(motion::popup(dialog(document)))
             .width(Fill)
             .height(Fill)
             .center_x(Fill)

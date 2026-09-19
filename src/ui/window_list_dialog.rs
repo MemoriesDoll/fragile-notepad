@@ -2,7 +2,7 @@ use iced::widget::{button, column, container, opaque, row, space, stack, text};
 use iced::{Alignment, Center, Element, Fill, Length};
 
 use crate::message::{Message, WindowTarget};
-use crate::ui::{centered_button_label, styles};
+use crate::ui::{centered_button_label, motion, styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowListEntry {
@@ -19,7 +19,7 @@ pub fn view(entries: Vec<WindowListEntry>) -> Element<'static, Message> {
                 .height(Fill)
                 .style(styles::modal_scrim)
         ),
-        container(dialog(entries))
+        container(motion::popup(dialog(entries)))
             .width(Fill)
             .height(Fill)
             .center_x(Fill)
