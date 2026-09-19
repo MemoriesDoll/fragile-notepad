@@ -579,7 +579,7 @@ fn about_dialog_opens_switches_tabs_and_closes() {
 }
 
 #[test]
-fn about_opens_immediately_without_backend_work_in_every_rendering_state() {
+fn about_fades_without_backend_work_and_stops_requesting_frames_when_settled() {
     use crate::app::rendering::{RenderFailureCategory, RenderingState};
 
     for rendering in [
@@ -596,9 +596,84 @@ fn about_opens_immediately_without_backend_work_in_every_rendering_state() {
 
         assert!(app.is_about_visible);
         assert_eq!(app.rendering, rendering);
-        assert!(!app.chrome_animation.needs_frames());
+        assert!(app.chrome_animation.needs_frames());
+        assert!(app.chrome_animation_info().about_rendered_visible);
+        assert!(app.chrome_animation_info().about_interactive);
+        assert_eq!(app.chrome_animation_info().about_progress, 0.0);
         assert_eq!(task.units(), 0);
+
+        let first = std::time::Instant::now();
+        let settled = first + std::time::Duration::from_millis(140);
+        let _ = app.update_inner(Message::ChromeAnimationFrame(first));
+        let _ = app.update_inner(Message::ChromeAnimationFrame(settled));
+        assert_eq!(app.chrome_animation_info().about_progress, 1.0);
+        assert!(!app.chrome_animation.needs_frames());
+
+        let _ = app.update_inner(Message::AboutClosed);
+        assert!(!app.is_about_visible);
+        assert!(!app.chrome_animation_info().about_interactive);
+        assert!(app.chrome_animation_info().about_rendered_visible);
+        assert!(app.chrome_animation.needs_frames());
+        let _ = app.update_inner(Message::ChromeAnimationFrame(settled));
+        let _ = app.update_inner(Message::ChromeAnimationFrame(
+            settled + std::time::Duration::from_millis(140),
+        ));
+        assert_eq!(app.chrome_animation_info().about_progress, 0.0);
+        assert!(!app.chrome_animation_info().about_rendered_visible);
+        assert!(!app.chrome_animation.needs_frames());
+        assert_eq!(app.rendering, rendering);
     }
+}
+
+#[test]
+fn about_tabs_keep_fade_progress_and_reopening_reverses_exit_without_a_jump() {
+    let (mut app, _) = App::new();
+    let first = std::time::Instant::now();
+    let middle = first + std::time::Duration::from_millis(70);
+    let _ = app.update_inner(Message::AboutOpened);
+    let _ = app.update_inner(Message::ChromeAnimationFrame(first));
+    let _ = app.update_inner(Message::ChromeAnimationFrame(middle));
+    let opening = app.chrome_animation_info().about_progress;
+    assert!(opening > 0.0 && opening < 1.0);
+
+    let _ = app.update_inner(Message::AboutTabSelected(AboutTab::Licenses));
+    assert_eq!(app.chrome_animation_info().about_progress, opening);
+    let _ = app.update_inner(Message::ChromeAnimationFrame(
+        first + std::time::Duration::from_millis(140),
+    ));
+    assert_eq!(app.chrome_animation_info().about_progress, 1.0);
+    assert!(!app.chrome_animation.needs_frames());
+
+    let _ = app.update_inner(Message::AboutClosed);
+    let close_start = first + std::time::Duration::from_millis(150);
+    let reverse_at = close_start + std::time::Duration::from_millis(70);
+    let _ = app.update_inner(Message::ChromeAnimationFrame(close_start));
+    let _ = app.update_inner(Message::ChromeAnimationFrame(reverse_at));
+    let closing = app.chrome_animation_info().about_progress;
+    assert!(closing > 0.0 && closing < 1.0);
+    assert!(!app.chrome_animation_info().about_interactive);
+
+    let _ = app.update_inner(Message::AboutOpened);
+    assert_eq!(app.chrome_animation_info().about_progress, closing);
+    assert_eq!(app.about_tab, AboutTab::Licenses);
+    assert!(app.chrome_animation_info().about_interactive);
+    let _ = app.update_inner(Message::ChromeAnimationFrame(reverse_at));
+    let _ = app.update_inner(Message::ChromeAnimationFrame(
+        reverse_at + std::time::Duration::from_millis(140),
+    ));
+    assert_eq!(app.chrome_animation_info().about_progress, 1.0);
+    assert!(!app.chrome_animation.needs_frames());
+}
+
+#[test]
+fn about_closed_before_first_frame_does_not_leave_an_invisible_modal() {
+    let (mut app, _) = App::new();
+    let _ = app.update_inner(Message::AboutOpened);
+    let _ = app.update_inner(Message::AboutClosed);
+    assert!(!app.is_about_visible);
+    assert!(!app.chrome_animation_info().about_rendered_visible);
+    assert_eq!(app.chrome_animation_info().about_progress, 0.0);
+    assert!(!app.chrome_animation.needs_frames());
 }
 
 #[test]

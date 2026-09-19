@@ -38,6 +38,9 @@ pub struct ChromeAnimationInfo {
     pub inline_replace_progress: f32,
     pub function_list_rendered_visible: bool,
     pub function_list_progress: f32,
+    pub about_rendered_visible: bool,
+    pub about_progress: f32,
+    pub about_interactive: bool,
 }
 
 pub fn centered_button_content<'a>(
@@ -182,7 +185,12 @@ pub fn view<'a>(
     if let Some(tab) = about_tab {
         stack![
             with_window_list,
-            about_dialog::view(tab, rendering_debug_info)
+            about_dialog::view(
+                tab,
+                rendering_debug_info,
+                chrome_animation.about_progress,
+                chrome_animation.about_interactive,
+            )
         ]
         .into()
     } else {

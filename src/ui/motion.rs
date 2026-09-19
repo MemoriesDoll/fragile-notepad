@@ -190,13 +190,18 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
                 if let Some(bounds) = layout.bounds().intersection(viewport) {
                     let mut color = background(theme);
                     color.a *= 1.0 - progress;
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds,
-                            ..renderer::Quad::default()
-                        },
-                        color,
-                    );
+                    // Renderers batch quads before text and images within each
+                    // layer. A final layer puts the veil above every child,
+                    // including content that creates its own clipping layers.
+                    renderer.with_layer(bounds, |renderer| {
+                        renderer.fill_quad(
+                            renderer::Quad {
+                                bounds,
+                                ..renderer::Quad::default()
+                            },
+                            color,
+                        );
+                    });
                 }
             }
         }
@@ -508,6 +513,76 @@ mod tests {
                 emitted.extend(messages);
             }
             assert_eq!(emitted.len(), usize::from(interactive));
+        }
+    }
+
+    #[test]
+    fn fade_covers_text_icons_quads_and_nested_layers() {
+        use crate::ui::icons::hero::{self, HeroIcon, IconTone};
+        use iced::widget::{row, stack, text};
+
+        let mut renderer = renderer();
+        let mut render = |progress| {
+            let black = || {
+                container(Space::new().width(64).height(32))
+                    .style(|_| container::Style::default().background(Color::BLACK))
+            };
+            let mut content = fade(
+                row![
+                    text("Fade").size(20).width(64).color(Color::BLACK),
+                    container(hero::icon(HeroIcon::Plus, 24, IconTone::Text)).width(64),
+                    black(),
+                    stack![Space::new().width(64).height(32), black()],
+                ]
+                .height(32),
+                progress,
+                |_| Color::WHITE,
+                false,
+            );
+            let (tree, node) = mount(&mut content, &renderer);
+            renderer.reset(VIEWPORT);
+            content.as_widget().draw(
+                &tree,
+                &mut renderer,
+                &Theme::Light,
+                &renderer::Style::default(),
+                Layout::new(&node),
+                mouse::Cursor::Unavailable,
+                &VIEWPORT,
+            );
+            renderer.screenshot(Size::new(320, 240), 1.0, Color::WHITE)
+        };
+
+        let hidden = render(0.0);
+        let halfway = render(0.5);
+        let visible = render(1.0);
+        let contrast = |pixels: &[u8], region: usize| -> u64 {
+            (0..32)
+                .flat_map(|y| (region * 64..(region + 1) * 64).map(move |x| (y * 320 + x) * 4))
+                .map(|offset| {
+                    pixels[offset..offset + 3]
+                        .iter()
+                        .map(|v| u64::from(255 - v))
+                        .sum::<u64>()
+                })
+                .sum()
+        };
+        for (region, name) in ["text", "icon", "quad", "nested layer"]
+            .into_iter()
+            .enumerate()
+        {
+            let full = contrast(&visible, region);
+            let half = contrast(&halfway, region);
+            assert!(full > 0, "{name} must be visible at full opacity");
+            assert_eq!(
+                contrast(&hidden, region),
+                0,
+                "{name} must disappear at zero opacity"
+            );
+            assert!(
+                half > full / 5 && half < full * 4 / 5,
+                "{name} must blend at intermediate opacity: {half}/{full}"
+            );
         }
     }
 

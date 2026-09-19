@@ -27,11 +27,12 @@ GPU renderer back to tiny-skia.
 
 When saved settings load, a lazy/diagnostic policy requests a boost once the main
 window is open. With no saved settings, that load-time branch does not request a
-boost. Opening About is immediate and does not request a backend change.
+boost. Opening About does not request a backend change.
 Find, inline replace, and function-list visibility use short reveal/fade transitions;
 menus, custom settings dropdowns, and confirmation/window-list popups have brief
 entrance motion. These run on both renderers and request frames only while
-transitioning. The About dialog is static.
+transitioning. The About panel and its backdrop fade in and out; its logo and
+contents remain static once open.
 
 The app states are `Software`, `PreparingHardware`, `Hardware`, and
 `Failed(RenderFailureCategory)`. Duplicate requests are suppressed while preparing

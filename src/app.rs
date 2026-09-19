@@ -94,6 +94,7 @@ struct ChromeAnimation {
     find: RevealAnimation,
     inline_replace: RevealAnimation,
     function_list: RevealAnimation,
+    about: RevealAnimation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -310,6 +311,7 @@ impl App {
             }
             Message::AboutClosed => {
                 self.is_about_visible = false;
+                self.chrome_animation.about.set_visible(false);
                 Task::none()
             }
             Message::WindowListOpened => {
@@ -540,7 +542,10 @@ impl App {
                 self.hovered_drop_tab,
                 self.pending_dirty_close
                     .and_then(|id| self.workspace.document(id)),
-                self.is_about_visible.then_some(self.about_tab),
+                self.chrome_animation
+                    .about
+                    .rendered_visible
+                    .then_some(self.about_tab),
                 ui::about_dialog::RenderingDebugInfo {
                     current_renderer: self.rendering.label(),
                     rendering_policy: rendering::current_policy_label(&self.settings),
@@ -759,7 +764,10 @@ impl App {
         self.active_menu = None;
         self.active_menu_path.clear();
         self.is_about_visible = true;
-        self.about_tab = AboutTab::About;
+        if !self.chrome_animation.about.rendered_visible {
+            self.about_tab = AboutTab::About;
+        }
+        self.chrome_animation.about.set_visible(true);
 
         Task::none()
     }
@@ -800,6 +808,7 @@ impl ChromeAnimation {
             find: RevealAnimation::hidden(),
             inline_replace: RevealAnimation::hidden(),
             function_list: RevealAnimation::hidden(),
+            about: RevealAnimation::hidden(),
         }
     }
 
@@ -807,12 +816,14 @@ impl ChromeAnimation {
         self.find.needs_frames()
             || self.inline_replace.needs_frames()
             || self.function_list.needs_frames()
+            || self.about.needs_frames()
     }
 
     fn update_frame(&mut self, at: Instant) {
         self.find.update_frame(at);
         self.inline_replace.update_frame(at);
         self.function_list.update_frame(at);
+        self.about.update_frame(at);
     }
 }
 
@@ -897,6 +908,7 @@ impl From<ChromeAnimation> for ui::ChromeAnimationInfo {
         let find = RevealAnimationInfo::from(animation.find);
         let inline_replace = RevealAnimationInfo::from(animation.inline_replace);
         let function_list = RevealAnimationInfo::from(animation.function_list);
+        let about = RevealAnimationInfo::from(animation.about);
 
         Self {
             find_rendered_visible: find.rendered_visible,
@@ -905,6 +917,9 @@ impl From<ChromeAnimation> for ui::ChromeAnimationInfo {
             inline_replace_progress: inline_replace.progress,
             function_list_rendered_visible: function_list.rendered_visible,
             function_list_progress: function_list.progress,
+            about_rendered_visible: about.rendered_visible,
+            about_progress: about.progress,
+            about_interactive: animation.about.target_visible,
         }
     }
 }
