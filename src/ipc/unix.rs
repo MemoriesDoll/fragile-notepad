@@ -3,9 +3,10 @@ use super::{ActivationRequest, SHOW_SIGNAL, Signal, SingleInstanceConfig};
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -272,33 +273,149 @@ impl InstancePaths {
         Self {
             dir: dir.clone(),
             lock_path: dir.join(format!("{app_id}.lock")),
-            socket_path: dir.join(format!("{app_id}.sock")),
+            socket_path: bounded_socket_path(dir.join(format!("{app_id}.sock"))),
         }
     }
 
     fn ensure_dir(&self) -> io::Result<()> {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&self.dir)?;
-        let metadata = fs::symlink_metadata(&self.dir)?;
-        if !metadata.is_dir()
-            || metadata.uid() != effective_user_id()
-            || metadata.mode() & 0o077 != 0
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "IPC directory must be private and owned by the current user",
-            ));
+        ensure_private_dir(&self.dir)?;
+        let socket_dir = self.socket_path.parent().expect("socket has a parent");
+        if socket_dir != self.dir {
+            ensure_private_dir(socket_dir)?;
         }
         Ok(())
     }
+}
+
+fn bounded_socket_path(path: PathBuf) -> PathBuf {
+    // macOS sun_path is 104 bytes, including the terminating NUL. Its default
+    // TMPDIR can already consume most of this budget before adding our name.
+    if path.as_os_str().as_bytes().len() < 104 {
+        return path;
+    }
+
+    // Stable FNV-1a over the full original path keeps runtime namespaces and
+    // instance IDs distinct. Do not use DefaultHasher: its algorithm may change.
+    let hash = path
+        .as_os_str()
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        });
+    PathBuf::from("/tmp")
+        .join(format!("fragile-notepad-{}", effective_user_id()))
+        .join(format!("{hash:016x}.sock"))
+}
+
+fn ensure_private_dir(dir: &Path) -> io::Result<()> {
+    DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    let metadata = fs::symlink_metadata(dir)?;
+    if !metadata.is_dir() || metadata.uid() != effective_user_id() || metadata.mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "IPC directory must be private and owned by the current user",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{parse_signal_payload, signal_payload};
     use crate::ipc::{ActivationRequest, SHOW_SIGNAL};
+
+    #[test]
+    fn socket_path_fallback_respects_byte_limit_and_runtime_namespace() {
+        use std::path::PathBuf;
+
+        let fitting = PathBuf::from(format!("/tmp/{}.sock", "a".repeat(93)));
+        assert_eq!(fitting.as_os_str().len(), 103);
+        assert_eq!(super::bounded_socket_path(fitting.clone()), fitting);
+
+        // Unicode characters consume multiple bytes in sun_path.
+        let long = PathBuf::from(format!("/tmp/{}.sock", "é".repeat(47)));
+        assert_eq!(long.as_os_str().len(), 104);
+        let fallback = super::bounded_socket_path(long.clone());
+        assert!(fallback.as_os_str().len() < 104);
+        assert_ne!(fallback, long);
+        assert_eq!(fallback, super::bounded_socket_path(long.clone()));
+        assert_ne!(
+            fallback,
+            super::bounded_socket_path(
+                PathBuf::from("/different").join(long.strip_prefix("/").unwrap())
+            )
+        );
+        assert_ne!(
+            fallback,
+            super::bounded_socket_path(long.with_extension("other.sock"))
+        );
+    }
+
+    #[test]
+    fn long_runtime_directory_supports_single_instance_forwarding() {
+        const CHILD_ENV: &str = "FRAGILE_IPC_LONG_RUNTIME_TEST";
+        if std::env::var_os(CHILD_ENV).is_some() {
+            let config = super::SingleInstanceConfig::new(format!(
+                "fragile-notepad-startup-probe-{}",
+                std::process::id()
+            ));
+            let super::Startup::Primary(primary) = super::claim_or_signal(&config, &[]).unwrap()
+            else {
+                panic!("expected primary instance");
+            };
+            // Stay below macOS's 104-byte sun_path even when tested on Linux.
+            assert!(primary.socket_path.as_os_str().len() < 104);
+            let socket_path = primary.socket_path.clone();
+            let receiver = std::thread::spawn(move || primary.accept_signal_with(|_| true));
+            let files = vec![std::env::temp_dir().join("forwarded file.txt")];
+            assert!(matches!(
+                super::claim_or_signal(&config, &files).unwrap(),
+                super::Startup::Secondary
+            ));
+            let super::Signal::OpenFiles(received, _) = receiver.join().unwrap().unwrap() else {
+                panic!("expected forwarded files");
+            };
+            assert_eq!(received, files);
+            assert!(
+                !socket_path.exists(),
+                "primary must remove its socket on exit"
+            );
+            assert!(matches!(
+                super::claim_or_signal(&config, &[]).unwrap(),
+                super::Startup::Primary(_)
+            ));
+            return;
+        }
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::path::PathBuf::from(format!(
+            "/tmp/fragile-ipc-test-{}-{unique}",
+            std::process::id()
+        ));
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "ipc::unix::tests::long_runtime_directory_supports_single_instance_forwarding",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .env("XDG_RUNTIME_DIR", root.join("long-runtime-".repeat(12)))
+            .output()
+            .unwrap();
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        assert!(
+            output.status.success(),
+            "long-path IPC child failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[test]
     fn legacy_show_signal_parses_as_empty_activation_request() {
