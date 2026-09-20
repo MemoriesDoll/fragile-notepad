@@ -35,6 +35,7 @@ pub enum MenuNode {
     },
     Disabled {
         label: String,
+        shortcut: Option<MenuShortcutHint>,
     },
     Submenu {
         id: String,
@@ -93,7 +94,13 @@ impl MenuNode {
                         LABEL_SHORTCUT_GAP + shortcut.intrinsic_width()
                     })
             }
-            Self::Disabled { label } => ROW_HORIZONTAL_PADDING + text_width(label, LABEL_TEXT_SIZE),
+            Self::Disabled { label, shortcut } => {
+                ROW_HORIZONTAL_PADDING
+                    + text_width(label, LABEL_TEXT_SIZE)
+                    + shortcut.as_ref().map_or(0.0, |shortcut| {
+                        LABEL_SHORTCUT_GAP + shortcut.intrinsic_width()
+                    })
+            }
             Self::Submenu { label, .. } => {
                 ROW_HORIZONTAL_PADDING
                     + text_width(label, LABEL_TEXT_SIZE)
@@ -140,6 +147,7 @@ pub fn item_with_shortcut_binding(
 pub fn disabled(label: impl Into<String>) -> MenuNode {
     MenuNode::Disabled {
         label: label.into(),
+        shortcut: None,
     }
 }
 
@@ -441,7 +449,7 @@ fn active_flyouts(entries: &[MenuNode], active_path: &[String], min_width: f32) 
             break;
         };
         let x = parent_x + parent_width;
-        let y = parent_y + submenu_y(row_index);
+        let y = parent_y + submenu_y(entries, row_index);
         let width = panel_width(children, min_width);
 
         flyouts.push(Flyout {
@@ -477,11 +485,22 @@ fn active_submenu<'a>(entries: &'a [MenuNode], id: &str) -> Option<(usize, &'a V
     })
 }
 
-fn submenu_y(row_index: usize) -> f32 {
-    f32::from(PANEL_PADDING) + ROW_HEIGHT * row_index as f32
+fn submenu_y(entries: &[MenuNode], row_index: usize) -> f32 {
+    f32::from(PANEL_PADDING)
+        + entries
+            .iter()
+            .take(row_index)
+            .map(|entry| {
+                if matches!(entry, MenuNode::Separator) {
+                    7.0
+                } else {
+                    ROW_HEIGHT
+                }
+            })
+            .sum::<f32>()
 }
 
-fn panel_width(entries: &[MenuNode], min_width: f32) -> f32 {
+pub(super) fn panel_width(entries: &[MenuNode], min_width: f32) -> f32 {
     let content_width = entries
         .iter()
         .map(MenuNode::intrinsic_width)
@@ -568,12 +587,19 @@ fn menu_entry_view<'a>(
             segments: active_path_to(active_path, depth),
         }))
         .into(),
-        MenuNode::Disabled { label } => mouse_area(
-            container(text(label).size(13))
-                .height(Length::Fixed(ROW_HEIGHT))
-                .width(Fill)
-                .padding([5, 9])
-                .style(styles::menu_dropdown_disabled),
+        MenuNode::Disabled { label, shortcut } => mouse_area(
+            container(
+                row![
+                    text(label).size(13),
+                    space::horizontal(),
+                    shortcut_hint_view(shortcut)
+                ]
+                .align_y(Center),
+            )
+            .height(Length::Fixed(ROW_HEIGHT))
+            .width(Fill)
+            .padding([5, 9])
+            .style(styles::menu_dropdown_disabled),
         )
         .on_enter(Message::MenuPathHovered(MenuPath {
             depth,
@@ -606,11 +632,15 @@ fn menu_entry_view<'a>(
             .into()
         }
         MenuNode::Separator => mouse_area(
-            container(space::horizontal())
-                .height(1)
-                .width(Length::Fixed(width - 8.0))
-                .padding([3, 0])
-                .style(styles::separator),
+            container(
+                container(space::horizontal())
+                    .height(1)
+                    .style(styles::separator),
+            )
+            .height(7)
+            .width(Length::Fixed(width - 8.0))
+            .padding([3, 0])
+            .style(styles::transparent),
         )
         .on_enter(Message::MenuPathHovered(MenuPath {
             depth,

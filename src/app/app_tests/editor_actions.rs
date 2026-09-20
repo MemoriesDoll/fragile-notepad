@@ -469,7 +469,11 @@ fn edit_menu_clipboard_messages_route_to_active_editor() {
     assert!(!document.is_dirty);
 
     let task = app.update(Message::Paste);
-    assert_eq!(task.units(), 1);
+    assert_eq!(
+        task.units(),
+        2,
+        "read the clipboard and restore editor focus"
+    );
 }
 
 #[test]

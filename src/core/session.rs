@@ -37,6 +37,10 @@ pub struct SessionDocument {
     pub cursor_line: usize,
     pub cursor_column: usize,
     pub first_visible_row: usize,
+    /// Logical line and UTF-8 byte column at the top of the editor. Older
+    /// sessions restore `first_visible_row` when this position is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_visible_position: Option<(usize, usize)>,
     pub horizontal_offset: f32,
     pub syntax_token: Option<String>,
     /// None denotes older sessions which did not record language provenance.
@@ -58,6 +62,7 @@ impl Default for SessionDocument {
             cursor_line: 0,
             cursor_column: 0,
             first_visible_row: 0,
+            first_visible_position: None,
             horizontal_offset: 0.0,
             syntax_token: None,
             syntax_automatic: None,
@@ -101,6 +106,37 @@ impl Session {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SessionDocument;
+
+    #[test]
+    fn legacy_session_scroll_metadata_defaults_to_saved_screen_row() {
+        let document: SessionDocument = serde_json::from_str(
+            r#"{"text":"legacy","first_visible_row":12,"horizontal_offset":24.0}"#,
+        )
+        .unwrap();
+
+        assert_eq!(document.first_visible_row, 12);
+        assert_eq!(document.first_visible_position, None);
+        assert_eq!(document.horizontal_offset, 24.0);
+    }
+
+    #[test]
+    fn session_logical_top_position_survives_serialization() {
+        let document = SessionDocument {
+            text: Some("éééé".into()),
+            first_visible_row: 3,
+            first_visible_position: Some((0, 6)),
+            ..Default::default()
+        };
+        let encoded = serde_json::to_string(&document).unwrap();
+        let decoded: SessionDocument = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded, document);
     }
 }
 

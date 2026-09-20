@@ -1,14 +1,14 @@
 use super::buffer::EditorBuffer;
 use super::decoration::{DecorationModel, HiddenLineSpan, IndentGuide, LineDecoration};
 use super::layout::{
-    EditorLayout, EditorMetrics, byte_column_for, caret_x, row_y, scrolled_text_origin_x,
-    visual_column_for, visual_width_with_tab_width, x_for_visual_column,
+    EditorLayout, EditorMetrics, byte_column_for, row_y, scrolled_text_origin_x, visual_column_for,
+    visual_column_for_with_offset, visual_width_with_tab_width, x_for_visual_column,
 };
 use super::position::{
     EditorPosition, EditorSelection, ProjectedSelectionLine, SelectionRange, SelectionSet,
     SelectionShape,
 };
-use super::viewport::ViewportModel;
+use super::viewport::{RowSegment, ViewportModel};
 use iced::advanced::text::Highlighter as _;
 use iced::{Color, Rectangle, highlighter};
 use std::ops::Range;
@@ -28,6 +28,8 @@ pub struct RenderPlan {
 pub struct RowRenderPlan {
     pub visible_row: usize,
     pub line: usize,
+    pub start_column: usize,
+    pub start_visual_column: usize,
     pub y: f32,
     pub text_x: f32,
     pub text: String,
@@ -39,6 +41,27 @@ pub struct RowRenderPlan {
     pub eol: Option<EolRenderPlan>,
     pub indent_guides: Vec<IndentGuideRenderPlan>,
     pub syntax_spans: Vec<SyntaxRenderSpan>,
+}
+
+impl RowRenderPlan {
+    /// Returns the inline indicator only when this row hides a collapsed block.
+    /// `measured_text_end_x` is the editor-local endpoint of the row's text.
+    pub fn collapsed_indicator_bounds(
+        &self,
+        metrics: EditorMetrics,
+        measured_text_end_x: f32,
+    ) -> Option<Rectangle> {
+        self.hidden_lines
+            .filter(|hidden| hidden.hidden_line_count > 0)
+            .map(|_| {
+                collapsed_fold_indicator_bounds(
+                    metrics,
+                    self.y,
+                    measured_text_end_x,
+                    self.eol.is_some(),
+                )
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -185,6 +208,55 @@ pub fn text_size(metrics: EditorMetrics) -> f32 {
     (metrics.line_height / 1.25).max(8.0)
 }
 
+/// Returns the boxed ellipsis bounds after a collapsed block's header text.
+///
+/// Coordinates are editor-local and already include horizontal scrolling in
+/// `measured_text_end_x`. Sharing this geometry with pointer handling keeps the
+/// clickable area aligned with measured Unicode text, tabs, and zoom. Callers
+/// clip the result to the text area; a long header never moves the indicator
+/// over its own text. An enabled end-of-line marker retains its own text cell.
+pub fn collapsed_fold_indicator_bounds(
+    metrics: EditorMetrics,
+    row_y: f32,
+    measured_text_end_x: f32,
+    show_eol_markers: bool,
+) -> Rectangle {
+    let (gap, width) = collapsed_fold_indicator_dimensions(metrics.character_width);
+    let height = (metrics.line_height * 0.75)
+        .max(8.0)
+        .min(metrics.line_height.max(0.0));
+    let marker_width = if show_eol_markers {
+        end_of_line_marker_reservation(metrics.character_width)
+    } else {
+        0.0
+    };
+
+    Rectangle {
+        x: measured_text_end_x + marker_width + gap,
+        y: row_y + (metrics.line_height - height) / 2.0,
+        width,
+        height,
+    }
+}
+
+/// Horizontal space needed after a header, excluding any EOL marker.
+pub fn collapsed_fold_indicator_reservation(character_width: f32) -> f32 {
+    let (gap, width) = collapsed_fold_indicator_dimensions(character_width);
+    gap + width
+}
+
+fn collapsed_fold_indicator_dimensions(character_width: f32) -> (f32, f32) {
+    (
+        (character_width * 0.6).max(4.0),
+        (character_width * 2.8).max(20.0),
+    )
+}
+
+/// Keep the marker's minimum icon width available when text is zoomed out.
+pub fn end_of_line_marker_reservation(character_width: f32) -> f32 {
+    character_width.max(7.0)
+}
+
 /// Returns the visible visual-column range for marker rendering.
 ///
 /// `text_origin_x` is the absolute x coordinate of visual column zero after
@@ -294,9 +366,64 @@ pub fn build_render_plan_for_selection_set_with_cache(
     layout: EditorLayout,
     syntax_cache: &SyntaxLineCache,
 ) -> RenderPlan {
+    build_render_plan_for_selection_set_with_cache_and_caret_row(
+        buffer,
+        viewport,
+        decorations,
+        selections,
+        layout,
+        syntax_cache,
+        None,
+    )
+}
+
+pub fn build_render_plan_for_selection_set_with_cache_and_caret_row(
+    buffer: &EditorBuffer,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
+    selections: SelectionSet,
+    layout: EditorLayout,
+    syntax_cache: &SyntaxLineCache,
+    caret_row: Option<usize>,
+) -> RenderPlan {
+    let caret = caret_row.map(|row| (selections.main().cursor, row));
+    build_render_plan_for_selection_set_with_cache_and_caret_rows(
+        buffer,
+        viewport,
+        decorations,
+        selections,
+        layout,
+        syntax_cache,
+        caret.as_slice(),
+    )
+}
+
+pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
+    buffer: &EditorBuffer,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
+    selections: SelectionSet,
+    mut layout: EditorLayout,
+    syntax_cache: &SyntaxLineCache,
+    caret_rows: &[(EditorPosition, usize)],
+) -> RenderPlan {
+    if viewport.wrap_columns().is_some() {
+        layout.scroll.horizontal_px = 0.0;
+    }
     let main_selection = selections.main();
+    let caret_row = |position| {
+        caret_rows
+            .iter()
+            .find_map(|(caret, row)| (*caret == position).then_some(*row))
+    };
     let active_line = main_selection.cursor.line;
     let mut rows = Vec::new();
+    let mut selection_plans = Vec::new();
+    let mut carets = Vec::new();
+    let mut cached_line = None;
+    let mut line_text = String::new();
+    let mut line_spans = Vec::new();
+    let mut projected = Vec::new();
     let lookups = RenderDecorationLookups::new(decorations);
     let text_x = scrolled_text_origin_x(layout, decorations);
     let max_row = layout
@@ -307,62 +434,116 @@ pub fn build_render_plan_for_selection_set_with_cache(
         let Some(line) = viewport.visible_row_to_document_line(visible_row) else {
             break;
         };
-        let text = buffer.line(line).unwrap_or_default();
+        let Some(segment) = viewport.row_segment(visible_row, buffer) else {
+            break;
+        };
+        if cached_line != Some(line) {
+            cached_line = Some(line);
+            line_text = buffer.line(line).unwrap_or_default();
+            line_spans = syntax_cache.spans(line).unwrap_or_default();
+            projected.clear();
+            for selection in selections.ranges() {
+                if let Some(projection) = project_selection_line(
+                    *selection,
+                    line,
+                    buffer,
+                    &line_text,
+                    decorations.settings.indent_width,
+                ) {
+                    if (selection.is_caret() || selection.is_rectangular())
+                        && let Some(caret) = caret_plan_from_projected(
+                            buffer,
+                            viewport,
+                            decorations,
+                            projection,
+                            &line_text,
+                            layout,
+                            caret_row(projection.end),
+                        )
+                    {
+                        carets.push(caret);
+                    }
+                    projected.push(projection);
+                }
+            }
+        }
+        let text = &line_text[segment.start_column..segment.end_column];
         let y = row_y(visible_row, layout);
         let line_decoration = lookups.line_decoration(line);
         let fold = line_decoration
-            .filter(|decoration| decoration.has_fold_control)
+            .filter(|decoration| decoration.has_fold_control && !segment.is_continuation())
             .map(|decoration| FoldRenderPlan {
                 line,
                 collapsed: decoration.is_fold_collapsed,
             });
         let hidden_lines = lookups
             .hidden_line_span(line)
+            .filter(|_| segment.is_last)
             .map(|span| HiddenLineRenderPlan {
                 first_hidden_line: span.first_hidden_line,
                 last_hidden_line: span.last_hidden_line,
                 hidden_line_count: span.hidden_line_count(),
             });
-        let syntax_spans = syntax_cache.spans(line).unwrap_or_default();
+        let first_span = line_spans.partition_point(|span| span.range.end <= segment.start_column);
+        let syntax_spans = line_spans[first_span..]
+            .iter()
+            .take_while(|span| span.range.start < segment.end_column)
+            .filter_map(|span| {
+                let start = span.range.start.max(segment.start_column);
+                let end = span.range.end.min(segment.end_column);
+                (start < end).then(|| SyntaxRenderSpan {
+                    range: start - segment.start_column..end - segment.start_column,
+                    color: span.color,
+                })
+            })
+            .collect();
+
+        for projection in &projected {
+            if let Some(selection) = selection_plan_from_projected(
+                decorations,
+                *projection,
+                segment,
+                visible_row,
+                layout,
+            ) {
+                selection_plans.push(selection);
+            }
+        }
 
         rows.push(RowRenderPlan {
             visible_row,
             line,
+            start_column: segment.start_column,
+            start_visual_column: segment.start_visual_column,
             y,
             text_x,
-            text: text.clone(),
-            line_number: line_decoration.and_then(|decoration| decoration.line_number),
+            text: text.to_owned(),
+            line_number: line_decoration
+                .filter(|_| !segment.is_continuation())
+                .and_then(|decoration| decoration.line_number),
             is_active_line: line == active_line,
             fold,
             hidden_lines,
-            whitespace: whitespace_plan(line, &text, decorations, layout),
-            eol: eol_plan(line, &text, decorations, layout),
-            indent_guides: indent_guide_plan(
+            whitespace: whitespace_plan(
                 line,
-                lookups.indent_guides(line),
+                text,
+                segment.start_visual_column,
                 decorations,
                 layout,
             ),
+            eol: segment
+                .is_last
+                .then(|| eol_plan(line, text, segment.start_visual_column, decorations, layout))
+                .flatten(),
+            indent_guides: if segment.is_continuation() {
+                Vec::new()
+            } else {
+                indent_guide_plan(line, lookups.indent_guides(line), decorations, layout)
+            },
             syntax_spans,
         });
     }
 
-    let projected_selection_lines =
-        projected_visible_selection_lines(buffer, viewport, decorations, &selections, layout);
-    let selection_plans = projected_selection_lines
-        .iter()
-        .filter_map(|selection| {
-            selection_plan_from_projected(viewport, decorations, *selection, layout)
-        })
-        .collect();
-    let projected_caret_lines =
-        projected_visible_caret_lines(buffer, viewport, decorations, &selections, layout);
-    let carets = projected_caret_lines
-        .iter()
-        .filter_map(|selection| {
-            caret_plan_from_projected(buffer, viewport, decorations, *selection, layout)
-        })
-        .collect::<Vec<_>>();
     let caret = selections
         .main_range()
         .is_caret()
@@ -373,7 +554,9 @@ pub fn build_render_plan_for_selection_set_with_cache(
                 decorations,
                 selections.main_range().cursor,
                 selections.main_range().cursor_virtual_column,
+                &buffer.line(main_selection.cursor.line).unwrap_or_default(),
                 layout,
+                caret_row(main_selection.cursor),
             )
         })
         .flatten();
@@ -386,74 +569,17 @@ pub fn build_render_plan_for_selection_set_with_cache(
     }
 }
 
-fn projected_visible_selection_lines(
-    buffer: &EditorBuffer,
-    viewport: &ViewportModel,
-    decorations: &DecorationModel,
-    selections: &SelectionSet,
-    layout: EditorLayout,
-) -> Vec<ProjectedSelectionLine> {
-    let first = layout.scroll.first_visible_row;
-    let last = first.saturating_add(layout.visible_row_capacity());
-    let mut projected = Vec::new();
-
-    for visible_row in first..=last {
-        let Some(line) = viewport.visible_row_to_document_line(visible_row) else {
-            break;
-        };
-
-        for selection in selections.ranges() {
-            if let Some(line) =
-                project_selection_line(*selection, line, buffer, decorations.settings.indent_width)
-            {
-                projected.push(line);
-            }
-        }
-    }
-
-    projected
-}
-
-fn projected_visible_caret_lines(
-    buffer: &EditorBuffer,
-    viewport: &ViewportModel,
-    decorations: &DecorationModel,
-    selections: &SelectionSet,
-    layout: EditorLayout,
-) -> Vec<ProjectedSelectionLine> {
-    let first = layout.scroll.first_visible_row;
-    let last = first.saturating_add(layout.visible_row_capacity());
-    let mut projected = Vec::new();
-
-    for visible_row in first..=last {
-        let Some(line) = viewport.visible_row_to_document_line(visible_row) else {
-            break;
-        };
-
-        for selection in selections.ranges() {
-            if !selection.is_caret() && !selection.is_rectangular() {
-                continue;
-            }
-
-            if let Some(line) =
-                project_selection_line(*selection, line, buffer, decorations.settings.indent_width)
-            {
-                projected.push(line);
-            }
-        }
-    }
-
-    projected
-}
-
 fn project_selection_line(
     selection: SelectionRange,
     line: usize,
     buffer: &EditorBuffer,
+    text: &str,
     tab_width: usize,
 ) -> Option<ProjectedSelectionLine> {
     match selection.shape {
-        SelectionShape::Linear => project_linear_selection_line(selection, line, buffer, tab_width),
+        SelectionShape::Linear => {
+            project_linear_selection_line(selection, line, buffer, text, tab_width)
+        }
         SelectionShape::Rectangular(rectangular) => {
             let anchor = buffer.clamp_position(selection.anchor);
             let cursor = buffer.clamp_position(selection.cursor);
@@ -466,7 +592,6 @@ fn project_selection_line(
                 return None;
             }
 
-            let text = buffer.line(line)?;
             let (start_visual_column, end_visual_column) = rectangular.visual_columns();
             let line_visual_width = visual_column_for(&text, text.len(), tab_width);
             let start_column = byte_column_for(&text, start_visual_column, tab_width);
@@ -491,6 +616,7 @@ fn project_linear_selection_line(
     selection: SelectionRange,
     line: usize,
     buffer: &EditorBuffer,
+    text: &str,
     tab_width: usize,
 ) -> Option<ProjectedSelectionLine> {
     let range = buffer.clamp_range(selection.range());
@@ -498,7 +624,6 @@ fn project_linear_selection_line(
         return None;
     }
 
-    let text = buffer.line(line)?;
     let start_column = if line == range.start.line {
         range.start.column
     } else {
@@ -541,33 +666,57 @@ fn project_linear_selection_line(
 }
 
 fn selection_plan_from_projected(
-    viewport: &ViewportModel,
     decorations: &DecorationModel,
     selection: ProjectedSelectionLine,
+    segment: RowSegment,
+    visible_row: usize,
     layout: EditorLayout,
 ) -> Option<SelectionRenderPlan> {
     if selection.start_visual_column == selection.end_visual_column {
         return None;
     }
 
-    let visible_row = visible_row_in_layout(viewport, selection.line, layout)?;
     let start_visual_column = selection
         .start_visual_column
-        .min(selection.end_visual_column);
-    let end_visual_column = selection
+        .min(selection.end_visual_column)
+        .max(segment.start_visual_column);
+    let mut end_visual_column = selection
         .start_visual_column
         .max(selection.end_visual_column);
+    if !segment.is_last {
+        end_visual_column = end_visual_column.min(segment.end_visual_column);
+    }
+    if start_visual_column >= end_visual_column {
+        return None;
+    }
+    let start_column = selection
+        .start
+        .column
+        .clamp(segment.start_column, segment.end_column);
+    let end_column = selection
+        .end
+        .column
+        .clamp(segment.start_column, segment.end_column);
 
     Some(SelectionRenderPlan {
         line: selection.line,
-        start_column: selection.start.column,
-        end_column: selection.end.column,
+        start_column,
+        end_column,
         start_visual_column,
         end_visual_column,
-        start_virtual_column: selection.start_virtual_column,
-        end_virtual_column: selection.end_virtual_column,
+        start_virtual_column: selection.start_virtual_column.filter(|_| segment.is_last),
+        end_virtual_column: selection
+            .end_virtual_column
+            .filter(|_| segment.is_last)
+            .or_else(|| {
+                (end_visual_column > segment.end_visual_column).then_some(end_visual_column)
+            }),
         y: row_y(visible_row, layout),
-        x: x_for_visual_column(start_visual_column, layout, decorations),
+        x: x_for_visual_column(
+            start_visual_column - segment.start_visual_column,
+            layout,
+            decorations,
+        ),
         width: end_visual_column.saturating_sub(start_visual_column) as f32
             * layout.metrics.character_width,
     })
@@ -578,7 +727,9 @@ fn caret_plan_from_projected(
     viewport: &ViewportModel,
     decorations: &DecorationModel,
     selection: ProjectedSelectionLine,
+    line_text: &str,
     layout: EditorLayout,
+    caret_row: Option<usize>,
 ) -> Option<CaretRenderPlan> {
     if selection.start != selection.end
         || selection.start_visual_column != selection.end_visual_column
@@ -594,7 +745,9 @@ fn caret_plan_from_projected(
         selection
             .end_virtual_column
             .or(Some(selection.end_visual_column)),
+        line_text,
         layout,
+        caret_row,
     )
 }
 
@@ -604,14 +757,32 @@ fn caret_plan_for_position(
     decorations: &DecorationModel,
     position: EditorPosition,
     virtual_column: Option<usize>,
+    line_text: &str,
     layout: EditorLayout,
+    caret_row: Option<usize>,
 ) -> Option<CaretRenderPlan> {
-    let visible_row = visible_row_in_layout(viewport, position.line, layout)?;
-    let line_text = buffer.line(position.line).unwrap_or_default();
+    let visible_row = caret_row
+        .filter(|row| {
+            viewport.visible_row_to_document_line(*row) == Some(position.line)
+                && viewport.row_segment(*row, buffer).is_some_and(|segment| {
+                    (segment.start_column..=segment.end_column).contains(&position.column)
+                })
+        })
+        .or_else(|| viewport.position_to_visible_row(position))?;
+    if visible_row < layout.scroll.first_visible_row
+        || visible_row
+            > layout
+                .scroll
+                .first_visible_row
+                .saturating_add(layout.visible_row_capacity())
+    {
+        return None;
+    }
+    let segment = viewport.row_segment(visible_row, buffer)?;
     let visual_column = virtual_column.filter(|column| {
         *column
             > visual_column_for(
-                &line_text,
+                line_text,
                 position.column,
                 decorations.settings.indent_width,
             )
@@ -620,9 +791,19 @@ fn caret_plan_for_position(
     Some(CaretRenderPlan {
         position,
         visual_column,
-        x: visual_column
-            .map(|column| x_for_visual_column(column, layout, decorations))
-            .unwrap_or_else(|| caret_x(&line_text, position.column, layout, decorations)),
+        x: x_for_visual_column(
+            visual_column
+                .unwrap_or_else(|| {
+                    visual_column_for(
+                        line_text,
+                        position.column,
+                        decorations.settings.indent_width,
+                    )
+                })
+                .saturating_sub(segment.start_visual_column),
+            layout,
+            decorations,
+        ),
         y: row_y(visible_row, layout),
         height: layout.metrics.line_height,
     })
@@ -847,6 +1028,7 @@ impl<'a> RenderDecorationLookups<'a> {
 fn whitespace_plan(
     line: usize,
     text: &str,
+    start_visual_column: usize,
     decorations: &DecorationModel,
     layout: EditorLayout,
 ) -> Vec<WhitespaceRenderPlan> {
@@ -854,7 +1036,7 @@ fn whitespace_plan(
         return Vec::new();
     }
 
-    let mut visual_column = 0usize;
+    let mut visual_column = start_visual_column;
 
     text.char_indices()
         .filter_map(|(column, ch)| {
@@ -870,7 +1052,7 @@ fn whitespace_plan(
                     return None;
                 }
             };
-            let x = x_for_visual_column(visual_column, layout, decorations);
+            let x = x_for_visual_column(visual_column - start_visual_column, layout, decorations);
 
             visual_column +=
                 visual_width_with_tab_width(ch, visual_column, decorations.settings.indent_width);
@@ -888,6 +1070,7 @@ fn whitespace_plan(
 fn eol_plan(
     line: usize,
     text: &str,
+    start_visual_column: usize,
     decorations: &DecorationModel,
     layout: EditorLayout,
 ) -> Option<EolRenderPlan> {
@@ -896,7 +1079,16 @@ fn eol_plan(
         .show_end_of_line_markers
         .then_some(EolRenderPlan {
             line,
-            x: caret_x(text, text.len(), layout, decorations),
+            x: x_for_visual_column(
+                visual_column_for_with_offset(
+                    text,
+                    text.len(),
+                    decorations.settings.indent_width,
+                    start_visual_column,
+                ) - start_visual_column,
+                layout,
+                decorations,
+            ),
         })
 }
 
@@ -921,16 +1113,4 @@ fn indent_guide_plan<'a>(
             ),
         })
         .collect()
-}
-
-fn visible_row_in_layout(
-    viewport: &ViewportModel,
-    line: usize,
-    layout: EditorLayout,
-) -> Option<usize> {
-    let visible_row = viewport.document_line_to_visible_row(line)?;
-    let first = layout.scroll.first_visible_row;
-    let last = first.saturating_add(layout.visible_row_capacity());
-
-    (first..=last).contains(&visible_row).then_some(visible_row)
 }

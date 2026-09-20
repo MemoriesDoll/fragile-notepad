@@ -55,7 +55,10 @@ impl App {
         self.active_menu = None;
 
         if let Some(action) = EditorAction::from_shortcut(shortcut) {
-            return self.update_editor(self.workspace.active_document_id, action);
+            return Task::batch([
+                self.update_editor(self.workspace.active_document_id, action),
+                iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
+            ]);
         }
 
         match shortcut {

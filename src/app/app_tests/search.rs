@@ -1,6 +1,29 @@
 use super::test_support::*;
 use crate::core::DocumentId;
 
+#[test]
+fn wrapped_find_reveals_the_screen_row_containing_a_deep_match() {
+    let (mut app, _) = App::new();
+    let text = format!("{}needle{}", "x".repeat(600), "z".repeat(100));
+    set_active_document_text(
+        &mut app,
+        &text,
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+    );
+    let document = app.workspace.active_document_mut().unwrap();
+    document.update_viewport_geometry(6, 82.0, 8.0);
+    document.set_word_wrap(true);
+    let _ = app.update(Message::AdvancedSearchQueryChanged("needle".into()));
+    let _ = app.update(Message::AdvancedFindNextRun);
+    let document = app.workspace.active_document().unwrap();
+    let start = document.main_selection().range().start;
+    assert_eq!(start, EditorPosition::new(0, 600));
+    let row = document.viewport.position_to_visible_row(start).unwrap();
+    assert!(row >= 60);
+    assert!(document.scroll.first_visible_row <= row);
+    assert!(row < document.scroll.first_visible_row + document.viewport_visible_rows);
+}
+
 fn deferred_search_document(
     app: &mut App,
     path: &str,

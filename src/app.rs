@@ -746,7 +746,10 @@ impl App {
         self.active_menu = None;
         self.active_menu_path.clear();
 
-        self.update_editor(self.workspace.active_document_id, action)
+        Task::batch([
+            self.update_editor(self.workspace.active_document_id, action),
+            iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
+        ])
     }
 
     fn toggle_function_list(&mut self) -> Task<Message> {
@@ -794,9 +797,9 @@ impl App {
         };
 
         let position = document.buffer.clamp_position(position);
-        document.selection = EditorSelection::new(position, position);
+        document.set_main_selection(EditorSelection::new(position, position));
         document.preferred_vertical_column = None;
-        document.reveal_line(position.line);
+        document.reveal_position(position);
 
         Task::none()
     }

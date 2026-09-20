@@ -16,7 +16,7 @@ pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element
         character_width: BASE_TEXT_SIZE * settings.zoom * 0.55,
         ..EditorMetrics::default()
     };
-    AdvancedEditor::new(
+    let editor = AdvancedEditor::new(
         &document.buffer,
         &document.viewport,
         &document.decorations,
@@ -33,9 +33,13 @@ pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element
     .height(Fill)
     .metrics(metrics)
     .scroll(document.scroll)
+    .caret_row(document.caret_visible_row())
+    .caret_rows(document.caret_row_affinities())
     .scroll_speed(settings.scroll_speed)
     .shortcuts(&settings.shortcuts)
-    .into()
+    .into();
+
+    super::editor_context_menu::wrap(editor, document, settings, metrics)
 }
 
 pub fn empty<'a>() -> Element<'a, Message> {

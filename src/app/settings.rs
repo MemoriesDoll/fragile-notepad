@@ -221,7 +221,11 @@ impl App {
             Message::ToggleWordWrap => {
                 self.active_menu = None;
                 self.settings.set_word_wrap(!self.settings.word_wrap);
-                self.persist_settings()
+                self.apply_decorations();
+                Task::batch([
+                    self.persist_settings(),
+                    iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
+                ])
             }
             Message::ToggleLineNumbers => {
                 self.active_menu = None;
@@ -341,6 +345,7 @@ impl App {
 
         for document in &mut self.workspace.documents {
             document.set_decoration_settings(decorations);
+            document.set_word_wrap(self.settings.word_wrap);
         }
     }
 }

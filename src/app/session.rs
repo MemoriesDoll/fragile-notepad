@@ -123,6 +123,7 @@ impl App {
                     document.is_pinned = entry.is_pinned;
                     document.is_dirty = entry.is_dirty;
                     document.set_decoration_settings(self.settings.decoration_settings());
+                    document.set_word_wrap(self.settings.word_wrap);
                     self.workspace.documents.push(document);
                     self.session.pending.insert(id, entry);
                     ids.push(id);
@@ -194,10 +195,14 @@ impl App {
             EditorPosition::new(entry.anchor_line, entry.anchor_column),
             EditorPosition::new(entry.cursor_line, entry.cursor_column),
         ));
-        document.scroll.first_visible_row = entry
-            .first_visible_row
-            .min(document.buffer.line_count().saturating_sub(1));
-        document.scroll.horizontal_px = entry.horizontal_offset;
+        document.restore_session_scroll(
+            entry
+                .first_visible_position
+                .map(|(line, column)| EditorPosition::new(line, column)),
+            entry.first_visible_row,
+            entry.horizontal_offset,
+            !entry.collapsed_folds.is_empty() && document.can_run_full_document_analysis(),
+        );
         self.session.folds.insert(id, entry.collapsed_folds);
     }
 
@@ -240,6 +245,9 @@ impl App {
                     cursor_line: selection.cursor.line,
                     cursor_column: selection.cursor.column,
                     first_visible_row: document.scroll.first_visible_row,
+                    first_visible_position: document
+                        .session_top_position()
+                        .map(|position| (position.line, position.column)),
                     horizontal_offset: document.scroll.horizontal_px,
                     syntax_token: Some(document.syntax_token.clone()),
                     syntax_automatic: Some(document.syntax_is_automatic()),
@@ -517,6 +525,206 @@ mod tests {
         let _ = app.update(Message::SessionLoaded(Ok(Some(saved))));
         let _ = app.update(Message::StartupReady);
         app
+    }
+
+    #[test]
+    fn wrapped_session_restores_logical_top_after_provisional_geometry_and_analysis() {
+        let mut original = ready(Session::default());
+        let original_id = original.workspace.active_document_id;
+        let document = original.workspace.document_mut(original_id).unwrap();
+        document.buffer = EditorBuffer::from_text("x".repeat(12_000));
+        document.refresh_after_text_change();
+        let _ = original.update(Message::EditorAction(
+            original_id,
+            EditorAction::ViewportChanged {
+                visible_rows: 6,
+                text_width: 962,
+                character_width_milli: 8000,
+            },
+        ));
+        let _ = original.update(Message::EditorAction(
+            original_id,
+            EditorAction::ScrollToRow(20),
+        ));
+        let saved = original.snapshot_session();
+        assert_eq!(saved.documents[0].first_visible_position, Some((0, 2400)));
+
+        let mut restored = ready(saved);
+        let id = restored.workspace.active_document_id;
+        assert_eq!(
+            restored.snapshot_session().documents[0].first_visible_position,
+            Some((0, 2400)),
+            "an early snapshot must retain the exact recovery anchor"
+        );
+        let document = restored.workspace.document_mut(id).unwrap();
+        let (buffer, request) = document.analysis_request().unwrap();
+        let _ = restored.update(Message::DocumentAnalyzed(
+            crate::core::document::analyze_document(buffer, request),
+        ));
+        let _ = restored.update(Message::EditorAction(
+            id,
+            EditorAction::ViewportChanged {
+                visible_rows: 6,
+                text_width: 242,
+                character_width_milli: 8000,
+            },
+        ));
+
+        let document = restored.workspace.document(id).unwrap();
+        assert_eq!(document.viewport.wrap_columns(), Some(30));
+        assert_eq!(document.scroll.first_visible_row, 80);
+        assert_eq!(
+            document.session_top_position(),
+            Some(EditorPosition::new(0, 2400))
+        );
+
+        let _ = restored.update(Message::EditorAction(id, EditorAction::ScrollToRow(90)));
+        let _ = restored.update(Message::EditorAction(
+            id,
+            EditorAction::ViewportChanged {
+                visible_rows: 6,
+                text_width: 482,
+                character_width_milli: 8000,
+            },
+        ));
+        assert_eq!(
+            restored
+                .workspace
+                .document(id)
+                .unwrap()
+                .scroll
+                .first_visible_row,
+            45,
+            "later resizing must preserve user scrolling, not reapply recovery"
+        );
+    }
+
+    #[test]
+    fn legacy_wrapped_sessions_clamp_against_screen_rows_and_clear_horizontal_scroll() {
+        for saved_row in [50, usize::MAX] {
+            let restored = ready(Session {
+                documents: vec![SessionDocument {
+                    text: Some("x".repeat(16_000)),
+                    first_visible_row: saved_row,
+                    horizontal_offset: 240.0,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            });
+            let document = restored.workspace.active_document().unwrap();
+
+            assert!(document.word_wrap());
+            assert_eq!(document.buffer.line_count(), 1);
+            assert_eq!(
+                document.scroll.first_visible_row,
+                saved_row.min(document.viewport.visible_row_count() - 1)
+            );
+            assert_eq!(document.scroll.horizontal_px, 0.0);
+        }
+    }
+
+    #[test]
+    fn streamed_session_restores_immediately_when_geometry_was_already_measured() {
+        let mut restored = ready(Session {
+            documents: vec![SessionDocument {
+                path: Some(std::path::absolute("wrapped-session.txt").unwrap()),
+                first_visible_row: 20,
+                first_visible_position: Some((0, 2400)),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let id = restored.workspace.active_document_id;
+        let _ = restored.update(Message::EditorAction(
+            id,
+            EditorAction::ViewportChanged {
+                visible_rows: 6,
+                text_width: 802,
+                character_width_milli: 8000,
+            },
+        ));
+        let document = restored.workspace.document_mut(id).unwrap();
+        let generation = document.load_generation().unwrap();
+        assert!(document.replace_loading_preview(
+            generation,
+            &"x".repeat(6000),
+            true,
+            6000,
+            Some(6000),
+        ));
+        assert!(document.complete_streaming_load(generation, TextEncoding::Utf8));
+        restored.apply_session_metadata(id);
+        assert_eq!(
+            restored
+                .workspace
+                .document(id)
+                .unwrap()
+                .scroll
+                .first_visible_row,
+            24
+        );
+
+        let _ = restored.update(Message::EditorAction(id, EditorAction::ScrollToRow(30)));
+        let _ = restored.update(Message::EditorAction(
+            id,
+            EditorAction::ViewportChanged {
+                visible_rows: 6,
+                text_width: 402,
+                character_width_milli: 8000,
+            },
+        ));
+        assert_eq!(
+            restored
+                .workspace
+                .document(id)
+                .unwrap()
+                .scroll
+                .first_visible_row,
+            60
+        );
+    }
+
+    #[test]
+    fn wrapped_session_keeps_exact_header_position_until_saved_folds_are_restored() {
+        let mut restored = ready(Session {
+            documents: vec![SessionDocument {
+                text: Some(format!("{} {{\n  body\n}}\ntail", "x".repeat(96))),
+                first_visible_position: Some((0, 36)),
+                collapsed_folds: vec![(0, 2)],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let id = restored.workspace.active_document_id;
+        let _ = restored.update(Message::EditorAction(
+            id,
+            EditorAction::ViewportChanged {
+                visible_rows: 4,
+                text_width: 82,
+                character_width_milli: 8000,
+            },
+        ));
+        assert_eq!(
+            restored.snapshot_session().documents[0].first_visible_position,
+            Some((0, 36))
+        );
+        let document = restored.workspace.document_mut(id).unwrap();
+        let (buffer, request) = document.analysis_request().unwrap();
+        let _ = restored.update(Message::DocumentAnalyzed(
+            crate::core::document::analyze_document(buffer, request),
+        ));
+
+        let document = restored.workspace.document(id).unwrap();
+        assert!(
+            document
+                .folds
+                .is_collapsed(crate::editor::FoldRange::new(0, 2))
+        );
+        assert_eq!(document.scroll.first_visible_row, 6);
+        assert_eq!(
+            document.session_top_position(),
+            Some(EditorPosition::new(0, 36))
+        );
     }
 
     #[test]

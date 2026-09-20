@@ -81,6 +81,7 @@ impl App {
                 let document_id = self.workspace.create_untitled();
                 if let Some(document) = self.workspace.document_mut(document_id) {
                     document.set_decoration_settings(self.settings.decoration_settings());
+                    document.set_word_wrap(self.settings.word_wrap);
                 }
                 self.refresh_find_matches();
                 self.schedule_outline_parse(document_id)
@@ -214,6 +215,7 @@ impl App {
                     };
                 if let Some(document) = self.workspace.document_mut(document_id) {
                     document.set_decoration_settings(self.settings.decoration_settings());
+                    document.set_word_wrap(self.settings.word_wrap);
                 }
                 self.refresh_find_matches();
                 self.prewarm_active_syntax_cache();
@@ -280,6 +282,7 @@ impl App {
         if let Some(document) = self.workspace.document_mut(document_id) {
             document.defer_analysis = true;
             document.set_decoration_settings(self.settings.decoration_settings());
+            document.set_word_wrap(self.settings.word_wrap);
         }
         self.refresh_find_matches();
         self.prewarm_active_syntax_cache();

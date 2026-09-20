@@ -51,8 +51,16 @@ pub enum EditorAction {
     Paste,
     Focus,
     PlaceCaret(EditorPosition),
+    PlaceCaretOnRow {
+        position: EditorPosition,
+        row: usize,
+    },
     SelectWordAt(EditorPosition),
     SelectRegion(EditorSelection),
+    SelectRegionOnRow {
+        selection: EditorSelection,
+        row: usize,
+    },
     AddCaretAbove,
     AddCaretBelow,
     SplitSelectionIntoLines,

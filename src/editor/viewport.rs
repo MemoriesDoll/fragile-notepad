@@ -1,4 +1,8 @@
-use super::fold::FoldModel;
+use super::buffer::EditorBuffer;
+use super::fold::{FoldModel, FoldRange};
+use super::layout::{visual_column_for, visual_width_with_tab_width};
+use super::position::EditorPosition;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VisibleRow {
@@ -6,17 +10,49 @@ pub struct VisibleRow {
     pub document_line: usize,
 }
 
+/// The portion of a logical line displayed on one screen row.
+///
+/// Byte columns address the original line, excluding its line ending. Visual
+/// columns also retain their original line offsets so that tabs keep the same
+/// stops when a line wraps. Neither wrapping nor reflow changes buffer text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RowSegment {
+    pub start_column: usize,
+    pub end_column: usize,
+    pub start_visual_column: usize,
+    pub end_visual_column: usize,
+    pub is_last: bool,
+}
+
+impl RowSegment {
+    pub const fn is_continuation(self) -> bool {
+        self.start_column > 0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewportModel {
     line_count: usize,
     visible_lines: Vec<usize>,
     document_to_visible: Vec<Option<usize>>,
+    wrap_columns: Option<usize>,
+    tab_width: usize,
+    wrapped_segments: Option<Vec<RowSegment>>,
+    collapsed_ranges: Vec<FoldRange>,
+    fold_indicator_columns: usize,
 }
 
 impl ViewportModel {
     pub fn new(line_count: usize, folds: &FoldModel) -> Self {
+        Self::new_with_tab_width(line_count, folds, 4)
+    }
+
+    pub fn new_with_tab_width(line_count: usize, folds: &FoldModel, tab_width: usize) -> Self {
         let mut visible_lines = Vec::new();
         let mut document_to_visible = vec![None; line_count];
+        let mut collapsed = folds.collapsed_ranges().copied().collect::<Vec<_>>();
+        collapsed.sort_by_key(|range| (range.start_line, range.end_line));
+        let mut collapsed_index = 0;
         let mut line = 0;
 
         while line < line_count {
@@ -24,23 +60,75 @@ impl ViewportModel {
             visible_lines.push(line);
             document_to_visible[line] = Some(row);
 
-            if let Some(range) = folds
-                .collapsed_ranges()
-                .copied()
-                .filter(|range| range.start_line == line)
-                .max_by_key(|range| range.end_line)
+            let mut next_line = line + 1;
+            while let Some(range) = collapsed.get(collapsed_index)
+                && range.start_line <= line
             {
-                line = range.end_line.saturating_add(1);
-            } else {
-                line += 1;
+                if range.start_line == line {
+                    next_line = next_line.max(range.end_line.saturating_add(1));
+                }
+                collapsed_index += 1;
             }
+            line = next_line;
         }
 
         Self {
             line_count,
             visible_lines,
             document_to_visible,
+            wrap_columns: None,
+            tab_width: tab_width.max(1),
+            wrapped_segments: None,
+            collapsed_ranges: collapsed,
+            fold_indicator_columns: 4,
         }
+    }
+
+    /// Builds a soft-wrapped viewport without changing logical line numbers.
+    ///
+    /// Breaks prefer Unicode word boundaries. Long tokens are split only
+    /// between complete graphemes, even when one grapheme or tab is wider than
+    /// the viewport. All whitespace remains part of exactly one segment.
+    pub fn new_wrapped(
+        buffer: &EditorBuffer,
+        folds: &FoldModel,
+        columns: usize,
+        tab_width: usize,
+    ) -> Self {
+        Self::new_wrapped_with_fold_indicator_columns(buffer, folds, columns, tab_width, 4)
+    }
+
+    /// Uses the rendered badge's measured column reservation, including its
+    /// minimum pixel width when the editor is zoomed out.
+    pub fn new_wrapped_with_fold_indicator_columns(
+        buffer: &EditorBuffer,
+        folds: &FoldModel,
+        columns: usize,
+        tab_width: usize,
+        fold_indicator_columns: usize,
+    ) -> Self {
+        let mut viewport = Self::new_with_tab_width(buffer.line_count(), folds, tab_width);
+        let visible_lines = std::mem::take(&mut viewport.visible_lines);
+        viewport.wrap_columns = Some(columns.max(1));
+        viewport.fold_indicator_columns = fold_indicator_columns;
+        viewport.wrapped_segments = Some(Vec::with_capacity(visible_lines.len()));
+
+        for line in visible_lines {
+            if let Some(text) = buffer.line(line) {
+                let line_columns = viewport.wrapped_line_columns(line, columns);
+                viewport.append_wrapped_line(line, &text, line_columns);
+            }
+        }
+
+        viewport
+    }
+
+    pub fn wrap_columns(&self) -> Option<usize> {
+        self.wrap_columns
+    }
+
+    pub fn fold_indicator_columns(&self) -> usize {
+        self.fold_indicator_columns
     }
 
     pub fn line_count(&self) -> usize {
@@ -62,6 +150,39 @@ impl ViewportModel {
         self.visible_lines.get(visible_row).copied()
     }
 
+    /// Returns cached boundaries for wrapped rows without copying line text.
+    pub fn row_segment(&self, visible_row: usize, buffer: &EditorBuffer) -> Option<RowSegment> {
+        if let Some(segments) = &self.wrapped_segments {
+            return segments.get(visible_row).copied();
+        }
+
+        let line = self.visible_row_to_document_line(visible_row)?;
+        let text = buffer.line(line)?;
+        Some(RowSegment {
+            start_column: 0,
+            end_column: text.len(),
+            start_visual_column: 0,
+            end_visual_column: visual_column_for(&text, text.len(), self.tab_width),
+            is_last: true,
+        })
+    }
+
+    /// Maps a caret to its screen row. At a wrap boundary, the caret belongs
+    /// to the following row; the logical line end belongs to its final row.
+    pub fn position_to_visible_row(&self, position: EditorPosition) -> Option<usize> {
+        let first_row = self.document_line_to_visible_row(position.line)?;
+        let Some(segments) = &self.wrapped_segments else {
+            return Some(first_row);
+        };
+        let row_count =
+            self.visible_lines[first_row..].partition_point(|line| *line == position.line);
+        let offset = segments[first_row..first_row + row_count]
+            .partition_point(|segment| segment.start_column <= position.column)
+            .saturating_sub(1);
+
+        Some(first_row + offset)
+    }
+
     pub fn visible_rows(&self) -> impl Iterator<Item = VisibleRow> + '_ {
         self.visible_lines
             .iter()
@@ -72,19 +193,113 @@ impl ViewportModel {
             })
     }
 
+    /// Reflows an inclusive range of edited logical lines without measuring
+    /// unchanged text. The caller must include every line whose text changed.
+    ///
+    /// Returns `false`, leaving this viewport unchanged, if it is unwrapped,
+    /// the logical line count changed, or collapsed fold ranges changed. In
+    /// those cases the caller must rebuild the viewport. Otherwise only the
+    /// edited visible lines are measured; cached suffix rows and their indices
+    /// are shifted when the replacement has a different number of rows.
+    pub fn reflow_wrapped_lines(
+        &mut self,
+        buffer: &EditorBuffer,
+        folds: &FoldModel,
+        first_line: usize,
+        last_line: usize,
+    ) -> bool {
+        let Some(columns) = self.wrap_columns else {
+            return false;
+        };
+        if self.line_count != buffer.line_count() {
+            return false;
+        }
+        let mut collapsed = folds.collapsed_ranges().copied().collect::<Vec<_>>();
+        collapsed.sort_by_key(|range| (range.start_line, range.end_line));
+        if collapsed != self.collapsed_ranges {
+            return false;
+        }
+        if first_line > last_line || first_line >= self.line_count {
+            return true;
+        }
+
+        let last_line = last_line.min(self.line_count - 1);
+        let first_row = self
+            .visible_lines
+            .partition_point(|line| *line < first_line);
+        let end_row = self
+            .visible_lines
+            .partition_point(|line| *line <= last_line);
+        if first_row == end_row {
+            return true;
+        }
+
+        let mut replacement_lines = Vec::new();
+        let mut replacement_segments = Vec::new();
+        let mut replacement_starts = Vec::new();
+        for line in first_line..=last_line {
+            if self.document_line_to_visible_row(line).is_none() {
+                continue;
+            }
+            let Some(text) = buffer.line(line) else {
+                return false;
+            };
+            replacement_starts.push((line, replacement_segments.len()));
+            append_wrapped_segments(
+                &mut replacement_segments,
+                &text,
+                self.wrapped_line_columns(line, columns),
+                self.tab_width,
+            );
+            replacement_lines.resize(replacement_segments.len(), line);
+        }
+
+        let removed_rows = end_row - first_row;
+        let inserted_rows = replacement_segments.len();
+        self.wrapped_segments
+            .as_mut()
+            .expect("wrapped viewport segments")
+            .splice(first_row..end_row, replacement_segments);
+        self.visible_lines
+            .splice(first_row..end_row, replacement_lines);
+        for (line, offset) in replacement_starts {
+            self.document_to_visible[line] = Some(first_row + offset);
+        }
+        if inserted_rows != removed_rows {
+            for row in self.document_to_visible[last_line + 1..]
+                .iter_mut()
+                .flatten()
+            {
+                *row = *row - removed_rows + inserted_rows;
+            }
+        }
+
+        true
+    }
+
     /// Synchronizes an unfolded viewport after text has only been appended.
     ///
     /// Loading documents do not expose folds until their text index is
     /// complete. Extending the identity mapping avoids rebuilding every
     /// previously loaded line for each streamed chunk.
+    ///
+    /// This method explicitly removes wrapping, because a line count alone
+    /// cannot reflow changed text. Wrapped append-only loads should use
+    /// [`Self::sync_unfolded_wrapped_buffer`] instead.
     pub fn sync_unfolded_line_count(&mut self, line_count: usize) {
-        if line_count < self.line_count
+        if self.wrap_columns.is_some()
+            || !self.collapsed_ranges.is_empty()
+            || line_count < self.line_count
             || self.visible_lines.len() != self.line_count
             || self.document_to_visible.len() != self.line_count
         {
             self.visible_lines = (0..line_count).collect();
             self.document_to_visible = (0..line_count).map(Some).collect();
             self.line_count = line_count;
+            self.wrap_columns = None;
+            self.wrapped_segments = None;
+            self.collapsed_ranges.clear();
+            self.fold_indicator_columns = 4;
             return;
         }
 
@@ -94,4 +309,141 @@ impl ViewportModel {
         }
         self.line_count = line_count;
     }
+
+    /// Updates an unfolded viewport after text has only been appended.
+    ///
+    /// Only the previously final logical line and newly appended lines are
+    /// measured. Completed logical lines are not measured again for each
+    /// streamed chunk.
+    pub fn sync_unfolded_wrapped_buffer(&mut self, buffer: &EditorBuffer) {
+        let Some(columns) = self.wrap_columns else {
+            self.sync_unfolded_line_count(buffer.line_count());
+            return;
+        };
+
+        if buffer.line_count() < self.line_count || !self.collapsed_ranges.is_empty() {
+            *self = Self::new_wrapped_with_fold_indicator_columns(
+                buffer,
+                &FoldModel::default(),
+                columns,
+                self.tab_width,
+                self.fold_indicator_columns,
+            );
+            return;
+        }
+
+        let first_line = self.line_count.saturating_sub(1);
+        let first_row = self.document_line_to_visible_row(first_line).unwrap_or(0);
+        self.visible_lines.truncate(first_row);
+        if let Some(segments) = &mut self.wrapped_segments {
+            segments.truncate(first_row);
+        }
+        self.line_count = buffer.line_count();
+        self.document_to_visible.resize(self.line_count, None);
+
+        for line in first_line..self.line_count {
+            if let Some(text) = buffer.line(line) {
+                self.append_wrapped_line(line, &text, columns);
+            }
+        }
+    }
+
+    fn append_wrapped_line(&mut self, line: usize, text: &str, columns: usize) {
+        let Some(segments) = &mut self.wrapped_segments else {
+            return;
+        };
+
+        self.document_to_visible[line] = Some(self.visible_lines.len());
+        append_wrapped_segments(segments, text, columns, self.tab_width);
+        self.visible_lines.resize(segments.len(), line);
+    }
+
+    fn wrapped_line_columns(&self, line: usize, columns: usize) -> usize {
+        // A collapsed header ends with an interactive ellipsis box. Reserve
+        // its width during reflow so it stays inside the text viewport.
+        if self
+            .collapsed_ranges
+            .binary_search_by_key(&line, |range| range.start_line)
+            .is_ok()
+        {
+            columns.saturating_sub(self.fold_indicator_columns).max(1)
+        } else {
+            columns.max(1)
+        }
+    }
+}
+
+fn append_wrapped_segments(
+    segments: &mut Vec<RowSegment>,
+    text: &str,
+    columns: usize,
+    tab_width: usize,
+) {
+    let mut word_boundaries = text
+        .split_word_bound_indices()
+        .map(|(offset, word)| offset + word.len())
+        .peekable();
+    let mut start_column = 0;
+    let mut start_visual_column = 0;
+    let mut visual_column: usize = 0;
+    let mut last_boundary = None;
+
+    // Each grapheme and each Unicode word boundary is visited once. A wrap
+    // can reuse its latest boundary without rescanning the remainder of a
+    // long word, which is especially important for minified source files.
+    for (column, grapheme) in text.grapheme_indices(true) {
+        let mut end_visual_column = visual_column;
+        for ch in grapheme.chars() {
+            end_visual_column = end_visual_column.saturating_add(visual_width_with_tab_width(
+                ch,
+                end_visual_column,
+                tab_width,
+            ));
+        }
+
+        while column > start_column
+            && end_visual_column.saturating_sub(start_visual_column) > columns
+        {
+            let (end_column, end_visual_column) =
+                last_boundary.take().unwrap_or((column, visual_column));
+            segments.push(RowSegment {
+                start_column,
+                end_column,
+                start_visual_column,
+                end_visual_column,
+                is_last: false,
+            });
+            start_column = end_column;
+            start_visual_column = end_visual_column;
+        }
+
+        visual_column = end_visual_column;
+        let end_column = column + grapheme.len();
+        while word_boundaries
+            .peek()
+            .is_some_and(|boundary| *boundary <= end_column)
+        {
+            if word_boundaries.next() == Some(end_column) {
+                last_boundary = Some((end_column, visual_column));
+            }
+        }
+        // Unicode word segmentation deliberately keeps punctuation such as
+        // the dot in a qualified identifier inside a word. For source text,
+        // these separators are also useful wrap opportunities.
+        if grapheme
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_punctuation() && ch != '_')
+        {
+            last_boundary = Some((end_column, visual_column));
+        }
+    }
+
+    segments.push(RowSegment {
+        start_column,
+        end_column: text.len(),
+        start_visual_column,
+        end_visual_column: visual_column,
+        is_last: true,
+    });
 }

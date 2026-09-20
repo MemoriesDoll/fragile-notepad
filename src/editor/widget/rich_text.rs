@@ -59,8 +59,11 @@ pub(super) fn draw_row_text<Renderer>(
         return;
     }
 
-    if let Some(expanded) = expand_tabs_for_rendering(&row.text, decorations.settings.indent_width)
-    {
+    if let Some(expanded) = expand_tabs_for_rendering_with_offset(
+        &row.text,
+        decorations.settings.indent_width,
+        row.start_visual_column,
+    ) {
         if row.syntax_spans.is_empty() || row.syntax_spans.len() > MAX_SYNTAX_SPANS_PER_ROW {
             draw_clipped_plain_text(
                 renderer,
@@ -248,7 +251,7 @@ fn draw_rich_row_text<Renderer>(
     let size = Pixels((metrics.line_height / 1.25).max(8.0));
     let scale_factor = renderer.scale_factor();
     let paragraph = rich_paragraphs.get_or_insert_with(
-        row.line,
+        row.visible_row,
         visible_text,
         &span_keys,
         visible_range.start,
@@ -460,14 +463,23 @@ struct ExpandedTabs {
     byte_offsets: Vec<usize>,
 }
 
+#[cfg(test)]
 fn expand_tabs_for_rendering(text: &str, tab_width: usize) -> Option<ExpandedTabs> {
+    expand_tabs_for_rendering_with_offset(text, tab_width, 0)
+}
+
+fn expand_tabs_for_rendering_with_offset(
+    text: &str,
+    tab_width: usize,
+    start_visual_column: usize,
+) -> Option<ExpandedTabs> {
     if !text.contains('\t') {
         return None;
     }
 
     let mut expanded = String::with_capacity(text.len());
     let mut byte_offsets = vec![0; text.len() + 1];
-    let mut visual_column = 0usize;
+    let mut visual_column = start_visual_column;
     let mut expanded_offset = 0usize;
 
     for (offset, ch) in text.char_indices() {
@@ -577,6 +589,13 @@ mod tests {
     }
 
     #[test]
+    fn wrapped_tab_expansion_retains_stops_from_the_logical_line() {
+        let expanded = expand_tabs_for_rendering_with_offset("x\ty ", 4, 5).unwrap();
+        assert_eq!(expanded.text, "x  y ");
+        assert_eq!(expanded.byte_offsets, [0, 1, 3, 4, 5]);
+    }
+
+    #[test]
     fn control_heavy_rows_use_bounded_ascii_display_fallback() {
         assert!(!contains_unsafe_render_controls("caf\u{00e9}\ttext"));
         assert!(contains_unsafe_render_controls("caf\u{00e9}\0text"));
@@ -617,6 +636,8 @@ mod tests {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
+            start_column: 0,
+            start_visual_column: 0,
             y: 0.0,
             text_x: 0.0,
             text: "x".repeat(1_000),
@@ -653,6 +674,8 @@ mod tests {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
+            start_column: 0,
+            start_visual_column: 0,
             y: 0.0,
             text_x: 0.0,
             text: "a".repeat(120),
@@ -702,6 +725,8 @@ mod tests {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
+            start_column: 0,
+            start_visual_column: 0,
             y: 0.0,
             text_x: 0.0,
             text: "a".repeat(1_000),
@@ -747,6 +772,8 @@ mod tests {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
+            start_column: 0,
+            start_visual_column: 0,
             y: 0.0,
             text_x: 0.0,
             text: "a".repeat(8_000),
@@ -768,6 +795,8 @@ mod tests {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
+            start_column: 0,
+            start_visual_column: 0,
             y: 0.0,
             text_x: 0.0,
             text: format!("{}\t{}", "a".repeat(40), "b".repeat(40)),
@@ -806,6 +835,8 @@ mod tests {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
+            start_column: 0,
+            start_visual_column: 0,
             y: 0.0,
             text_x: 0.0,
             text: format!("{}\u{6f20}\u{7958}{}", "a".repeat(40), "b".repeat(40)),
@@ -844,6 +875,8 @@ mod tests {
         let row = RowRenderPlan {
             visible_row: 0,
             line: 0,
+            start_column: 0,
+            start_visual_column: 0,
             y: 0.0,
             text_x: 0.0,
             text: "a".repeat(120),

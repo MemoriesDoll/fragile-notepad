@@ -100,6 +100,16 @@ impl EditorLayout {
 
         ((self.height - self.metrics.padding_top) / self.metrics.line_height).ceil() as usize
     }
+
+    /// Rows that fit completely, used by navigation and scroll limits so the
+    /// final row can always be brought fully into view.
+    pub fn complete_visible_row_capacity(self) -> usize {
+        if self.metrics.line_height <= 0.0 || self.height <= self.metrics.padding_top {
+            return 0;
+        }
+
+        ((self.height - self.metrics.padding_top) / self.metrics.line_height).floor() as usize
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -143,7 +153,14 @@ pub fn hit_test(
         };
     let hidden_indicator_end_x = text_origin_x;
 
-    if decorations.settings.show_folding_controls && x >= fold_start_x && x < fold_end_x {
+    let segment = viewport.row_segment(visible_row, buffer);
+    let is_first_row = segment.is_none_or(|segment| segment.start_column == 0);
+
+    if is_first_row
+        && decorations.settings.show_folding_controls
+        && x >= fold_start_x
+        && x < fold_end_x
+    {
         if let Some(decoration) = decorations
             .line_decorations
             .iter()
@@ -155,7 +172,8 @@ pub fn hit_test(
         }
     }
 
-    if x >= fold_end_x
+    if is_first_row
+        && x >= fold_end_x
         && x < hidden_indicator_end_x
         && decorations
             .hidden_line_spans
@@ -169,17 +187,23 @@ pub fn hit_test(
         return HitTarget::GutterLine { line };
     }
 
-    let visual_column = ((x - text_origin_x + layout.scroll.horizontal_px)
-        / metrics.character_width)
+    let horizontal_px = if viewport.wrap_columns().is_some() {
+        0.0
+    } else {
+        layout.scroll.horizontal_px
+    };
+    let start_visual_column = segment.map_or(0, |segment| segment.start_visual_column);
+    let visual_column = ((x - text_origin_x + horizontal_px) / metrics.character_width)
         .floor()
-        .max(0.0) as usize;
+        .max(0.0) as usize
+        + start_visual_column;
     let column = buffer
         .line(line)
         .map(|text| byte_column_for(&text, visual_column, decorations.settings.indent_width))
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .min(segment.map_or(usize::MAX, |segment| segment.end_column));
     let position = buffer.clamp_position(EditorPosition::new(line, column));
 
-    let _ = visible_row;
     HitTarget::Text(position)
 }
 
@@ -249,7 +273,17 @@ pub fn visual_column_for_byte_column(text: &str, byte_column: usize) -> usize {
 }
 
 pub fn visual_column_for(text: &str, byte_column: usize, tab_width: usize) -> usize {
-    let mut visual_column = 0;
+    visual_column_for_with_offset(text, byte_column, tab_width, 0)
+}
+
+/// Returns a logical visual column for a fragment beginning at an existing tab stop offset.
+pub fn visual_column_for_with_offset(
+    text: &str,
+    byte_column: usize,
+    tab_width: usize,
+    start_visual_column: usize,
+) -> usize {
+    let mut visual_column = start_visual_column;
 
     for (offset, ch) in text.char_indices() {
         if offset >= byte_column {
@@ -267,7 +301,17 @@ pub fn byte_column_for_visual_column(text: &str, target_visual_column: usize) ->
 }
 
 pub fn byte_column_for(text: &str, target_visual_column: usize, tab_width: usize) -> usize {
-    let mut visual_column = 0;
+    byte_column_for_with_offset(text, target_visual_column, tab_width, 0)
+}
+
+/// Returns a fragment byte column from an absolute logical visual column.
+pub fn byte_column_for_with_offset(
+    text: &str,
+    target_visual_column: usize,
+    tab_width: usize,
+    start_visual_column: usize,
+) -> usize {
+    let mut visual_column = start_visual_column;
 
     for (offset, ch) in text.char_indices() {
         let next_visual_column =

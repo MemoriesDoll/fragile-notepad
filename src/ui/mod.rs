@@ -6,6 +6,7 @@ pub mod controls;
 pub mod dirty_close_dialog;
 pub mod dropdown;
 pub mod editor;
+mod editor_context_menu;
 pub mod find_panel;
 pub mod function_list_panel;
 pub mod icons;
@@ -86,7 +87,7 @@ pub fn view<'a>(
 
     let mut workbench = column![
         toolbar::menu_bar(active_menu),
-        toolbar::tool_bar(),
+        toolbar::tool_bar(active_document),
         tabs::view(workspace, dragged_tab, hovered_drop_tab),
     ];
 
@@ -160,7 +161,8 @@ pub fn view<'a>(
                 active_menu,
                 active_menu_path,
                 window_menu_state,
-                settings
+                settings,
+                active_document
             ))
             .width(Fill)
             .height(Fill),

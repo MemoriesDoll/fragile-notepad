@@ -1,3 +1,4 @@
+use iced::Point;
 use iced::advanced::input_method;
 use iced::advanced::widget::{self};
 use iced::time::Instant;
@@ -18,6 +19,8 @@ pub struct AdvancedEditorState<Paragraph> {
     pub(super) caret_updated_at: Instant,
     pub(super) caret_now: Cell<Instant>,
     pub(super) drag_anchor: Option<EditorPosition>,
+    pub(super) drag_position: Option<Point>,
+    pub(super) drag_scroll_at: Option<Instant>,
     pub(super) last_text_click: Option<TextClick>,
     pub(super) scrollbar_grab_offset_y: Option<f32>,
     pub(super) partial_scroll_lines: f32,
@@ -39,6 +42,8 @@ impl<Paragraph> Default for AdvancedEditorState<Paragraph> {
             caret_updated_at: now,
             caret_now: Cell::new(now),
             drag_anchor: None,
+            drag_position: None,
+            drag_scroll_at: None,
             last_text_click: None,
             scrollbar_grab_offset_y: None,
             partial_scroll_lines: 0.0,
@@ -73,6 +78,13 @@ impl<Paragraph> AdvancedEditorState<Paragraph> {
         self.last_text_click = None;
     }
 
+    pub(super) fn cancel_pointer_drag(&mut self) {
+        self.drag_anchor = None;
+        self.drag_position = None;
+        self.drag_scroll_at = None;
+        self.scrollbar_grab_offset_y = None;
+    }
+
     pub(super) fn is_caret_visible(&self) -> bool {
         caret_visible_at(
             self.is_focused,
@@ -95,9 +107,8 @@ impl<Paragraph> widget::operation::Focusable for AdvancedEditorState<Paragraph> 
 
     fn unfocus(&mut self) {
         self.is_focused = false;
-        self.drag_anchor = None;
+        self.cancel_pointer_drag();
         self.last_text_click = None;
-        self.scrollbar_grab_offset_y = None;
         self.preedit = None;
     }
 }
@@ -168,5 +179,25 @@ mod tests {
             EditorPosition::new(0, 2),
             now + Duration::from_millis(DOUBLE_CLICK_INTERVAL_MS as u64 + 2)
         ));
+    }
+
+    #[test]
+    fn losing_editor_focus_cancels_selection_and_scrollbar_drags() {
+        use iced::advanced::widget::operation::Focusable;
+
+        let mut state: AdvancedEditorState<()> = AdvancedEditorState::default();
+        state.focus();
+        state.drag_anchor = Some(EditorPosition::new(3, 2));
+        state.drag_position = Some(Point::new(100.0, -20.0));
+        state.drag_scroll_at = Some(Instant::now());
+        state.scrollbar_grab_offset_y = Some(4.0);
+
+        state.unfocus();
+
+        assert!(!state.is_focused);
+        assert!(state.drag_anchor.is_none());
+        assert!(state.drag_position.is_none());
+        assert!(state.drag_scroll_at.is_none());
+        assert!(state.scrollbar_grab_offset_y.is_none());
     }
 }

@@ -116,6 +116,7 @@ fn replace_document_range(
     let range = document.buffer.clamp_range(range);
     let first_changed_line = range.start.line;
     let delta = document.buffer.replace_range(range, replacement);
+    let last_changed_line = delta.before_range.end.line.max(delta.after_range.end.line);
 
     if let Some(line_ending) = crate::core::document::detect_line_ending(replacement) {
         document.line_ending = Some(line_ending);
@@ -139,7 +140,7 @@ fn replace_document_range(
         before_selection_set,
         document.selection_set().clone(),
     );
-    document.refresh_text_from(first_changed_line);
+    document.refresh_text_lines(first_changed_line, last_changed_line);
     true
 }
 
@@ -169,6 +170,7 @@ pub(super) fn duplicate_line(document: &mut crate::core::Document) -> bool {
 
     let insert_range = EditorRange::new(insert_position, insert_position);
     let delta = document.buffer.replace_range(insert_range, &insertion);
+    let last_changed_line = delta.before_range.end.line.max(delta.after_range.end.line);
 
     if let Some(line_ending) = crate::core::document::detect_line_ending(&insertion) {
         document.line_ending = Some(line_ending);
@@ -204,18 +206,45 @@ pub(super) fn duplicate_line(document: &mut crate::core::Document) -> bool {
         before_selection,
         after_selection: document.main_selection(),
     });
-    document.refresh_text_from(insert_position.line);
+    document.refresh_text_lines(insert_position.line, last_changed_line);
     true
 }
 
 pub(super) fn delete_line(document: &mut crate::core::Document) -> bool {
-    let Some(range) = selected_touched_line_range(&document.buffer, document.main_selection())
-    else {
-        return false;
-    };
-    let after_selection = EditorSelection::new(range.start, range.start);
+    let before = document.selection_set().clone();
+    let mut replacements = before
+        .ranges()
+        .iter()
+        .enumerate()
+        .filter_map(|(source_index, selection)| {
+            Some(ConcreteReplacement {
+                range: selected_touched_line_range(&document.buffer, *selection)?,
+                replacement: String::new(),
+                source_index,
+                main_preferred: source_index == before.main_index(),
+            })
+        })
+        .collect::<Vec<_>>();
+    replacements.sort_by_key(|replacement| (replacement.range.start, replacement.range.end));
 
-    replace_document_range(document, range, "", after_selection)
+    // Adjacent and overlapping selections delete each touched line once and
+    // leave one caret at the start of each removed span.
+    let mut spans: Vec<ConcreteReplacement> = Vec::new();
+    for replacement in replacements {
+        if let Some(previous) = spans.last_mut()
+            && replacement.range.start <= previous.range.end
+        {
+            previous.range.end = previous.range.end.max(replacement.range.end);
+            if replacement.main_preferred {
+                previous.source_index = replacement.source_index;
+                previous.main_preferred = true;
+            }
+        } else {
+            spans.push(replacement);
+        }
+    }
+
+    apply_concrete_replacements(document, before, spans, false)
 }
 
 pub(super) fn uppercase_selection(document: &mut crate::core::Document, tab_width: usize) -> bool {
@@ -458,7 +487,7 @@ pub(super) fn indent(
         before,
         document.selection_set().clone(),
     );
-    document.refresh_text_from(first);
+    document.refresh_text_lines(first, last);
     true
 }
 
@@ -517,7 +546,7 @@ pub(super) fn unindent(document: &mut crate::core::Document, indentation_width: 
         before_selection_set,
         document.selection_set().clone(),
     );
-    document.refresh_text_from(first_line);
+    document.refresh_text_lines(first_line, last_line);
 
     true
 }
@@ -575,19 +604,18 @@ fn selected_lines_for_selection_set(
 
 fn selected_touched_line_range(
     buffer: &EditorBuffer,
-    selection: EditorSelection,
+    selection: impl Into<SelectionRange>,
 ) -> Option<EditorRange> {
     if buffer.line_count() == 0 {
         return None;
     }
 
-    let range = buffer.clamp_range(selection.range());
-    let (first_line, last_line) = if selection.is_caret() {
-        (range.start.line, range.start.line)
-    } else if range.end.column == 0 {
-        (range.start.line, range.end.line.saturating_sub(1))
-    } else {
+    let selection = selection.into();
+    let (first_line, last_line) = if selection.is_rectangular() {
+        let range = buffer.clamp_range(selection.range());
         (range.start.line, range.end.line)
+    } else {
+        selected_line_span(buffer, selection.selection())?
     };
     if first_line > last_line {
         return None;
@@ -1008,6 +1036,7 @@ fn apply_concrete_replacements_with_policy(
     }
 
     let delta = document.buffer.replace_range(span, &replacement_text);
+    let last_changed_line = delta.before_range.end.line.max(delta.after_range.end.line);
 
     if let Some(line_ending) = crate::core::document::detect_line_ending(&replacement_text) {
         document.line_ending = Some(line_ending);
@@ -1054,7 +1083,7 @@ fn apply_concrete_replacements_with_policy(
         );
     }
 
-    document.refresh_text_from(span.start.line);
+    document.refresh_text_lines(span.start.line, last_changed_line);
     true
 }
 

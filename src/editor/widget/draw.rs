@@ -13,7 +13,8 @@ use crate::ui::icons::hero::{self, HeroIcon};
 use super::cache::RichParagraphCache;
 use super::font::{EDITOR_FONT, EDITOR_TEXT_SHAPING};
 use super::line_cache::{
-    LineGeometryCache, RowGeometries, measured_selection_x_and_width, measured_virtual_caret_x,
+    LineGeometryCache, RowGeometries, measured_caret_x, measured_selection_x_and_width,
+    measured_virtual_caret_x,
 };
 use super::markers::draw_row_markers;
 use super::rich_text::{can_batch_fast_text, draw_row_text};
@@ -89,10 +90,23 @@ pub(super) fn draw_plan<Renderer>(
 
     renderer.with_layer(text_clip_bounds, |renderer| {
         for selection in &plan.selections {
-            let (x, width) = row_geometries
-                .get_optional(selection.line)
-                .map(|line_geometry| {
-                    measured_selection_x_and_width(selection, line_geometry, layout, decorations)
+            let (x, width) = plan
+                .rows
+                .iter()
+                .enumerate()
+                .find(|(_, row)| row.line == selection.line && row.y == selection.y)
+                .map(|(index, row)| {
+                    let local = crate::editor::render::SelectionRenderPlan {
+                        start_column: selection.start_column.saturating_sub(row.start_column),
+                        end_column: selection.end_column.saturating_sub(row.start_column),
+                        ..*selection
+                    };
+                    measured_selection_x_and_width(
+                        &local,
+                        row_geometries.get_by_row_index(index),
+                        layout,
+                        decorations,
+                    )
                 })
                 .unwrap_or((selection.x, selection.width));
 
@@ -125,18 +139,19 @@ pub(super) fn draw_plan<Renderer>(
         let row_y = bounds.y + row.y;
 
         if let Some(fold) = row.fold {
-            draw_fold_control(renderer, bounds, row_y, fold.collapsed, metrics, style);
-        }
-
-        if let Some(hidden_lines) = row.hidden_lines {
-            draw_hidden_line_hint(
+            draw_fold_control(
                 renderer,
                 bounds,
                 row_y,
-                hidden_lines.hidden_line_count,
+                fold.collapsed,
                 metrics,
+                decorations,
                 style,
             );
+        }
+
+        if row.hidden_lines.is_some() {
+            draw_hidden_line_hint(renderer, bounds, row_y, metrics, decorations, style);
         }
     }
 
@@ -216,6 +231,33 @@ pub(super) fn draw_plan<Renderer>(
         }
     });
 
+    renderer.with_layer(scroll_text_clip_bounds, |renderer| {
+        for (row_index, row) in plan.rows.iter().enumerate() {
+            if row.hidden_lines.is_none() {
+                continue;
+            }
+
+            let text_end_x = measured_caret_x(
+                row_geometries.get_by_row_index(row_index),
+                row.text.len(),
+                layout,
+                decorations,
+            );
+
+            if let Some(indicator) = row.collapsed_indicator_bounds(metrics, text_end_x) {
+                let indicator = Rectangle {
+                    x: bounds.x + indicator.x,
+                    y: bounds.y + indicator.y,
+                    ..indicator
+                };
+
+                if indicator.intersects(&scroll_text_clip_bounds) {
+                    draw_collapsed_fold_indicator(renderer, indicator, metrics, style);
+                }
+            }
+        }
+    });
+
     renderer.with_layer(text_clip_bounds, |renderer| {
         let fallback_caret = plan.caret.iter();
         let carets: Box<dyn Iterator<Item = _>> = if plan.carets.is_empty() {
@@ -225,10 +267,18 @@ pub(super) fn draw_plan<Renderer>(
         };
 
         for caret in carets {
-            let row_geometry = row_geometries.get(caret.position.line);
+            let Some((row_index, row)) = plan
+                .rows
+                .iter()
+                .enumerate()
+                .find(|(_, row)| row.line == caret.position.line && row.y == caret.y)
+            else {
+                continue;
+            };
+            let row_geometry = row_geometries.get_by_row_index(row_index);
             let x = measured_virtual_caret_x(
                 row_geometry,
-                caret.position.column,
+                caret.position.column.saturating_sub(row.start_column),
                 caret.visual_column,
                 layout,
                 decorations,
@@ -376,8 +426,8 @@ fn draw_batched_row_text<Renderer>(
 
     let mut content = String::new();
     let mut max_width = metrics.character_width;
-    for row in &plan.rows {
-        if !content.is_empty() {
+    for (index, row) in plan.rows.iter().enumerate() {
+        if index > 0 {
             content.push('\n');
         }
 
@@ -410,6 +460,7 @@ fn draw_fold_control<Renderer>(
     row_y: f32,
     collapsed: bool,
     metrics: EditorMetrics,
+    decorations: &DecorationModel,
     style: EditorStyle,
 ) where
     Renderer: iced::advanced::Renderer
@@ -417,7 +468,10 @@ fn draw_fold_control<Renderer>(
         + advanced_image::Renderer<Handle = advanced_image::Handle>,
 {
     let icon_size = (metrics.fold_lane_width - 5.0).max(7.0);
-    let x = bounds.x + metrics.padding_left + metrics.line_number_width + 2.5;
+    let x = bounds.x + metrics.text_origin_x(decorations)
+        - metrics.hidden_indicator_width
+        - metrics.fold_lane_width
+        + 2.5;
     let y = row_y + (metrics.line_height - icon_size) / 2.0;
 
     renderer.fill_quad(
@@ -456,6 +510,54 @@ fn draw_fold_control<Renderer>(
     );
 }
 
+fn draw_collapsed_fold_indicator<Renderer>(
+    renderer: &mut Renderer,
+    bounds: Rectangle,
+    metrics: EditorMetrics,
+    style: EditorStyle,
+) where
+    Renderer: iced::advanced::Renderer,
+{
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds,
+            border: iced::Border {
+                color: style.fold_controls.scale_alpha(0.65),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..renderer::Quad::default()
+        },
+        Background::Color(style.fold_control_background),
+    );
+
+    // Keep the three dots on the same inexpensive solid-quad path as visible
+    // spaces, independent of the active font's ellipsis glyph or text batching.
+    let dot_size = (metrics.character_width * 0.24).clamp(1.5, 3.0);
+    let dot_step = dot_size * 2.0;
+    let center_x = bounds.center_x();
+    let center_y = bounds.center_y();
+
+    for dot in -1..=1 {
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: Rectangle {
+                    x: center_x + dot as f32 * dot_step - dot_size / 2.0,
+                    y: center_y - dot_size / 2.0,
+                    width: dot_size,
+                    height: dot_size,
+                },
+                border: iced::Border {
+                    radius: (dot_size / 2.0).into(),
+                    ..iced::Border::default()
+                },
+                ..renderer::Quad::default()
+            },
+            Background::Color(style.fold_controls),
+        );
+    }
+}
+
 fn draw_icon<Renderer>(
     renderer: &mut Renderer,
     icon: HeroIcon,
@@ -477,14 +579,14 @@ fn draw_hidden_line_hint<Renderer>(
     renderer: &mut Renderer,
     bounds: Rectangle,
     row_y: f32,
-    hidden_line_count: usize,
     metrics: EditorMetrics,
+    decorations: &DecorationModel,
     style: EditorStyle,
 ) where
-    Renderer: iced::advanced::Renderer + text::Renderer<Font = Font>,
+    Renderer: iced::advanced::Renderer,
 {
     let indicator_x =
-        bounds.x + metrics.padding_left + metrics.line_number_width + metrics.fold_lane_width;
+        bounds.x + metrics.text_origin_x(decorations) - metrics.hidden_indicator_width;
     let indicator_y = row_y + (metrics.line_height - 8.0) / 2.0;
 
     renderer.fill_quad(
@@ -504,19 +606,6 @@ fn draw_hidden_line_hint<Renderer>(
         },
         Background::Color(style.hidden_line_indicators.scale_alpha(0.08)),
     );
-
-    if hidden_line_count > 0 {
-        draw_text(
-            renderer,
-            hidden_line_count.to_string(),
-            Point::new(indicator_x + 10.0, row_y + text_baseline_offset(metrics)),
-            Size::new(metrics.hidden_indicator_width + 24.0, metrics.line_height),
-            style.hidden_line_indicators,
-            text::Alignment::Left,
-            metrics,
-            Rectangle::INFINITE,
-        );
-    }
 }
 
 fn draw_text<Renderer>(

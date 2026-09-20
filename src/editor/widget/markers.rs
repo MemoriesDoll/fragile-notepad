@@ -2,7 +2,7 @@ use iced::advanced::{image as advanced_image, renderer, text};
 use iced::{Background, Font, Rectangle};
 
 use crate::editor::decoration::DecorationModel;
-use crate::editor::layout::{EditorLayout, scrolled_text_origin_x, visual_column_for};
+use crate::editor::layout::{EditorLayout, scrolled_text_origin_x, visual_column_for_with_offset};
 use crate::editor::render::{
     RowRenderPlan, WhitespaceKind, space_marker_bounds, space_marker_size, visible_marker_columns,
 };
@@ -77,11 +77,13 @@ where
     };
 
     for whitespace in &row.whitespace {
-        let visual_column = visual_column_for(
+        let visual_column = visual_column_for_with_offset(
             &row.text,
             whitespace.column,
             decorations.settings.indent_width,
-        );
+            row.start_visual_column,
+        )
+        .saturating_sub(row.start_visual_column);
 
         if visual_column < first_visible_column || visual_column > last_visible_column {
             continue;
@@ -96,8 +98,13 @@ where
     }
 
     if row.eol.is_some() {
-        let visual_column =
-            visual_column_for(&row.text, row.text.len(), decorations.settings.indent_width);
+        let visual_column = visual_column_for_with_offset(
+            &row.text,
+            row.text.len(),
+            decorations.settings.indent_width,
+            row.start_visual_column,
+        )
+        .saturating_sub(row.start_visual_column);
 
         if visual_column >= first_visible_column && visual_column <= last_visible_column {
             draw_marker_icon(

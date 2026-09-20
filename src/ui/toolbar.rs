@@ -5,7 +5,8 @@ use iced::widget::{
 };
 use iced::{Center, Element, Fill, Length};
 
-use crate::core::{EditorSettings, ShortcutCommand, TextEncoding};
+use crate::core::{Document, EditorSettings, ShortcutCommand, TextEncoding};
+use crate::editor::EditorAction;
 use crate::message::{Menu, Message};
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::tango::{self, TangoIcon};
@@ -89,6 +90,7 @@ pub fn menu_overlay<'a>(
     active_path: &'a [String],
     window_menu_state: WindowMenuState,
     settings: &'a EditorSettings,
+    document: Option<&'a Document>,
 ) -> Element<'a, Message> {
     let Some(menu) = active_menu else {
         return space::horizontal().into();
@@ -106,7 +108,8 @@ pub fn menu_overlay<'a>(
                             menu,
                             active_path,
                             window_menu_state,
-                            settings
+                            settings,
+                            document
                         )),
                         space::horizontal(),
                     ]
@@ -138,7 +141,7 @@ fn menu_prefix<'a>(active_menu: Menu) -> Element<'a, Message> {
         .into()
 }
 
-pub fn tool_bar<'a>() -> Element<'a, Message> {
+pub fn tool_bar<'a>(document: Option<&Document>) -> Element<'a, Message> {
     let buttons = row![
         icon_button(Icon::New, "New", Message::NewFile),
         icon_button(Icon::Open, "Open", Message::OpenFile),
@@ -148,12 +151,12 @@ pub fn tool_bar<'a>() -> Element<'a, Message> {
         icon_button(Icon::CloseAll, "Close All", Message::CloseAllFiles),
         disabled_icon_button(Icon::Print, "Print"),
         separator(),
-        icon_button(Icon::Cut, "Cut", Message::Cut),
-        icon_button(Icon::Copy, "Copy", Message::Copy),
-        icon_button(Icon::Paste, "Paste", Message::Paste),
+        editor_icon_button(Icon::Cut, "Cut", Message::Cut, document),
+        editor_icon_button(Icon::Copy, "Copy", Message::Copy, document),
+        editor_icon_button(Icon::Paste, "Paste", Message::Paste, document),
         separator(),
-        icon_button(Icon::Undo, "Undo", Message::Undo),
-        icon_button(Icon::Redo, "Redo", Message::Redo),
+        editor_icon_button(Icon::Undo, "Undo", Message::Undo, document),
+        editor_icon_button(Icon::Redo, "Redo", Message::Redo, document),
         separator(),
         icon_button(Icon::Find, "Find", Message::ToggleFind),
         icon_button(Icon::Replace, "Replace", Message::ShowInlineReplace),
@@ -220,12 +223,11 @@ fn menu_drop_down<'a>(
     active_path: &'a [String],
     window_menu_state: WindowMenuState,
     settings: &'a EditorSettings,
+    document: Option<&'a Document>,
 ) -> Element<'a, Message> {
-    menu::view(
-        menu_kind,
-        menu_tree(menu_kind, window_menu_state, settings),
-        active_path,
-    )
+    let mut tree = menu_tree(menu_kind, window_menu_state, settings);
+    apply_editor_availability(&mut tree.entries, document);
+    menu::view(menu_kind, tree, active_path)
 }
 
 fn menu_tree(
@@ -333,7 +335,7 @@ fn file_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
     entries
 }
 
-fn edit_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
+pub(super) fn edit_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
     vec![
         menu_item(settings, "Undo", ShortcutCommand::Undo, Message::Undo),
         menu_item(settings, "Redo", ShortcutCommand::Redo, Message::Redo),
@@ -350,12 +352,9 @@ fn edit_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
         ),
         menu::separator(),
         selection_operations_menu(settings),
-        menu::separator(),
-        indent_menu(settings),
-        menu::separator(),
-        transformation_menu(),
-        menu::separator(),
         line_operations_menu(settings),
+        indent_menu(settings),
+        transformation_menu(),
     ]
 }
 
@@ -418,7 +417,116 @@ fn view_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
     ]
 }
 
-fn menu_item(
+pub(super) fn apply_editor_availability(entries: &mut [MenuNode], document: Option<&Document>) {
+    for entry in entries {
+        match entry {
+            MenuNode::Item {
+                label,
+                shortcut,
+                message,
+            } if !editor_command_available(message, document) => {
+                *entry = MenuNode::Disabled {
+                    label: label.clone(),
+                    shortcut: shortcut.clone(),
+                };
+            }
+            MenuNode::Submenu { children, .. } => apply_editor_availability(children, document),
+            _ => {}
+        }
+    }
+}
+
+fn editor_command_available(message: &Message, document: Option<&Document>) -> bool {
+    let action = match message {
+        Message::EditorAction(_, action) => Some(action.clone()),
+        Message::Shortcut(command) => EditorAction::from_shortcut(*command),
+        Message::Undo => Some(EditorAction::Undo),
+        Message::Redo => Some(EditorAction::Redo),
+        Message::Cut => Some(EditorAction::Cut),
+        Message::Copy => Some(EditorAction::Copy),
+        Message::Paste => Some(EditorAction::Paste),
+        Message::Delete => Some(EditorAction::Delete),
+        Message::Uppercase => Some(EditorAction::Uppercase),
+        Message::Lowercase => Some(EditorAction::Lowercase),
+        Message::TrimTrailingSpaces => Some(EditorAction::TrimTrailingSpaces),
+        Message::JoinLines => Some(EditorAction::JoinLines),
+        Message::FoldCurrent => Some(EditorAction::FoldCurrent),
+        Message::UnfoldCurrent => Some(EditorAction::UnfoldCurrent),
+        Message::ToggleCurrentFold => Some(EditorAction::ToggleCurrentFold),
+        Message::FoldAll => Some(EditorAction::FoldAll),
+        Message::UnfoldAll => Some(EditorAction::UnfoldAll),
+        Message::GoToMatchingDelimiter => Some(EditorAction::GoToMatchingDelimiter),
+        Message::SelectMatchingDelimiter => Some(EditorAction::SelectMatchingDelimiter),
+        Message::NextFunction => Some(EditorAction::NextFunction),
+        Message::PreviousFunction => Some(EditorAction::PreviousFunction),
+        Message::SelectCurrentFunction => Some(EditorAction::SelectCurrentFunction),
+        Message::SelectCurrentFunctionBody => Some(EditorAction::SelectCurrentFunctionBody),
+        _ => None,
+    };
+    let Some(action) = action else {
+        return true;
+    };
+    let Some(document) = document else {
+        return false;
+    };
+    let complete = document.has_complete_text_index();
+    if action.mutates_document() && !complete {
+        return false;
+    }
+    let has_text = document.buffer.len_bytes() > 0;
+    match action {
+        EditorAction::Undo => document.can_undo(),
+        EditorAction::Redo => document.can_redo(),
+        EditorAction::Copy | EditorAction::CopyLine => has_text,
+        EditorAction::Cut | EditorAction::CutLine | EditorAction::DeleteLine => has_text,
+        EditorAction::Uppercase | EditorAction::Lowercase => document
+            .selection_set()
+            .ranges()
+            .iter()
+            .any(|range| !range.range().is_empty()),
+        EditorAction::Delete => document.selection_set().ranges().iter().any(|range| {
+            !range.range().is_empty()
+                || range.cursor < crate::editor::document_end(&document.buffer)
+        }),
+        EditorAction::SelectAll => has_text,
+        EditorAction::FoldAll => document
+            .folds
+            .ranges()
+            .iter()
+            .any(|range| !document.folds.is_collapsed(*range)),
+        EditorAction::UnfoldAll => document.folds.collapsed_ranges().next().is_some(),
+        EditorAction::FoldCurrent
+        | EditorAction::UnfoldCurrent
+        | EditorAction::ToggleCurrentFold => document
+            .folds
+            .range_at_or_parent(document.main_selection().cursor.line)
+            .is_some_and(|range| match action {
+                EditorAction::FoldCurrent => !document.folds.is_collapsed(range),
+                EditorAction::UnfoldCurrent => document.folds.is_collapsed(range),
+                _ => true,
+            }),
+        EditorAction::NextFunction
+        | EditorAction::PreviousFunction
+        | EditorAction::SelectCurrentFunction
+        | EditorAction::SelectCurrentFunctionBody => document.can_run_full_document_analysis(),
+        _ => true,
+    }
+}
+
+fn editor_icon_button<'a>(
+    icon: Icon,
+    label: &'static str,
+    message: Message,
+    document: Option<&Document>,
+) -> Element<'a, Message> {
+    if editor_command_available(&message, document) {
+        icon_button(icon, label, message)
+    } else {
+        disabled_icon_button(icon, label)
+    }
+}
+
+pub(super) fn menu_item(
     settings: &EditorSettings,
     label: impl Into<String>,
     command: ShortcutCommand,
@@ -551,7 +659,7 @@ fn line_operations_menu(settings: &EditorSettings) -> MenuNode {
     )
 }
 
-fn matching_and_function_items(settings: &EditorSettings) -> Vec<MenuNode> {
+pub(super) fn matching_and_function_items(settings: &EditorSettings) -> Vec<MenuNode> {
     vec![
         menu_item(
             settings,
@@ -636,7 +744,7 @@ fn zoom_menu(settings: &EditorSettings) -> MenuNode {
     )
 }
 
-fn fold_commands_menu(settings: &EditorSettings) -> MenuNode {
+pub(super) fn fold_commands_menu(settings: &EditorSettings) -> MenuNode {
     menu::submenu(
         "fold",
         "Fold",
@@ -977,6 +1085,7 @@ fn toolbar_button<'a>(
             image::Image::new(icon_handle(icon))
                 .width(18)
                 .height(18)
+                .opacity(if message.is_some() { 1.0 } else { 0.38 })
                 .filter_method(image::FilterMethod::Linear),
         ))
         .width(25)

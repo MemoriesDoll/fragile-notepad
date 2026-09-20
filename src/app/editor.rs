@@ -24,6 +24,13 @@ impl App {
         document_id: DocumentId,
         action: EditorAction,
     ) -> Task<Message> {
+        if action == EditorAction::Focus {
+            return if document_id == self.workspace.active_document_id {
+                iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
+            } else {
+                Task::none()
+            };
+        }
         if self.editor_action_blocked_while_indexing(document_id, &action) {
             self.file_status = Some(String::from("Finish loading before editing."));
             return Task::none();
@@ -114,6 +121,7 @@ impl App {
 
     pub(super) fn update_editor_command(&mut self, message: Message) -> Task<Message> {
         self.active_menu = None;
+        self.active_menu_path.clear();
 
         if self
             .workspace
@@ -142,10 +150,13 @@ impl App {
             }
             self.refresh_find_matches();
             let document_id = self.workspace.active_document_id;
-            return self.schedule_outline_parse(document_id);
+            return Task::batch([
+                self.schedule_outline_parse(document_id),
+                iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
+            ]);
         }
 
-        Task::none()
+        iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
     }
 
     pub(super) fn replace_active_document_range(
@@ -294,9 +305,13 @@ impl App {
                 text_width,
                 character_width_milli,
             } => {
-                document.viewport_visible_rows = visible_rows.max(1);
-                document.viewport_text_width = text_width as f32;
-                document.viewport_character_width = character_width_milli as f32 / 1000.0;
+                document.update_viewport_geometry(
+                    visible_rows,
+                    text_width as f32,
+                    character_width_milli as f32 / 1000.0,
+                );
+                document.set_word_wrap(self.settings.word_wrap);
+                document.finish_session_scroll_restore();
                 false
             }
             EditorAction::ToggleFold(range) => {
@@ -368,17 +383,33 @@ impl App {
             EditorAction::Focus => false,
             EditorAction::PlaceCaret(position) => {
                 document.preferred_vertical_column = None;
+                document.clear_caret_row_affinity();
                 let position = document.buffer.clamp_position(position);
                 document.set_main_selection(EditorSelection::new(position, position));
                 false
             }
+            EditorAction::PlaceCaretOnRow { position, row } => {
+                document.preferred_vertical_column = None;
+                let position = document.buffer.clamp_position(position);
+                document.set_main_selection(EditorSelection::new(position, position));
+                document.set_caret_row_affinity(position, row);
+                false
+            }
             EditorAction::SelectWordAt(position) => {
+                document.clear_caret_row_affinity();
                 select_word_at(document, position);
                 false
             }
             EditorAction::SelectRegion(selection) => {
                 document.preferred_vertical_column = None;
+                document.clear_caret_row_affinity();
                 document.set_main_selection(selection);
+                false
+            }
+            EditorAction::SelectRegionOnRow { selection, row } => {
+                document.preferred_vertical_column = None;
+                document.set_main_selection(selection);
+                document.set_caret_row_affinity(document.main_selection().cursor, row);
                 false
             }
             EditorAction::AddCaretAbove => {

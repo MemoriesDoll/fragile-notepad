@@ -16,7 +16,7 @@ pub fn vertical_scrollbar_geometry(
     layout: EditorLayout,
     total_visible_rows: usize,
 ) -> Option<VerticalScrollbarGeometry> {
-    let visible_rows = layout.visible_row_capacity().max(1);
+    let visible_rows = layout.complete_visible_row_capacity().max(1);
 
     if total_visible_rows <= visible_rows || layout.height <= 0.0 {
         return None;
@@ -58,7 +58,7 @@ pub fn scrollbar_row_for_position(
     layout: EditorLayout,
     total_visible_rows: usize,
 ) -> usize {
-    let visible_rows = layout.visible_row_capacity().max(1);
+    let visible_rows = layout.complete_visible_row_capacity().max(1);
     let max_first_row = total_visible_rows.saturating_sub(visible_rows);
 
     if max_first_row == 0 {
@@ -73,4 +73,44 @@ pub fn scrollbar_row_for_position(
         - scrollbar.track.y;
 
     ((top / travel) * max_first_row as f32).round() as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::layout::{EditorMetrics, ScrollOffset, row_y};
+
+    #[test]
+    fn scrollbar_exposes_a_final_row_that_only_partially_fits() {
+        let layout = EditorLayout::new(EditorMetrics::default(), ScrollOffset::ZERO, 300.0, 49.0);
+        assert_eq!(layout.visible_row_capacity(), 3);
+        assert_eq!(layout.complete_visible_row_capacity(), 2);
+        assert!(vertical_scrollbar_geometry(layout, 3).is_some());
+    }
+
+    #[test]
+    fn scrollbar_bottom_fully_exposes_final_visual_row_with_partial_viewport_row() {
+        let mut layout =
+            EditorLayout::new(EditorMetrics::default(), ScrollOffset::ZERO, 300.0, 49.0);
+        for total_rows in [3, 10] {
+            let scrollbar = vertical_scrollbar_geometry(layout, total_rows).expect("scrollbar");
+            let bottom = scrollbar_row_for_position(
+                scrollbar.track.y + scrollbar.track.height,
+                0.0,
+                layout,
+                total_rows,
+            );
+            assert_eq!(bottom, total_rows - 2);
+            layout.scroll.first_visible_row = bottom;
+            assert!(row_y(total_rows - 1, layout) + layout.metrics.line_height <= layout.height);
+            let scrollbar = vertical_scrollbar_geometry(layout, total_rows).expect("scrollbar");
+            assert!(
+                (scrollbar.thumb.y + scrollbar.thumb.height
+                    - scrollbar.track.y
+                    - scrollbar.track.height)
+                    .abs()
+                    < 0.001
+            );
+        }
+    }
 }

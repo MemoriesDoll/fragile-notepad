@@ -1,5 +1,55 @@
 # Development
 
+## Editor interactions
+
+The editing surface is the custom Iced `AdvancedEditor` widget. Its pointer and
+keyboard handling lives under `src/editor/widget/`; commands go through
+`EditorAction` and the application handlers so menus and shortcuts share undo,
+clipboard, and selection behavior.
+
+- Double-click the line-number gutter or column zero to select a complete logical
+  line, including its line ending when present. Double-click elsewhere selects a
+  word.
+- Drag a selection beyond either vertical edge to scroll continuously. Scrolling
+  speeds up with distance from the edge and stops on release, focus loss, or the
+  document boundary.
+- Collapsed code blocks show a boxed ellipsis after the header. Click the box to
+  expand the represented block. The indicator follows text measurement, zoom,
+  horizontal scrolling, and EOL marker spacing.
+- Right-click inside a selection to retain it; clicking outside moves the caret
+  before opening the menu. Multiple and rectangular selections are preserved
+  when the click is inside any selected region.
+- Open the editor context menu with the Context Menu key or Shift+F10. Arrow keys
+  navigate commands and submenus, Enter activates, and Escape dismisses. Menus
+  fit the window and support scrolling when space is limited. Text composition
+  is suspended while the menu is open and resumes in the editor after dismissal.
+
+The context menu reuses the Edit menu command definitions and configured shortcut
+labels. History, clipboard, selection, line, indentation, case, search, navigation,
+and folding commands use the existing handlers. Unavailable commands retain their
+shortcut hints but are disabled; the toolbar shares the same availability rules.
+Cut, Cut Line, and Delete Line operate on all unique touched lines in one undo
+transaction, including multiple carets and rectangular selections.
+
+The interaction design was checked against the default Notepad++ menu in
+`../notepad-plus-plus/PowerEditor/src/MISC/Common/NppConstants.h` and selection
+handling in `../notepad-plus-plus/scintilla/win32/ScintillaWin.cxx`.
+
+Word Wrap reflows logical lines into screen rows at the current text width.
+`ViewportModel` stores byte and visual-column boundaries for each fragment;
+rendering, hit-testing, navigation, IME placement, and scrollbars share this map.
+Tabs retain their logical-line stops, Unicode graphemes remain intact, and soft
+breaks never change the buffer or clipboard text. Line numbers and fold controls
+appear on the first fragment; end markers and collapsed ellipses appear on the
+last. Resizing, zooming, and changing gutter or tab settings reflow the viewport.
+Caret affinity preserves the chosen side of a soft break for End, vertical
+navigation, added carets, and pointer placement. Toggling wrapping keeps a visible
+caret in view. Session recovery records the logical top position so changes to
+the window width do not discard the saved location. Streaming loads reflow only
+the previous last line and newly appended lines. Edits that retain the logical line count
+remeasure the affected lines and reuse the remaining wrap measurements; changes
+to line counts or fold visibility rebuild the mapping.
+
 ## Files and sessions
 
 Launch with file paths, including several paths at once:

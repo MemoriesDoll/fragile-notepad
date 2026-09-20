@@ -44,11 +44,13 @@ pub use render::{
     CaretRenderPlan, EolRenderPlan, FoldRenderPlan, HiddenLineRenderPlan, IndentGuideRenderPlan,
     RenderPlan, RowRenderPlan, SelectionRenderPlan, SyntaxLineCache, SyntaxRenderSpan,
     WhitespaceKind, WhitespaceRenderPlan, build_render_plan,
-    build_render_plan_for_selection_set_with_cache, build_render_plan_with_cache,
+    build_render_plan_for_selection_set_with_cache,
+    build_render_plan_for_selection_set_with_cache_and_caret_row,
+    build_render_plan_for_selection_set_with_cache_and_caret_rows, build_render_plan_with_cache,
     line_number_left_x, line_number_text_x, planned_text_draws, planned_text_draws_with_markers,
     space_marker_bounds, space_marker_size, text_baseline_offset, text_size,
     visible_marker_columns,
 };
-pub use viewport::{ViewportModel, VisibleRow};
+pub use viewport::{RowSegment, ViewportModel, VisibleRow};
 pub use widget::{AdvancedEditor, AdvancedEditorState, CaretMotion, EditorAction, key_action};
 pub use word::word_range_at_position;

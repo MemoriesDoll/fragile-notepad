@@ -1,22 +1,26 @@
 use iced::advanced::{InputMethod, Shell, input_method, mouse, text};
 use iced::keyboard;
 use iced::time::{Duration, Instant};
-use iced::{Event, Font, Pixels, Rectangle, window};
+use iced::{Event, Font, Pixels, Point, Rectangle, window};
 
 use crate::core::ShortcutMap;
 use crate::editor::buffer::EditorBuffer;
 use crate::editor::decoration::DecorationModel;
-use crate::editor::layout::{EditorLayout, HitTarget, ScrollOffset, hit_test};
-use crate::editor::position::{EditorPosition, EditorSelection, SelectionSet};
+use crate::editor::layout::{EditorLayout, HitTarget, hit_test, hit_visible_row};
+use crate::editor::position::{EditorPosition, EditorSelection, SelectionRange, SelectionSet};
 use crate::editor::render::text_size;
 use crate::editor::viewport::ViewportModel;
 
 use super::actions::{EditorAction, key_action};
-use super::line_cache::{LineGeometry, measured_caret_x, measured_text_hit_target};
+use super::line_cache::{
+    LineGeometry, measured_position_point, measured_text_hit_target, measured_virtual_caret_x,
+};
 use super::scrollbar::{scrollbar_row_for_position, vertical_scrollbar_geometry};
 use super::state::{AdvancedEditorState, CARET_BLINK_INTERVAL_MS};
 
 const FAST_SCROLL_SETTLE_MS: u64 = 120;
+const DRAG_SCROLL_INTERVAL_MS: u64 = 50;
+const MAX_DRAG_SCROLL_LINES: i32 = 8;
 
 pub(super) struct InteractionContext<'a, Message> {
     pub(super) buffer: &'a EditorBuffer,
@@ -24,7 +28,7 @@ pub(super) struct InteractionContext<'a, Message> {
     pub(super) decorations: &'a DecorationModel,
     pub(super) selections: &'a SelectionSet,
     pub(super) metrics: crate::editor::layout::EditorMetrics,
-    pub(super) scroll: ScrollOffset,
+    pub(super) caret_row: Option<usize>,
     pub(super) scroll_speed: f32,
     pub(super) viewport_key: u64,
     pub(super) shortcuts: &'a ShortcutMap,
@@ -64,10 +68,7 @@ where
     let mut outcome = UpdateOutcome::default();
     // Rendering includes a partially visible bottom row; caret navigation must
     // count only complete rows so the insertion point cannot remain clipped.
-    let visible_rows = ((editor_layout.height - context.metrics.padding_top)
-        / context.metrics.line_height.max(1.0))
-    .floor()
-    .max(1.0) as usize;
+    let visible_rows = editor_layout.complete_visible_row_capacity().max(1);
     let text_width =
         (bounds.width - context.metrics.text_origin_x(context.decorations) - 14.0).max(1.0) as u32;
     let character_width_milli = (context.metrics.character_width * 1000.0).max(1.0) as u32;
@@ -89,6 +90,8 @@ where
     match event {
         Event::Window(window::Event::Unfocused) => {
             state.is_window_focused = false;
+            state.cancel_pointer_drag();
+            state.clear_text_click();
             shell.request_redraw();
         }
         Event::Window(window::Event::Focused) => {
@@ -98,13 +101,22 @@ where
         }
         Event::Window(window::Event::RedrawRequested(now)) => {
             state.caret_now.set(*now);
+            update_drag_selection(
+                &context,
+                state,
+                bounds,
+                editor_layout,
+                renderer,
+                shell,
+                *now,
+            );
             request_caret_blink_frame(state, shell);
         }
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+            state.cancel_pointer_drag();
             let Some(position) = cursor.position_in(bounds) else {
                 state.is_focused = false;
-                state.drag_anchor = None;
-                state.scrollbar_grab_offset_y = None;
+                state.clear_text_click();
                 state.preedit = None;
                 shell.request_redraw();
                 shell.request_input_method(&input_method(
@@ -137,7 +149,7 @@ where
 
                 state.is_focused = true;
                 state.reset_caret_blink();
-                state.drag_anchor = None;
+                state.clear_text_click();
                 shell.publish((context.on_action)(EditorAction::Focus));
                 shell.request_redraw();
                 outcome.should_capture = true;
@@ -145,6 +157,11 @@ where
                 return outcome;
             }
 
+            let clicked_row =
+                hit_visible_row(position.y, editor_layout, context.viewport).map(|(row, _)| row);
+            let clicked_row_start = clicked_row
+                .and_then(|row| context.viewport.row_segment(row, context.buffer))
+                .map_or(0, |segment| segment.start_column);
             let hit = hit_test(
                 position.x,
                 position.y,
@@ -180,20 +197,36 @@ where
                     let is_double_click = state.record_text_click(position, state.caret_now.get());
                     state.drag_anchor = (!is_double_click).then_some(position);
                     shell.publish((context.on_action)(EditorAction::Focus));
-                    shell.publish((context.on_action)(EditorAction::PlaceCaret(position)));
+                    shell.publish((context.on_action)(place_caret_action(
+                        context.viewport,
+                        position,
+                        clicked_row,
+                    )));
                     if is_double_click {
-                        shell.publish((context.on_action)(EditorAction::SelectWordAt(position)));
+                        let action = if position.column == clicked_row_start {
+                            EditorAction::SelectRegion(whole_line_selection(
+                                context.buffer,
+                                position.line,
+                            ))
+                        } else {
+                            EditorAction::SelectWordAt(position)
+                        };
+                        shell.publish((context.on_action)(action));
                     }
                     shell.request_redraw();
                 }
                 HitTarget::GutterLine { line } | HitTarget::HiddenLineIndicator { line } => {
                     state.is_focused = true;
                     state.reset_caret_blink();
-                    state.clear_text_click();
+                    let position = EditorPosition::new(line, 0);
+                    let is_double_click = state.record_text_click(position, state.caret_now.get());
+                    state.drag_anchor = (!is_double_click).then_some(position);
                     shell.publish((context.on_action)(EditorAction::Focus));
-                    shell.publish((context.on_action)(EditorAction::PlaceCaret(
-                        EditorPosition::new(line, 0),
-                    )));
+                    shell.publish((context.on_action)(if is_double_click {
+                        EditorAction::SelectRegion(whole_line_selection(context.buffer, line))
+                    } else {
+                        EditorAction::PlaceCaret(position)
+                    }));
                     shell.request_redraw();
                 }
                 HitTarget::Outside => {
@@ -211,11 +244,58 @@ where
 
             outcome.should_capture = true;
         }
+        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+            if let Some(position) = cursor.position_in(bounds)
+                && position.x >= context.metrics.text_origin_x(context.decorations)
+                && !vertical_scrollbar_geometry(editor_layout, context.viewport.visible_row_count())
+                    .is_some_and(|scrollbar| scrollbar.track.contains(position))
+            {
+                state.is_focused = true;
+                state.reset_caret_blink();
+                state.cancel_pointer_drag();
+                state.clear_text_click();
+                state.preedit = None;
+
+                let text_position =
+                    Point::new(position.x, position.y.max(context.metrics.padding_top));
+                let hit = measured_text_hit_target(
+                    text_position,
+                    editor_layout,
+                    context.buffer,
+                    context.viewport,
+                    context.decorations,
+                    renderer,
+                );
+                let target = match hit {
+                    HitTarget::Text(target) => target,
+                    _ => last_line_end_position(context.buffer),
+                };
+                shell.publish((context.on_action)(EditorAction::Focus));
+                if !matches!(hit, HitTarget::Text(_))
+                    || !selection_contains_pointer(
+                        &context,
+                        target,
+                        position,
+                        editor_layout,
+                        renderer,
+                    )
+                {
+                    shell.publish((context.on_action)(place_caret_action(
+                        context.viewport,
+                        target,
+                        hit_visible_row(text_position.y, editor_layout, context.viewport)
+                            .map(|(row, _)| row),
+                    )));
+                }
+                shell.request_redraw();
+                outcome.should_capture = true;
+            }
+        }
         Event::Mouse(mouse::Event::CursorMoved { .. }) => {
             if let Some(grab_offset_y) = state.scrollbar_grab_offset_y {
-                if let Some(position) = cursor.position_in(bounds) {
+                if let Some(position) = cursor.position() {
                     let target_row = scrollbar_row_for_position(
-                        position.y,
+                        position.y - bounds.y,
                         grab_offset_y,
                         editor_layout,
                         context.viewport.visible_row_count(),
@@ -224,44 +304,27 @@ where
                     shell.request_redraw();
                     outcome.should_capture = true;
                 }
-            } else if let Some(anchor) = state.drag_anchor
+            } else if state.drag_anchor.is_some()
                 && let Some(screen_position) = cursor.position()
             {
                 outcome.perf_event = "editor_drag_select";
-                let position = iced::Point::new(
-                    screen_position.x.clamp(bounds.x, bounds.x + bounds.width),
-                    screen_position.y.clamp(bounds.y, bounds.y + bounds.height),
-                );
-                let local_position = iced::Point::new(position.x - bounds.x, position.y - bounds.y);
-                let hit = measured_text_hit_target(
-                    local_position,
+                state.drag_position = Some(screen_position);
+                update_drag_selection(
+                    &context,
+                    state,
+                    bounds,
                     editor_layout,
-                    context.buffer,
-                    context.viewport,
-                    context.decorations,
                     renderer,
+                    shell,
+                    Instant::now(),
                 );
-
-                if let HitTarget::Text(cursor) = hit {
-                    state.reset_caret_blink();
-                    if screen_position.y < bounds.y {
-                        shell.publish((context.on_action)(EditorAction::ScrollLines(-1)));
-                    } else if screen_position.y > bounds.y + bounds.height {
-                        shell.publish((context.on_action)(EditorAction::ScrollLines(1)));
-                    }
-                    shell.publish((context.on_action)(EditorAction::SelectRegion(
-                        EditorSelection::new(anchor, cursor),
-                    )));
-                    shell.request_redraw();
-                    outcome.should_capture = true;
-                }
+                outcome.should_capture = true;
             }
         }
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
             outcome.should_capture =
                 state.drag_anchor.is_some() || state.scrollbar_grab_offset_y.is_some();
-            state.drag_anchor = None;
-            state.scrollbar_grab_offset_y = None;
+            state.cancel_pointer_drag();
         }
         Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
             outcome.perf_event = "editor_wheel";
@@ -349,6 +412,230 @@ where
     outcome
 }
 
+fn whole_line_selection(buffer: &EditorBuffer, line: usize) -> EditorSelection {
+    let start = buffer.clamp_position(EditorPosition::new(line, 0));
+    let end = if start.line + 1 < buffer.line_count() {
+        EditorPosition::new(start.line + 1, 0)
+    } else {
+        last_line_end_position(buffer)
+    };
+
+    EditorSelection::new(start, end)
+}
+
+fn place_caret_action(
+    viewport: &ViewportModel,
+    position: EditorPosition,
+    row: Option<usize>,
+) -> EditorAction {
+    match row.filter(|_| viewport.wrap_columns().is_some()) {
+        Some(row) => EditorAction::PlaceCaretOnRow { position, row },
+        None => EditorAction::PlaceCaret(position),
+    }
+}
+
+fn drag_scroll_lines(y: f32, layout: EditorLayout) -> i32 {
+    let distance = if y < 0.0 {
+        y
+    } else if y > layout.height {
+        y - layout.height
+    } else {
+        return 0;
+    };
+    let lines = (1 + (distance.abs() / (layout.metrics.line_height.max(1.0) * 2.0)) as i32)
+        .min(MAX_DRAG_SCROLL_LINES);
+
+    if distance.is_sign_negative() {
+        -lines
+    } else {
+        lines
+    }
+}
+
+fn drag_scroll_row(y: f32, layout: EditorLayout, row_count: usize) -> usize {
+    let first_row = layout.scroll.first_visible_row;
+    let lines = drag_scroll_lines(y, layout);
+    let last_page = row_count.saturating_sub(layout.complete_visible_row_capacity().max(1));
+
+    if lines.is_negative() {
+        first_row.saturating_sub(lines.unsigned_abs() as usize)
+    } else if lines > 0 && first_row < last_page {
+        first_row.saturating_add(lines as usize).min(last_page)
+    } else {
+        first_row
+    }
+}
+
+fn update_drag_selection<Message, Renderer>(
+    context: &InteractionContext<'_, Message>,
+    state: &mut AdvancedEditorState<Renderer::Paragraph>,
+    bounds: Rectangle,
+    mut layout: EditorLayout,
+    renderer: &Renderer,
+    shell: &mut Shell<'_, Message>,
+    now: Instant,
+) where
+    Renderer: text::Renderer<Font = Font>,
+{
+    let (Some(anchor), Some(screen_position)) = (state.drag_anchor, state.drag_position) else {
+        return;
+    };
+    if !state.is_focused || !state.is_window_focused {
+        state.cancel_pointer_drag();
+        return;
+    }
+
+    let position = Point::new(screen_position.x - bounds.x, screen_position.y - bounds.y);
+    let target_row = drag_scroll_row(position.y, layout, context.viewport.visible_row_count());
+    if target_row != layout.scroll.first_visible_row {
+        let scroll_at = state.drag_scroll_at.unwrap_or(now);
+        if now >= scroll_at {
+            layout.scroll.first_visible_row = target_row;
+            shell.publish((context.on_action)(EditorAction::ScrollToRow(target_row)));
+            state.drag_scroll_at = Some(now + Duration::from_millis(DRAG_SCROLL_INTERVAL_MS));
+        }
+        if let Some(scroll_at) = state.drag_scroll_at {
+            shell.request_redraw_at(scroll_at);
+        }
+    } else {
+        state.drag_scroll_at = None;
+    }
+
+    // Hit-test the destination viewport, including its top padding. Otherwise an
+    // upward drag becomes Outside and the selection stops at the previous row.
+    let (cursor, row) = drag_selection_position(position, layout, context, renderer);
+    let selection = EditorSelection::new(anchor, cursor);
+    if context.selections.main() != selection
+        || context.viewport.wrap_columns().is_some() && row != context.caret_row
+    {
+        state.reset_caret_blink();
+        state.clear_text_click();
+        let action = match row.filter(|_| context.viewport.wrap_columns().is_some()) {
+            Some(row) => EditorAction::SelectRegionOnRow { selection, row },
+            None => EditorAction::SelectRegion(selection),
+        };
+        shell.publish((context.on_action)(action));
+        shell.request_redraw();
+    }
+}
+
+fn drag_selection_position<Message, Renderer>(
+    position: Point,
+    layout: EditorLayout,
+    context: &InteractionContext<'_, Message>,
+    renderer: &Renderer,
+) -> (EditorPosition, Option<usize>)
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    let last_page = context
+        .viewport
+        .visible_row_count()
+        .saturating_sub(layout.complete_visible_row_capacity().max(1));
+    if position.y < 0.0 && layout.scroll.first_visible_row == 0 {
+        return (EditorPosition::new(0, 0), Some(0));
+    }
+    if position.y > layout.height && layout.scroll.first_visible_row >= last_page {
+        let position = last_line_end_position(context.buffer);
+        return (position, context.viewport.position_to_visible_row(position));
+    }
+
+    let last_row_y = layout.metrics.padding_top
+        + (layout.complete_visible_row_capacity().max(1) as f32 - 0.5)
+            * layout.metrics.line_height.max(1.0);
+    let position = Point::new(
+        position.x.clamp(0.0, layout.width.max(0.0)),
+        position.y.clamp(layout.metrics.padding_top, last_row_y),
+    );
+
+    let row = hit_visible_row(position.y, layout, context.viewport).map(|(row, _)| row);
+    let target = match measured_text_hit_target(
+        position,
+        layout,
+        context.buffer,
+        context.viewport,
+        context.decorations,
+        renderer,
+    ) {
+        HitTarget::Text(position) => position,
+        _ => last_line_end_position(context.buffer),
+    };
+    (target, row)
+}
+
+fn selection_contains_pointer<Message, Renderer>(
+    context: &InteractionContext<'_, Message>,
+    position: EditorPosition,
+    pointer: Point,
+    layout: EditorLayout,
+    renderer: &Renderer,
+) -> bool
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    context.selections.ranges().iter().any(|selection| {
+        let range = selection.range();
+        if position.line < range.start.line || position.line > range.end.line {
+            return false;
+        }
+        if !selection.is_rectangular() {
+            return range.start <= position && position < range.end;
+        }
+
+        // Project only the clicked row so a large rectangular selection does
+        // not allocate geometry for the rest of the document on right click.
+        let row = SelectionRange {
+            anchor: EditorPosition::new(position.line, 0),
+            cursor: EditorPosition::new(position.line, 0),
+            ..*selection
+        }
+        .projected_lines(context.buffer, context.decorations.settings.indent_width);
+        let Some(row) = row.first() else {
+            return false;
+        };
+        let text = context.buffer.line(position.line).unwrap_or_default();
+        let Some(segment) = hit_visible_row(pointer.y, layout, context.viewport)
+            .and_then(|(visible_row, _)| context.viewport.row_segment(visible_row, context.buffer))
+        else {
+            return false;
+        };
+        let geometry = LineGeometry::new_with_visual_offset(
+            &text[segment.start_column..segment.end_column],
+            layout.metrics,
+            renderer,
+            segment.start_visual_column,
+        );
+        let start_x = measured_virtual_caret_x(
+            &geometry,
+            row.start.column.saturating_sub(segment.start_column),
+            row.start_virtual_column.map(|column| {
+                if segment.is_last {
+                    column
+                } else {
+                    column.min(segment.end_visual_column)
+                }
+            }),
+            layout,
+            context.decorations,
+        );
+        let end_x = measured_virtual_caret_x(
+            &geometry,
+            row.end.column.saturating_sub(segment.start_column),
+            row.end_virtual_column.map(|column| {
+                if segment.is_last {
+                    column
+                } else {
+                    column.min(segment.end_visual_column)
+                }
+            }),
+            layout,
+            context.decorations,
+        );
+
+        pointer.x >= start_x.min(end_x) && pointer.x < start_x.max(end_x)
+    })
+}
+
 fn mark_scroll_fast<Paragraph, Message>(
     state: &AdvancedEditorState<Paragraph>,
     shell: &mut Shell<'_, Message>,
@@ -397,28 +684,20 @@ where
     let cursor = context
         .buffer
         .clamp_position(context.selections.main().cursor);
-    let visible_row = context
-        .viewport
-        .document_line_to_visible_row(cursor.line)
-        .unwrap_or(context.scroll.first_visible_row);
-    let line_text = context.buffer.line(cursor.line).unwrap_or_default();
-    let line_geometry = LineGeometry::new(&line_text, editor_layout.metrics, renderer);
-    let x = bounds.x
-        + measured_caret_x(
-            &line_geometry,
-            cursor.column,
-            editor_layout,
-            context.decorations,
-        );
-    let y = bounds.y
-        + context.metrics.padding_top
-        + visible_row.saturating_sub(context.scroll.first_visible_row) as f32
-            * context.metrics.line_height;
+    let point = measured_position_point(
+        context.buffer,
+        context.viewport,
+        context.decorations,
+        editor_layout,
+        cursor,
+        context.caret_row,
+        renderer,
+    );
 
     InputMethod::Enabled {
         cursor: Rectangle {
-            x,
-            y,
+            x: bounds.x + point.x,
+            y: bounds.y + point.y,
             width: 1.0,
             height: context.metrics.line_height,
         },
@@ -439,6 +718,143 @@ pub(super) fn scroll_delta_lines(delta: mouse::ScrollDelta, scroll_speed: f32) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::decoration::DecorationSettings;
+    use crate::editor::fold::{FoldModel, FoldRange};
+    use crate::editor::layout::{EditorMetrics, ScrollOffset};
+    use iced::advanced::graphics::core::shell::Waker;
+
+    struct TestEditor {
+        buffer: EditorBuffer,
+        viewport: ViewportModel,
+        decorations: DecorationModel,
+        selections: SelectionSet,
+        caret_row: Option<usize>,
+        shortcuts: ShortcutMap,
+        state: AdvancedEditorState<()>,
+        layout: EditorLayout,
+        bounds: Rectangle,
+        last_redraw: window::RedrawRequest,
+    }
+
+    impl TestEditor {
+        fn new(text: &str) -> Self {
+            Self::with_folds(text, FoldModel::default())
+        }
+
+        fn with_folds(text: &str, folds: FoldModel) -> Self {
+            let buffer = EditorBuffer::from_text(text);
+            let viewport = ViewportModel::new(buffer.line_count(), &folds);
+            let decorations = DecorationModel::from_folds(
+                DecorationSettings::default(),
+                buffer.line_count(),
+                &folds,
+                vec![],
+            );
+            let layout =
+                EditorLayout::new(EditorMetrics::default(), ScrollOffset::ZERO, 400.0, 94.0);
+
+            Self {
+                buffer,
+                viewport,
+                decorations,
+                selections: SelectionSet::new(EditorSelection::new(
+                    EditorPosition::new(0, 0),
+                    EditorPosition::new(0, 0),
+                )),
+                caret_row: None,
+                shortcuts: ShortcutMap::default(),
+                state: AdvancedEditorState::default(),
+                layout,
+                bounds: Rectangle {
+                    x: 10.0,
+                    y: 20.0,
+                    width: layout.width,
+                    height: layout.height,
+                },
+                last_redraw: window::RedrawRequest::Wait,
+            }
+        }
+
+        fn text_point(&self, row: usize, column: usize) -> Point {
+            Point::new(
+                self.bounds.x
+                    + self.layout.metrics.text_origin_x(&self.decorations)
+                    + column as f32 * self.layout.metrics.character_width
+                    + 0.5,
+                self.bounds.y
+                    + self.layout.metrics.padding_top
+                    + row as f32 * self.layout.metrics.line_height
+                    + 1.0,
+            )
+        }
+
+        fn dispatch(&mut self, event: Event, cursor: mouse::Cursor) -> Vec<EditorAction> {
+            let mut messages = Vec::new();
+            let mut shell = Shell::new(&window::Headless, Waker::noop(), &mut messages);
+            handle_event(
+                InteractionContext {
+                    buffer: &self.buffer,
+                    viewport: &self.viewport,
+                    decorations: &self.decorations,
+                    selections: &self.selections,
+                    metrics: self.layout.metrics,
+                    caret_row: self.caret_row,
+                    scroll_speed: 1.5,
+                    viewport_key: 0,
+                    shortcuts: &self.shortcuts,
+                    on_action: &std::convert::identity,
+                },
+                &mut self.state,
+                &event,
+                self.bounds,
+                cursor,
+                self.layout,
+                &(),
+                &mut shell,
+            );
+            self.last_redraw = shell.redraw_request();
+            for action in &messages {
+                match action {
+                    EditorAction::PlaceCaret(position) => {
+                        self.caret_row = None;
+                        self.selections =
+                            SelectionSet::new(EditorSelection::new(*position, *position));
+                    }
+                    EditorAction::SelectRegion(selection) => {
+                        self.caret_row = None;
+                        self.selections = SelectionSet::new(*selection);
+                    }
+                    EditorAction::PlaceCaretOnRow { position, row } => {
+                        self.caret_row = Some(*row);
+                        self.selections =
+                            SelectionSet::new(EditorSelection::new(*position, *position));
+                    }
+                    EditorAction::SelectRegionOnRow { selection, row } => {
+                        self.caret_row = Some(*row);
+                        self.selections = SelectionSet::new(*selection);
+                    }
+                    EditorAction::ScrollToRow(row) => self.layout.scroll.first_visible_row = *row,
+                    _ => {}
+                }
+            }
+
+            messages
+        }
+
+        fn press(&mut self, button: mouse::Button, point: Point) -> Vec<EditorAction> {
+            self.dispatch(
+                Event::Mouse(mouse::Event::ButtonPressed(button)),
+                mouse::Cursor::Available(point),
+            )
+        }
+
+        fn drag_to(&mut self, point: Point) -> Vec<EditorAction> {
+            self.dispatch(
+                Event::Mouse(mouse::Event::CursorMoved { position: point }),
+                mouse::Cursor::Available(point),
+            )
+        }
+    }
 
     #[test]
     fn blank_editor_area_targets_end_of_last_line() {
@@ -455,5 +871,309 @@ mod tests {
         let buffer = EditorBuffer::from_text("alpha\n");
 
         assert_eq!(last_line_end_position(&buffer), EditorPosition::new(1, 0));
+    }
+
+    #[test]
+    fn whole_line_selection_includes_line_endings_and_handles_empty_last_lines() {
+        for (text, line, expected) in [
+            ("alpha\nbeta", 0, "alpha\n"),
+            ("alpha\r\nbeta", 0, "alpha\r\n"),
+            ("alpha\rbeta", 0, "alpha\r"),
+            ("alpha\n\rbeta", 0, "alpha\n\r"),
+            ("alpha\n\nbeta", 1, "\n"),
+            ("alpha\ncaf\u{e9}", 1, "caf\u{e9}"),
+            ("alpha\n", 1, ""),
+            ("", 0, ""),
+        ] {
+            let buffer = EditorBuffer::from_text(text);
+            let selection = whole_line_selection(&buffer, line);
+
+            assert_eq!(buffer.slice_text(selection.range()), expected, "{text:?}");
+            assert_eq!(selection.anchor, EditorPosition::new(line, 0));
+        }
+    }
+
+    #[test]
+    fn double_click_at_text_start_selects_line_and_elsewhere_selects_word() {
+        for column in [0, 2] {
+            let mut editor = TestEditor::new("alpha beta\nnext");
+            let point = editor.text_point(0, column);
+            editor.press(mouse::Button::Left, point);
+            editor.dispatch(
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                mouse::Cursor::Available(point),
+            );
+            let messages = editor.press(mouse::Button::Left, point);
+            let expected = if column == 0 {
+                EditorAction::SelectRegion(EditorSelection::new(
+                    EditorPosition::new(0, 0),
+                    EditorPosition::new(1, 0),
+                ))
+            } else {
+                EditorAction::SelectWordAt(EditorPosition::new(0, column))
+            };
+
+            assert!(messages.contains(&expected));
+            assert!(editor.state.drag_anchor.is_none());
+        }
+    }
+
+    #[test]
+    fn wrapped_clicks_use_fragment_columns_and_double_click_selects_logical_line() {
+        let mut editor = TestEditor::new("abcdefghijkl\nnext");
+        editor.viewport = ViewportModel::new_wrapped(&editor.buffer, &FoldModel::default(), 4, 4);
+        let point = editor.text_point(1, 0);
+        let messages = editor.press(mouse::Button::Left, point);
+        assert!(messages.contains(&EditorAction::PlaceCaretOnRow {
+            position: EditorPosition::new(0, 4),
+            row: 1,
+        }));
+        let messages = editor.press(mouse::Button::Left, point);
+        assert!(
+            messages.contains(&EditorAction::SelectRegion(EditorSelection::new(
+                EditorPosition::new(0, 0),
+                EditorPosition::new(1, 0),
+            )))
+        );
+        assert!(editor.state.drag_anchor.is_none());
+    }
+
+    #[test]
+    fn wrapped_row_end_click_and_drag_keep_upstream_row_affinity() {
+        let mut editor = TestEditor::new("abcdefghijkl\nnext");
+        editor.viewport = ViewportModel::new_wrapped(&editor.buffer, &FoldModel::default(), 4, 4);
+        let end = editor.text_point(0, 8);
+        let messages = editor.press(mouse::Button::Left, end);
+        assert!(messages.contains(&EditorAction::PlaceCaretOnRow {
+            position: EditorPosition::new(0, 4),
+            row: 0,
+        }));
+        let messages = editor.drag_to(editor.text_point(1, 8));
+        assert!(messages.contains(&EditorAction::SelectRegionOnRow {
+            selection: EditorSelection::new(EditorPosition::new(0, 4), EditorPosition::new(0, 8)),
+            row: 1,
+        }));
+    }
+
+    #[test]
+    fn wrapped_drag_autoscroll_counts_visual_rows_within_one_logical_line() {
+        let mut editor = TestEditor::new(&"a".repeat(120));
+        editor.viewport = ViewportModel::new_wrapped(&editor.buffer, &FoldModel::default(), 4, 4);
+        editor.layout.scroll.first_visible_row = 5;
+        editor.press(mouse::Button::Left, editor.text_point(1, 1));
+        let outside = Point::new(editor.text_point(0, 1).x, editor.bounds.y - 1.0);
+        let messages = editor.drag_to(outside);
+        assert!(messages.contains(&EditorAction::ScrollToRow(4)));
+        assert!(messages.contains(&EditorAction::SelectRegionOnRow {
+            selection: EditorSelection::new(EditorPosition::new(0, 25), EditorPosition::new(0, 17)),
+            row: 4,
+        }));
+    }
+
+    #[test]
+    fn wrapped_right_click_preserves_rectangular_selection_on_continuation() {
+        let mut editor = TestEditor::new("abcdefghijkl\nnext");
+        editor.viewport = ViewportModel::new_wrapped(&editor.buffer, &FoldModel::default(), 4, 4);
+        let selection =
+            SelectionRange::rectangular(EditorPosition::new(0, 5), EditorPosition::new(0, 7), 5, 7);
+        editor.selections = SelectionSet::from_selection_ranges(vec![selection], 0);
+        let original = editor.selections.clone();
+        let messages = editor.press(mouse::Button::Right, editor.text_point(1, 2));
+        assert_eq!(editor.selections, original);
+        assert!(!messages.iter().any(|message| matches!(
+            message,
+            EditorAction::PlaceCaret(_) | EditorAction::PlaceCaretOnRow { .. }
+        )));
+    }
+
+    #[test]
+    fn gutter_double_click_selects_the_logical_line_after_a_collapsed_block() {
+        let range = FoldRange::new(0, 2);
+        let mut folds = FoldModel::new(vec![range]);
+        folds.set_collapsed(range, true);
+        let mut editor = TestEditor::with_folds("header\nchild\nend\nafter\nlast", folds);
+        let point = Point::new(editor.bounds.x + 10.0, editor.text_point(1, 0).y);
+
+        editor.press(mouse::Button::Left, point);
+        let messages = editor.press(mouse::Button::Left, point);
+
+        assert!(
+            messages.contains(&EditorAction::SelectRegion(EditorSelection::new(
+                EditorPosition::new(3, 0),
+                EditorPosition::new(4, 0),
+            )))
+        );
+    }
+
+    #[test]
+    fn stationary_drag_scrolls_both_directions_and_tracks_the_destination_rows() {
+        let text = (0..40).map(|_| "abcdefgh").collect::<Vec<_>>().join("\n");
+        for upwards in [true, false] {
+            let mut editor = TestEditor::new(&text);
+            editor.layout.scroll.first_visible_row = 10;
+            let start = editor.text_point(2, 2);
+            editor.press(mouse::Button::Left, start);
+            let outside = Point::new(
+                start.x,
+                if upwards {
+                    editor.bounds.y - 5.0
+                } else {
+                    editor.bounds.y + editor.bounds.height + 5.0
+                },
+            );
+            editor.drag_to(outside);
+
+            assert_eq!(
+                editor.layout.scroll.first_visible_row,
+                if upwards { 9 } else { 11 }
+            );
+            assert_eq!(editor.selections.main().anchor, EditorPosition::new(12, 2));
+            assert_eq!(
+                editor.selections.main().cursor,
+                EditorPosition::new(if upwards { 9 } else { 15 }, 2),
+            );
+
+            let due = editor
+                .state
+                .drag_scroll_at
+                .expect("drag should schedule another frame");
+            let early = editor.dispatch(
+                Event::Window(window::Event::RedrawRequested(
+                    due - Duration::from_millis(1),
+                )),
+                mouse::Cursor::Unavailable,
+            );
+            assert!(
+                !early
+                    .iter()
+                    .any(|action| matches!(action, EditorAction::ScrollToRow(_)))
+            );
+            assert_eq!(editor.last_redraw, window::RedrawRequest::At(due));
+
+            editor.dispatch(
+                Event::Window(window::Event::RedrawRequested(due)),
+                mouse::Cursor::Unavailable,
+            );
+            assert_eq!(
+                editor.layout.scroll.first_visible_row,
+                if upwards { 8 } else { 12 }
+            );
+            assert_eq!(
+                editor.selections.main().cursor,
+                EditorPosition::new(if upwards { 8 } else { 16 }, 2),
+            );
+        }
+    }
+
+    #[test]
+    fn drag_stops_at_document_ends_and_selects_the_remaining_text() {
+        let text = (0..10).map(|_| "abcdefgh").collect::<Vec<_>>().join("\n");
+        for upwards in [true, false] {
+            let mut editor = TestEditor::new(&text);
+            editor.layout.scroll.first_visible_row = if upwards { 1 } else { 4 };
+            let start = editor.text_point(2, 2);
+            editor.press(mouse::Button::Left, start);
+            editor.drag_to(Point::new(
+                start.x,
+                if upwards {
+                    editor.bounds.y - 500.0
+                } else {
+                    editor.bounds.y + editor.bounds.height + 500.0
+                },
+            ));
+
+            assert_eq!(
+                editor.layout.scroll.first_visible_row,
+                if upwards { 0 } else { 5 }
+            );
+            assert_eq!(
+                editor.selections.main().cursor,
+                if upwards {
+                    EditorPosition::new(0, 0)
+                } else {
+                    EditorPosition::new(9, 8)
+                }
+            );
+            editor.dispatch(
+                Event::Window(window::Event::RedrawRequested(
+                    Instant::now() + Duration::from_millis(100),
+                )),
+                mouse::Cursor::Unavailable,
+            );
+            assert!(editor.state.drag_scroll_at.is_none());
+        }
+    }
+
+    #[test]
+    fn release_and_window_unfocus_cancel_pending_drag_scroll() {
+        let text = (0..20).map(|_| "abcdefgh").collect::<Vec<_>>().join("\n");
+        for ending in [
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            Event::Window(window::Event::Unfocused),
+        ] {
+            let mut editor = TestEditor::new(&text);
+            editor.layout.scroll.first_visible_row = 10;
+            let start = editor.text_point(2, 2);
+            editor.press(mouse::Button::Left, start);
+            editor.drag_to(Point::new(start.x, editor.bounds.y - 5.0));
+            let due = editor.state.drag_scroll_at.expect("scheduled drag scroll");
+
+            editor.dispatch(ending, mouse::Cursor::Unavailable);
+            let messages = editor.dispatch(
+                Event::Window(window::Event::RedrawRequested(due)),
+                mouse::Cursor::Unavailable,
+            );
+
+            assert!(editor.state.drag_anchor.is_none());
+            assert!(editor.state.drag_position.is_none());
+            assert!(editor.state.drag_scroll_at.is_none());
+            assert!(
+                !messages
+                    .iter()
+                    .any(|action| matches!(action, EditorAction::ScrollToRow(_)))
+            );
+        }
+    }
+
+    #[test]
+    fn right_click_preserves_multiple_selections_and_repositions_outside_them() {
+        let mut editor = TestEditor::new("abcdefgh\nabcdefgh");
+        editor.selections = SelectionSet::from_ranges(
+            vec![
+                EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 2)),
+                EditorSelection::new(EditorPosition::new(1, 1), EditorPosition::new(1, 4)),
+            ],
+            0,
+        );
+        let original = editor.selections.clone();
+        let inside = editor.text_point(1, 2);
+
+        let messages = editor.press(mouse::Button::Right, inside);
+
+        assert!(messages.contains(&EditorAction::Focus));
+        assert!(
+            !messages
+                .iter()
+                .any(|action| matches!(action, EditorAction::PlaceCaret(_)))
+        );
+        assert_eq!(editor.selections, original);
+        let outside = editor.text_point(1, 6);
+        let messages = editor.press(mouse::Button::Right, outside);
+        assert!(messages.contains(&EditorAction::PlaceCaret(EditorPosition::new(1, 6))));
+    }
+
+    #[test]
+    fn right_click_preserves_rectangular_virtual_space_only_inside_the_rectangle() {
+        let mut editor = TestEditor::new("abcdefgh\nx\nabcdefgh");
+        editor.selections =
+            SelectionSet::rectangular(EditorPosition::new(0, 3), EditorPosition::new(2, 6), 3, 6);
+        let original = editor.selections.clone();
+        let inside = editor.text_point(1, 4);
+        editor.press(mouse::Button::Right, inside);
+        assert_eq!(editor.selections, original);
+
+        let outside = editor.text_point(1, 7);
+        let messages = editor.press(mouse::Button::Right, outside);
+        assert!(messages.contains(&EditorAction::PlaceCaret(EditorPosition::new(1, 1))));
     }
 }

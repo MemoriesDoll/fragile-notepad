@@ -5,8 +5,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::editor::buffer::EditorBuffer;
 use crate::editor::decoration::DecorationModel;
 use crate::editor::layout::{
-    EditorLayout, EditorMetrics, HitTarget, byte_column_for, hit_visible_row,
-    scrolled_text_origin_x, visual_column_for,
+    EditorLayout, EditorMetrics, HitTarget, byte_column_for_with_offset, hit_visible_row, row_y,
+    scrolled_text_origin_x, visual_column_for_with_offset,
 };
 use crate::editor::position::EditorPosition;
 use crate::editor::render::{RowRenderPlan, SelectionRenderPlan};
@@ -36,7 +36,8 @@ impl<Paragraph> Default for LineGeometryCache<Paragraph> {
 
 #[derive(Debug)]
 struct LineGeometryEntry<Paragraph> {
-    line: usize,
+    visible_row: usize,
+    start_visual_column: usize,
     text: String,
     metrics: EditorMetrics,
     scale_factor: Option<f32>,
@@ -56,9 +57,9 @@ impl<Paragraph> LineGeometryCache<Paragraph> {
         }
     }
 
-    fn slot_for_line(&self, line: usize) -> usize {
+    fn slot_for_row(&self, visible_row: usize) -> usize {
         debug_assert!(!self.entries.is_empty());
-        line % self.entries.len()
+        visible_row % self.entries.len()
     }
 
     fn geometry(&self, slot: usize) -> Option<&LineGeometry<Paragraph>> {
@@ -80,7 +81,8 @@ where
 {
     fn ensure<Renderer>(
         &mut self,
-        line: usize,
+        visible_row: usize,
+        start_visual_column: usize,
         text: &str,
         metrics: EditorMetrics,
         renderer: &Renderer,
@@ -89,9 +91,10 @@ where
         Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
     {
         let scale_factor = renderer.scale_factor();
-        let slot = self.slot_for_line(line);
+        let slot = self.slot_for_row(visible_row);
         let is_hit = self.entries[slot].as_ref().is_some_and(|entry| {
-            entry.line == line
+            entry.visible_row == visible_row
+                && entry.start_visual_column == start_visual_column
                 && entry.text == text
                 && entry.metrics == metrics
                 && entry.scale_factor == scale_factor
@@ -104,11 +107,21 @@ where
             }
 
             self.entries[slot] = Some(LineGeometryEntry {
-                line,
+                visible_row,
+                start_visual_column,
                 text: text.to_owned(),
                 metrics,
                 scale_factor,
-                geometry: LineGeometry::new(text, metrics, renderer),
+                geometry: if start_visual_column == 0 {
+                    LineGeometry::new(text, metrics, renderer)
+                } else {
+                    LineGeometry::new_with_visual_offset(
+                        text,
+                        metrics,
+                        renderer,
+                        start_visual_column,
+                    )
+                },
             });
         }
 
@@ -118,7 +131,7 @@ where
 
 pub(super) fn measured_text_hit_target<Renderer>(
     position: Point,
-    layout: EditorLayout,
+    mut layout: EditorLayout,
     buffer: &EditorBuffer,
     viewport: &ViewportModel,
     decorations: &DecorationModel,
@@ -127,17 +140,87 @@ pub(super) fn measured_text_hit_target<Renderer>(
 where
     Renderer: text::Renderer<Font = Font>,
 {
-    let Some((_visible_row, line)) = hit_visible_row(position.y, layout, viewport) else {
+    let Some((visible_row, line)) = hit_visible_row(position.y, layout, viewport) else {
         return HitTarget::Outside;
     };
+    let Some(segment) = viewport.row_segment(visible_row, buffer) else {
+        return HitTarget::Outside;
+    };
+    if viewport.wrap_columns().is_some() {
+        layout.scroll.horizontal_px = 0.0;
+    }
 
     let line_text = buffer.line(line).unwrap_or_default();
+    let fragment = &line_text[segment.start_column..segment.end_column];
     let text_x = scrolled_text_origin_x(layout, decorations);
     let x = (position.x - text_x).max(0.0);
-    let column = LineGeometry::new(&line_text, layout.metrics, renderer)
+    let column = segment.start_column
+        + LineGeometry::new_with_visual_offset(
+            fragment,
+            layout.metrics,
+            renderer,
+            segment.start_visual_column,
+        )
         .byte_column_for_x(x, decorations.settings.indent_width);
 
     HitTarget::Text(buffer.clamp_position(EditorPosition::new(line, column)))
+}
+
+/// Measures a document position within its visual row. The optional row keeps
+/// an upstream caret at the end of a wrapped fragment on that fragment.
+pub(crate) fn measured_position_point<Renderer>(
+    buffer: &EditorBuffer,
+    viewport: &ViewportModel,
+    decorations: &DecorationModel,
+    mut layout: EditorLayout,
+    position: EditorPosition,
+    caret_row: Option<usize>,
+    renderer: &Renderer,
+) -> Point
+where
+    Renderer: text::Renderer<Font = Font>,
+{
+    let position = buffer.clamp_position(position);
+    if viewport.wrap_columns().is_some() {
+        layout.scroll.horizontal_px = 0.0;
+    }
+    let visible_row = caret_row
+        .filter(|row| {
+            viewport.visible_row_to_document_line(*row) == Some(position.line)
+                && viewport.row_segment(*row, buffer).is_some_and(|segment| {
+                    position.column >= segment.start_column && position.column <= segment.end_column
+                })
+        })
+        .or_else(|| viewport.position_to_visible_row(position))
+        .unwrap_or(layout.scroll.first_visible_row);
+    let line = buffer.line(position.line).unwrap_or_default();
+    let (start, end, visual_offset) = viewport
+        .row_segment(visible_row, buffer)
+        .filter(|_| viewport.visible_row_to_document_line(visible_row) == Some(position.line))
+        .map(|segment| {
+            (
+                segment.start_column,
+                segment.end_column,
+                segment.start_visual_column,
+            )
+        })
+        .unwrap_or((0, line.len(), 0));
+    let geometry = LineGeometry::new_with_visual_offset(
+        &line[start.min(line.len())..end.min(line.len())],
+        layout.metrics,
+        renderer,
+        visual_offset,
+    );
+
+    Point::new(
+        measured_caret_x(
+            &geometry,
+            position.column.saturating_sub(start),
+            layout,
+            decorations,
+        ),
+        row_y(visible_row, layout),
+    )
 }
 
 pub(super) fn measured_caret_x<Paragraph>(
@@ -166,7 +249,8 @@ where
     virtual_column
         .map(|visual_column| {
             scrolled_text_origin_x(layout, decorations)
-                + visual_column as f32 * layout.metrics.character_width
+                + visual_column.saturating_sub(line_geometry.start_visual_column()) as f32
+                    * layout.metrics.character_width
         })
         .unwrap_or_else(|| measured_caret_x(line_geometry, column, layout, decorations))
 }
@@ -224,8 +308,14 @@ where
             .iter()
             .map(|row| {
                 (
-                    row.line,
-                    cache.ensure(row.line, &row.text, metrics, renderer),
+                    row.visible_row,
+                    cache.ensure(
+                        row.visible_row,
+                        row.start_visual_column,
+                        &row.text,
+                        metrics,
+                        renderer,
+                    ),
                 )
             })
             .collect();
@@ -234,24 +324,6 @@ where
             cache: &*cache,
             rows,
         }
-    }
-
-    pub(super) fn get(&self, line: usize) -> &LineGeometry<Paragraph> {
-        match self.get_optional(line) {
-            Some(geometry) => geometry,
-            None => self
-                .rows
-                .first()
-                .and_then(|(_, slot)| self.cache.geometry(*slot))
-                .expect("visible row geometry"),
-        }
-    }
-
-    pub(super) fn get_optional(&self, line: usize) -> Option<&LineGeometry<Paragraph>> {
-        self.rows
-            .binary_search_by_key(&line, |(row_line, _)| *row_line)
-            .ok()
-            .and_then(|index| self.cache.geometry(self.rows[index].1))
     }
 
     pub(super) fn get_by_row_index(&self, row_index: usize) -> &LineGeometry<Paragraph> {
@@ -270,16 +342,19 @@ pub(super) enum LineGeometry<Paragraph> {
     Fast {
         text: String,
         character_width: f32,
+        start_visual_column: usize,
     },
     Tabular {
         text: String,
         character_width: f32,
+        start_visual_column: usize,
     },
     Measured {
         text: String,
         paragraph: Paragraph,
         byte_to_grapheme: Vec<(usize, usize)>,
         fallback_character_width: f32,
+        start_visual_column: usize,
     },
 }
 
@@ -291,10 +366,23 @@ where
     where
         Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
     {
+        Self::new_with_visual_offset(text, metrics, renderer, 0)
+    }
+
+    pub(super) fn new_with_visual_offset<Renderer>(
+        text: &str,
+        metrics: EditorMetrics,
+        renderer: &Renderer,
+        start_visual_column: usize,
+    ) -> Self
+    where
+        Renderer: text::Renderer<Font = Font, Paragraph = Paragraph>,
+    {
         if can_use_fast_geometry(text) {
             return Self::Fast {
                 text: text.to_owned(),
                 character_width: metrics.character_width,
+                start_visual_column,
             };
         }
 
@@ -302,6 +390,7 @@ where
             return Self::Tabular {
                 text: text.to_owned(),
                 character_width: metrics.character_width,
+                start_visual_column,
             };
         }
 
@@ -315,6 +404,24 @@ where
             )),
             byte_to_grapheme: byte_to_grapheme_table(text),
             fallback_character_width: metrics.character_width,
+            start_visual_column,
+        }
+    }
+
+    pub(super) fn start_visual_column(&self) -> usize {
+        match self {
+            Self::Fast {
+                start_visual_column,
+                ..
+            }
+            | Self::Tabular {
+                start_visual_column,
+                ..
+            }
+            | Self::Measured {
+                start_visual_column,
+                ..
+            } => *start_visual_column,
         }
     }
 
@@ -323,16 +430,25 @@ where
             Self::Fast {
                 text,
                 character_width,
+                start_visual_column,
             }
             | Self::Tabular {
                 text,
                 character_width,
-            } => visual_column_for(text, byte_column, tab_width) as f32 * character_width,
+                start_visual_column,
+            } => fallback_x_for_byte_column(
+                text,
+                byte_column,
+                *character_width,
+                tab_width,
+                *start_visual_column,
+            ),
             Self::Measured {
                 text,
                 paragraph,
                 byte_to_grapheme,
                 fallback_character_width,
+                start_visual_column,
             } => {
                 if text.contains('\t') {
                     return fallback_x_for_byte_column(
@@ -340,6 +456,7 @@ where
                         byte_column,
                         *fallback_character_width,
                         tab_width,
+                        *start_visual_column,
                     );
                 }
 
@@ -355,6 +472,7 @@ where
                             byte_column,
                             *fallback_character_width,
                             tab_width,
+                            *start_visual_column,
                         )
                     })
             }
@@ -366,18 +484,26 @@ where
             Self::Fast {
                 text,
                 character_width,
+                start_visual_column,
             }
             | Self::Tabular {
                 text,
                 character_width,
+                start_visual_column,
             } => {
                 let visual_column = (x / character_width).floor().max(0.0) as usize;
-                byte_column_for(text, visual_column, tab_width)
+                byte_column_for_with_offset(
+                    text,
+                    start_visual_column.saturating_add(visual_column),
+                    tab_width,
+                    *start_visual_column,
+                )
             }
             Self::Measured {
                 text,
                 paragraph,
                 fallback_character_width,
+                start_visual_column,
                 ..
             } => {
                 if text.contains('\t') {
@@ -386,6 +512,7 @@ where
                         x,
                         *fallback_character_width,
                         tab_width,
+                        *start_visual_column,
                     );
                 }
 
@@ -394,7 +521,13 @@ where
                     .map(text::Hit::cursor)
                     .map(|offset| clamp_byte_boundary(text, offset))
                     .unwrap_or_else(|| {
-                        fallback_byte_column_for_x(text, x, *fallback_character_width, tab_width)
+                        fallback_byte_column_for_x(
+                            text,
+                            x,
+                            *fallback_character_width,
+                            tab_width,
+                            *start_visual_column,
+                        )
                     })
             }
         }
@@ -414,14 +547,28 @@ fn fallback_x_for_byte_column(
     byte_column: usize,
     character_width: f32,
     tab_width: usize,
+    start_visual_column: usize,
 ) -> f32 {
-    visual_column_for(text, byte_column, tab_width) as f32 * character_width
+    visual_column_for_with_offset(text, byte_column, tab_width, start_visual_column)
+        .saturating_sub(start_visual_column) as f32
+        * character_width
 }
 
-fn fallback_byte_column_for_x(text: &str, x: f32, character_width: f32, tab_width: usize) -> usize {
+fn fallback_byte_column_for_x(
+    text: &str,
+    x: f32,
+    character_width: f32,
+    tab_width: usize,
+    start_visual_column: usize,
+) -> usize {
     let target = (x / character_width).floor().max(0.0) as usize;
 
-    byte_column_for(text, target, tab_width)
+    byte_column_for_with_offset(
+        text,
+        start_visual_column.saturating_add(target),
+        tab_width,
+        start_visual_column,
+    )
 }
 
 fn measure_text<'a, Renderer>(
@@ -487,6 +634,114 @@ fn clamp_byte_boundary(text: &str, byte_column: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::decoration::DecorationSettings;
+    use crate::editor::fold::FoldModel;
+    use crate::editor::layout::ScrollOffset;
+
+    #[test]
+    fn wrapped_fragment_geometry_preserves_logical_tab_stops() {
+        let metrics = EditorMetrics::new(18.0, 10.0);
+        let geometry = LineGeometry::<()>::new_with_visual_offset("x\ty", metrics, &(), 5);
+
+        assert_eq!(geometry.x_for_byte_column(1, 4), 10.0);
+        assert_eq!(geometry.x_for_byte_column(2, 4), 30.0);
+        assert_eq!(geometry.byte_column_for_x(29.0, 4), 1);
+        assert_eq!(geometry.byte_column_for_x(30.0, 4), 2);
+    }
+
+    #[test]
+    fn wrapped_cache_keeps_fragments_of_same_line_separate_and_reflows_offsets() {
+        let metrics = EditorMetrics::default();
+        let mut cache = LineGeometryCache::<()>::default();
+        cache.ensure_capacity(2);
+        let first = cache.ensure(0, 0, "first", metrics, &());
+        let second = cache.ensure(1, 5, "\tend", metrics, &());
+        assert_ne!(first, second);
+        assert_eq!(cache.geometry(first).unwrap().x_for_byte_column(5, 4), 40.0);
+        assert_eq!(
+            cache.geometry(second).unwrap().x_for_byte_column(1, 4),
+            24.0
+        );
+
+        cache.ensure(1, 6, "\tend", metrics, &());
+        assert_eq!(
+            cache.geometry(second).unwrap().x_for_byte_column(1, 4),
+            16.0
+        );
+        assert_eq!(cache.build_count(), 3);
+    }
+
+    #[test]
+    fn wrapped_hit_testing_and_ime_geometry_use_visual_rows_and_caret_affinity() {
+        let buffer = EditorBuffer::from_text("abcdefghij\nnext");
+        let folds = FoldModel::default();
+        let viewport = ViewportModel::new_wrapped(&buffer, &folds, 4, 4);
+        let decorations = DecorationModel::from_folds(
+            DecorationSettings::default(),
+            buffer.line_count(),
+            &folds,
+            vec![],
+        );
+        let metrics = EditorMetrics::default();
+        let layout = EditorLayout::new(
+            metrics,
+            ScrollOffset {
+                first_visible_row: 0,
+                horizontal_px: 80.0,
+            },
+            300.0,
+            100.0,
+        );
+        let origin = metrics.text_origin_x(&decorations);
+        let point = Point::new(
+            origin + metrics.character_width + 0.1,
+            metrics.padding_top + metrics.line_height + 1.0,
+        );
+
+        assert_eq!(
+            measured_text_hit_target(point, layout, &buffer, &viewport, &decorations, &()),
+            HitTarget::Text(EditorPosition::new(0, 5))
+        );
+        assert_eq!(
+            measured_position_point(
+                &buffer,
+                &viewport,
+                &decorations,
+                layout,
+                EditorPosition::new(0, 5),
+                None,
+                &()
+            ),
+            Point::new(
+                origin + metrics.character_width,
+                metrics.padding_top + metrics.line_height
+            )
+        );
+        assert_eq!(
+            measured_position_point(
+                &buffer,
+                &viewport,
+                &decorations,
+                layout,
+                EditorPosition::new(0, 4),
+                Some(0),
+                &()
+            ),
+            Point::new(origin + 4.0 * metrics.character_width, metrics.padding_top)
+        );
+        assert_eq!(
+            measured_position_point(
+                &buffer,
+                &viewport,
+                &decorations,
+                layout,
+                EditorPosition::new(0, 4),
+                None,
+                &()
+            ),
+            Point::new(origin, metrics.padding_top + metrics.line_height)
+        );
+    }
 
     #[test]
     fn line_geometry_cache_reuses_page_rows_across_wheel_scroll_frames() {
@@ -495,9 +750,9 @@ mod tests {
 
         for frame in 0..2 {
             for line in frame..frame + 37 {
-                let slot = cache.slot_for_line(line);
+                let slot = cache.slot_for_row(line);
                 let is_hit = cache.entries[slot].as_ref().is_some_and(|entry| {
-                    entry.line == line
+                    entry.visible_row == line
                         && entry.text == format!("line {line}")
                         && entry.metrics == EditorMetrics::default()
                         && entry.scale_factor.is_none()
@@ -506,13 +761,15 @@ mod tests {
                 if !is_hit {
                     cache.build_count += 1;
                     cache.entries[slot] = Some(LineGeometryEntry {
-                        line,
+                        visible_row: line,
+                        start_visual_column: 0,
                         text: format!("line {line}"),
                         metrics: EditorMetrics::default(),
                         scale_factor: None,
                         geometry: LineGeometry::Fast {
                             text: format!("line {line}"),
                             character_width: EditorMetrics::default().character_width,
+                            start_visual_column: 0,
                         },
                     });
                 }

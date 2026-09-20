@@ -165,9 +165,9 @@ impl App {
                         document_id,
                         crate::editor::EditorAction::SelectRegion(selection),
                     );
-                    self.reveal_document_line(
+                    self.reveal_document_position(
                         document_id,
-                        selection.range().normalized().start.line,
+                        selection.range().normalized().start,
                     );
                 }
                 Task::none()
@@ -298,7 +298,7 @@ impl App {
                 end_position,
             )),
         );
-        self.reveal_document_line(document_id, start_position.line);
+        self.reveal_document_position(document_id, start_position);
     }
 
     fn replace_all(&mut self) -> Task<Message> {
@@ -636,7 +636,7 @@ impl App {
             .clamp_position(crate::editor::EditorPosition::new(target_line, 0));
 
         document.set_main_selection(EditorSelection::new(position, position));
-        document.reveal_line(target_line);
+        document.reveal_position(position);
         self.search_dialog.status = format!("Line {} of {}", target_line + 1, line_count);
     }
 
@@ -719,11 +719,15 @@ impl App {
         changed
     }
 
-    fn reveal_document_line(&mut self, document_id: crate::core::DocumentId, line: usize) {
+    fn reveal_document_position(
+        &mut self,
+        document_id: crate::core::DocumentId,
+        position: crate::editor::EditorPosition,
+    ) {
         let Some(document) = self.workspace.document_mut(document_id) else {
             return;
         };
-        document.reveal_line(line);
+        document.reveal_position(position);
     }
 }
 
