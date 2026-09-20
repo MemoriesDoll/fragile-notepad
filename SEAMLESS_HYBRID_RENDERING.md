@@ -31,8 +31,11 @@ boost. Opening About does not request a backend change.
 Find, inline replace, and function-list visibility use short reveal/fade transitions;
 menus, custom settings dropdowns, and confirmation/window-list popups have brief
 entrance motion. These run on both renderers and request frames only while
-transitioning. The About panel and its backdrop fade in and out; its logo and
-contents remain static once open.
+transitioning. The About panel and its backdrop fade in and out. Its header has
+soft color bloom and slowly drifting light rays behind a macaw quill, capped
+at 24 animation updates per second. The effect automatically stops scheduling
+frames while unfocused, clipped out, or closing, and never requests a renderer
+handoff.
 
 The app states are `Software`, `PreparingHardware`, `Hardware`, and
 `Failed(RenderFailureCategory)`. Duplicate requests are suppressed while preparing

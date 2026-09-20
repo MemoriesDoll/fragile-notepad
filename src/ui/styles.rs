@@ -435,6 +435,78 @@ pub fn modal_dialog(theme: &Theme) -> container::Style {
     }
 }
 
+pub fn info_dialog(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+
+    container::Style {
+        background: Some(Background::Color(palette.overlay)),
+        text_color: Some(palette.text),
+        border: border(1.0, palette.border_soft, 12.0),
+        // The software renderer rebuilds a blurred shadow on every header
+        // animation frame. The scrim and border already separate this panel.
+        ..container::Style::default()
+    }
+}
+
+pub fn info_card(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+
+    container::Style {
+        background: Some(Background::Color(palette.surface_low)),
+        text_color: Some(palette.text),
+        border: border(1.0, palette.border_soft, 8.0),
+        ..container::Style::default()
+    }
+}
+
+pub fn info_muted(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+
+    container::Style {
+        text_color: Some(palette.muted_text),
+        ..container::Style::default()
+    }
+}
+
+pub fn info_badge(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+
+    container::Style {
+        background: Some(Background::Color(palette.accent_soft)),
+        text_color: Some(palette.accent),
+        border: border(0.0, Color::TRANSPARENT, CONTROL_RADIUS),
+        ..container::Style::default()
+    }
+}
+
+pub fn info_tab(theme: &Theme, status: button::Status, active: bool) -> button::Style {
+    let palette = VisualPalette::from_theme(theme);
+    let background = if active {
+        Some(Background::Color(palette.surface))
+    } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+        Some(Background::Color(palette.surface_low))
+    } else {
+        None
+    };
+
+    button::Style {
+        background,
+        text_color: if matches!(status, button::Status::Disabled) {
+            palette.faint_text
+        } else if active {
+            palette.accent
+        } else {
+            palette.muted_text
+        },
+        border: border(
+            if active { 1.0 } else { 0.0 },
+            palette.border_soft,
+            CONTROL_RADIUS,
+        ),
+        ..button::Style::default()
+    }
+}
+
 pub fn logo_placeholder(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 

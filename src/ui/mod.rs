@@ -10,6 +10,7 @@ mod editor_context_menu;
 pub mod find_panel;
 pub mod function_list_panel;
 pub mod icons;
+pub mod info_vfx;
 pub mod menu;
 pub mod motion;
 pub mod settings_panel;

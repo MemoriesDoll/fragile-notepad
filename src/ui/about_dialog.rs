@@ -1,11 +1,12 @@
 use iced::widget::{button, column, container, opaque, row, rule, scrollable, space, stack, text};
-use iced::{Alignment, Center, Element, Fill, Length};
+use iced::{Center, Element, Fill, Length};
 
 use crate::message::{AboutTab, Message};
-use crate::ui::{centered_button_label, motion, styles};
+use crate::ui::{centered_button_label, centered_fill_button_label, info_vfx, motion, styles};
 
 const APP_NAME: &str = "Fragile Notepad";
-const AUTHOR: &str = "Rachel Fragile <rabbit0w0@outlook.com>";
+const AUTHOR: &str = "Rachel Fragile";
+const AUTHOR_EMAIL: &str = "rabbit0w0@outlook.com";
 
 // Fade the actual paint colors so the editor remains visible behind the modal.
 // A solid veil (used by docked panels) would hide that backdrop instead.
@@ -131,7 +132,8 @@ pub fn view(
                 .height(Fill)
                 .style(move |theme| fade_container(styles::modal_scrim(theme), progress))
         ),
-        container(dialog(active_tab, rendering, progress))
+        container(dialog(active_tab, rendering, progress, interactive))
+            .padding(16)
             .width(Fill)
             .height(Fill)
             .center_x(Fill)
@@ -151,72 +153,99 @@ fn dialog(
     active_tab: AboutTab,
     rendering: RenderingDebugInfo,
     progress: f32,
+    interactive: bool,
 ) -> Element<'static, Message> {
+    let content = match active_tab {
+        AboutTab::About => about_content(progress),
+        AboutTab::Debug => debug_content(rendering, progress),
+        AboutTab::Licenses => licenses_content(progress),
+    };
+
     container(
         column![
-            header(progress),
-            tabs(active_tab, progress),
-            rule::horizontal(1).style(move |theme| {
-                let mut style = rule::default(theme);
-                style.color = style.color.scale_alpha(progress);
-                style
-            }),
-            match active_tab {
-                AboutTab::About => about_content(),
-                AboutTab::Debug => debug_content(rendering, progress),
-                AboutTab::Licenses => licenses_content(progress),
-            },
-            row![
-                space::horizontal(),
-                button(centered_button_label("Close", 13))
-                    .padding([7, 18])
-                    .style(move |theme, status| fade_button(
-                        styles::primary_command_button(theme, status),
-                        progress
-                    ))
-                    .on_press(Message::AboutClosed),
-            ]
-            .align_y(Center)
-            .width(Fill),
+            container(
+                column![header(progress, interactive), tabs(active_tab, progress)].spacing(12)
+            )
+            .padding([22, 24]),
+            container(content).padding([0, 24]).height(Fill).width(Fill),
+            container(
+                column![
+                    divider(progress),
+                    row![
+                        muted(
+                            text(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(12),
+                            progress
+                        ),
+                        space::horizontal(),
+                        button(centered_button_label("Close", 13))
+                            .padding([8, 24])
+                            .style(move |theme, status| fade_button(
+                                styles::primary_command_button(theme, status),
+                                progress
+                            ))
+                            .on_press(Message::AboutClosed),
+                    ]
+                    .spacing(10)
+                    .align_y(Center)
+                    .width(Fill),
+                ]
+                .spacing(14)
+            )
+            .padding([16, 24]),
         ]
-        .spacing(14)
-        .align_x(Alignment::Start),
+        .height(Fill)
+        .width(Fill),
     )
-    .width(Length::Fixed(560.0))
-    .height(Length::Fixed(470.0))
-    .padding(20)
-    .style(move |theme| fade_container(styles::modal_dialog(theme), progress))
+    .width(Length::Fixed(600.0))
+    .height(Length::Fixed(500.0))
+    .clip(true)
+    .style(move |theme| fade_container(styles::info_dialog(theme), progress))
     .into()
 }
 
-fn header(progress: f32) -> Element<'static, Message> {
-    row![
-        container(text("FN").size(22))
-            .width(Length::Fixed(56.0))
-            .height(Length::Fixed(56.0))
-            .center_x(Length::Fixed(56.0))
-            .center_y(Length::Fixed(56.0))
-            .style(move |theme| fade_container(styles::logo_placeholder(theme), progress)),
-        column![
-            text(APP_NAME).size(22),
-            text(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(13),
-        ]
-        .spacing(4),
+fn header(progress: f32, effects_running: bool) -> Element<'static, Message> {
+    stack![
+        info_vfx::view(progress, effects_running),
+        container(
+            row![
+                container(text("FN").size(20))
+                    .width(Length::Fixed(52.0))
+                    .height(Length::Fixed(52.0))
+                    .center_x(Length::Fixed(52.0))
+                    .center_y(Length::Fixed(52.0))
+                    .style(move |theme| fade_container(styles::logo_placeholder(theme), progress)),
+                column![
+                    text(APP_NAME).size(22),
+                    muted(
+                        text("A lightweight editor for everyday text.").size(13),
+                        progress
+                    ),
+                ]
+                .spacing(4)
+                .width(Fill),
+            ]
+            .spacing(16)
+            .align_y(Center)
+        )
+        .width(Fill)
+        .height(84)
+        .center_y(Fill),
     ]
-    .spacing(14)
-    .align_y(Center)
     .into()
 }
 
 fn tabs(active_tab: AboutTab, progress: f32) -> Element<'static, Message> {
-    row![
-        tab_button("About", AboutTab::About, active_tab, progress),
-        tab_button("Debug", AboutTab::Debug, active_tab, progress),
-        tab_button("Licenses", AboutTab::Licenses, active_tab, progress),
-        space::horizontal(),
-    ]
-    .spacing(8)
-    .width(Fill)
+    container(
+        row![
+            tab_button("About", AboutTab::About, active_tab, progress),
+            tab_button("Debug", AboutTab::Debug, active_tab, progress),
+            tab_button("Licenses", AboutTab::Licenses, active_tab, progress),
+        ]
+        .spacing(4)
+        .width(Fill),
+    )
+    .padding(4)
+    .style(move |theme| fade_container(styles::info_card(theme), progress))
     .into()
 }
 
@@ -226,30 +255,53 @@ fn tab_button(
     active_tab: AboutTab,
     progress: f32,
 ) -> Element<'static, Message> {
-    button(centered_button_label(label, 13))
-        .padding([6, 14])
+    button(centered_fill_button_label(label, 13))
+        .padding([7, 14])
+        .width(Fill)
         .style(move |theme, status| {
-            let style = if tab == active_tab {
-                styles::primary_command_button(theme, status)
-            } else {
-                styles::command_button(theme, status)
-            };
+            let style = styles::info_tab(theme, status, tab == active_tab);
             fade_button(style, progress)
         })
         .on_press(Message::AboutTabSelected(tab))
         .into()
 }
 
-fn about_content() -> Element<'static, Message> {
-    column![
-        text("Author").size(13),
-        text(AUTHOR).size(15),
-        space::vertical().height(8),
-        text("A lightweight notepad-style editor focused on fast local text editing.").size(13),
-    ]
-    .spacing(6)
-    .width(Fill)
-    .into()
+fn about_content(progress: f32) -> Element<'static, Message> {
+    scrollable(column![
+        column![
+            text("A little space for your words.").size(24),
+            muted(text("Quick notes, source code, and everything in between.\nSimple tools for working with local text files.").size(14), progress),
+        ].spacing(10),
+        container(column![
+            muted(text("CREATED BY").size(11), progress),
+            text(AUTHOR).size(16),
+            muted(text(AUTHOR_EMAIL).size(13), progress),
+        ].spacing(6)).padding(18).width(Fill)
+            .style(move |theme| fade_container(styles::info_card(theme), progress)),
+    ].spacing(22).padding([2, 0]).width(Fill))
+        .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
+        .height(Fill)
+        .width(Fill)
+        .into()
+}
+
+fn muted(
+    content: impl Into<Element<'static, Message>>,
+    progress: f32,
+) -> Element<'static, Message> {
+    container(content)
+        .style(move |theme| fade_container(styles::info_muted(theme), progress))
+        .into()
+}
+
+fn divider(progress: f32) -> Element<'static, Message> {
+    rule::horizontal(1)
+        .style(move |theme| {
+            let mut style = rule::default(theme);
+            style.color = style.color.scale_alpha(progress * 0.5);
+            style
+        })
+        .into()
 }
 
 fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'static, Message> {
@@ -272,6 +324,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
     scrollable(
         column![
             debug_section(
+                progress,
                 "Application",
                 &[
                     ("Name", env!("CARGO_PKG_NAME").to_owned()),
@@ -282,6 +335,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
                 ],
             ),
             debug_section(
+                progress,
                 "Runtime",
                 &[
                     ("Operating system", std::env::consts::OS.to_owned()),
@@ -298,6 +352,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
                 ],
             ),
             debug_section(
+                progress,
                 "Rendering",
                 &[
                     ("Current renderer", rendering.current_renderer),
@@ -309,6 +364,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
                 ],
             ),
             debug_section(
+                progress,
                 "Bundled Data",
                 &[
                     (
@@ -325,7 +381,8 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
                 ],
             ),
         ]
-        .spacing(14)
+        .spacing(12)
+        .padding(iced::Padding::new(0.0).right(10))
         .width(Fill),
     )
     .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
@@ -335,37 +392,52 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
 }
 
 fn debug_section(
+    progress: f32,
     heading: &'static str,
     rows: &[(&'static str, String)],
 ) -> Element<'static, Message> {
     let rows = rows
         .iter()
-        .fold(column![].spacing(4), |column, (label, value)| {
+        .fold(column![].spacing(9), |column, (label, value)| {
             column.push(
                 row![
-                    text(*label).size(12).width(Length::Fixed(142.0)),
-                    text(value.clone()).size(12).width(Fill),
+                    container(muted(text(*label).size(12), progress)).width(140),
+                    text(value.clone()).size(13).width(Fill),
                 ]
                 .spacing(10)
-                .align_y(Center),
+                .align_y(iced::Top),
             )
         });
 
-    column![text(heading).size(13), rows]
-        .spacing(6)
+    container(column![text(heading.to_owned()).size(15), divider(progress), rows].spacing(12))
+        .padding(16)
         .width(Fill)
+        .style(move |theme| fade_container(styles::info_card(theme), progress))
         .into()
 }
 
 fn licenses_content(progress: f32) -> Element<'static, Message> {
     scrollable(
-        column(
-            LICENSES
-                .iter()
-                .map(license_entry)
-                .collect::<Vec<Element<'static, Message>>>(),
-        )
-        .spacing(12)
+        column![
+            column![
+                text("Open-source acknowledgements").size(18),
+                muted(
+                    text("Fragile Notepad is built with these libraries and assets.").size(13),
+                    progress
+                )
+            ]
+            .spacing(6),
+            column(
+                LICENSES
+                    .iter()
+                    .map(|entry| license_entry(entry, progress))
+                    .collect::<Vec<Element<'static, Message>>>(),
+            )
+            .spacing(10)
+            .width(Fill),
+        ]
+        .spacing(18)
+        .padding(iced::Padding::new(0.0).right(10))
         .width(Fill),
     )
     .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
@@ -374,17 +446,25 @@ fn licenses_content(progress: f32) -> Element<'static, Message> {
     .into()
 }
 
-fn license_entry(entry: &LicenseEntry) -> Element<'static, Message> {
-    column![
-        text(format!(
-            "{} {} - {}",
-            entry.name, entry.version, entry.license
-        ))
-        .size(13),
-        text(entry.notes).size(12).width(Fill),
-    ]
-    .spacing(3)
+fn license_entry(entry: &LicenseEntry, progress: f32) -> Element<'static, Message> {
+    container(
+        column![
+            row![
+                text(entry.name).size(15).width(Fill),
+                muted(text(entry.version).size(12), progress)
+            ]
+            .spacing(8)
+            .align_y(Center),
+            container(text(entry.license).size(11).width(Fill))
+                .padding([4, 8])
+                .style(move |theme| fade_container(styles::info_badge(theme), progress)),
+            muted(text(entry.notes).size(12).width(Fill), progress),
+        ]
+        .spacing(8),
+    )
+    .padding(16)
     .width(Fill)
+    .style(move |theme| fade_container(styles::info_card(theme), progress))
     .into()
 }
 
@@ -393,9 +473,9 @@ mod tests {
     use super::*;
     use iced::advanced::graphics::core::shell::Waker;
     use iced::advanced::renderer::{self, Headless};
-    use iced::advanced::widget::Tree;
+    use iced::advanced::widget::{self, Operation, Tree, operation};
     use iced::advanced::{Layout, Renderer as _, Shell, layout, mouse};
-    use iced::{Color, Event, Point, Rectangle, Renderer, Size, Theme, window};
+    use iced::{Color, Event, Point, Rectangle, Renderer, Size, Theme, Vector, window};
 
     const VIEWPORT: Rectangle = Rectangle {
         x: 0.0,
@@ -420,14 +500,117 @@ mod tests {
     }
 
     fn mount(content: &mut Element<'_, Message>, renderer: &Renderer) -> (Tree, layout::Node) {
+        mount_in(content, renderer, VIEWPORT.size())
+    }
+
+    fn mount_in(
+        content: &mut Element<'_, Message>,
+        renderer: &Renderer,
+        size: Size,
+    ) -> (Tree, layout::Node) {
         let mut tree = Tree::empty();
         tree.diff(content.as_widget_mut());
         let node = content.as_widget_mut().layout(
             &mut tree,
             renderer,
-            &layout::Limits::new(Size::ZERO, VIEWPORT.size()),
+            &layout::Limits::new(Size::ZERO, size),
         );
         (tree, node)
+    }
+
+    #[derive(Default)]
+    struct DialogLayout {
+        close: Option<Rectangle>,
+        scroll_regions: Vec<(Rectangle, Rectangle)>,
+    }
+
+    impl Operation for DialogLayout {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+
+        fn text(&mut self, _id: Option<&widget::Id>, bounds: Rectangle, text: &str) {
+            if text == "Close" {
+                self.close = Some(bounds);
+            }
+        }
+
+        fn scrollable(
+            &mut self,
+            _id: Option<&widget::Id>,
+            bounds: Rectangle,
+            content_bounds: Rectangle,
+            _translation: Vector,
+            _state: &mut dyn operation::Scrollable,
+        ) {
+            self.scroll_regions.push((bounds, content_bounds));
+        }
+    }
+
+    fn inspect_layout(
+        content: &mut Element<'_, Message>,
+        tree: &mut Tree,
+        node: &layout::Node,
+        renderer: &Renderer,
+    ) -> DialogLayout {
+        let mut inspection = DialogLayout::default();
+        content
+            .as_widget_mut()
+            .operate(tree, Layout::new(node), renderer, &mut inspection);
+        inspection
+    }
+
+    #[test]
+    fn small_windows_keep_the_footer_fixed_and_content_scrollable() {
+        let renderer = renderer();
+        for size in [Size::new(480.0, 360.0), Size::new(640.0, 480.0)] {
+            let mut footer = None;
+            for tab in [AboutTab::About, AboutTab::Debug, AboutTab::Licenses] {
+                let mut content = view(tab, rendering_info(), 1.0, true);
+                let (mut tree, node) = mount_in(&mut content, &renderer, size);
+                let inspection = inspect_layout(&mut content, &mut tree, &node, &renderer);
+                let close = inspection.close.expect("Close control must be present");
+                assert!(close.width > 0.0 && close.height > 0.0);
+                assert!(
+                    close.x >= 0.0
+                        && close.y >= 0.0
+                        && close.x + close.width <= size.width
+                        && close.y + close.height <= size.height,
+                    "{tab:?}: Close must stay inside {size:?}, got {close:?}"
+                );
+                if let Some(expected) = footer {
+                    assert_eq!(
+                        close, expected,
+                        "switching tabs must not move the footer at {size:?}"
+                    );
+                } else {
+                    footer = Some(close);
+                }
+                assert_eq!(
+                    inspection.scroll_regions.len(),
+                    1,
+                    "each tab must have one scrolling body"
+                );
+                let (viewport, body) = inspection.scroll_regions[0];
+                assert!(
+                    viewport.width > 0.0 && viewport.height > 0.0,
+                    "{tab:?}: scrolling body needs visible space"
+                );
+                assert!(
+                    viewport.x >= 0.0
+                        && viewport.x + viewport.width <= size.width
+                        && viewport.y >= 0.0
+                        && viewport.y + viewport.height <= close.y,
+                    "{tab:?}: scrolling body must fit above the fixed footer"
+                );
+                if !matches!(tab, AboutTab::About) {
+                    assert!(
+                        body.height > viewport.height,
+                        "{tab:?}: long content must remain available through scrolling"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -480,10 +663,7 @@ mod tests {
     fn closing_modal_blocks_background_clicks_and_disables_its_buttons() {
         let renderer = renderer();
         for interactive in [true, false] {
-            for (point, on_tab) in [
-                (Point::new(10.0, 10.0), false),
-                (Point::new(155.0, 165.0), true),
-            ] {
+            for on_close in [false, true] {
                 let mut content: Element<'_, Message> = stack![
                     button(space::vertical().width(Fill).height(Fill))
                         .width(Fill)
@@ -493,6 +673,14 @@ mod tests {
                 ]
                 .into();
                 let (mut tree, node) = mount(&mut content, &renderer);
+                let point = if on_close {
+                    inspect_layout(&mut content, &mut tree, &node, &renderer)
+                        .close
+                        .expect("Close control must be present")
+                        .center()
+                } else {
+                    Point::new(10.0, 10.0)
+                };
                 let mut messages = Vec::new();
                 for event in [
                     mouse::Event::ButtonPressed(mouse::Button::Left),
@@ -515,12 +703,11 @@ mod tests {
                         .any(|message| matches!(message, Message::NewFile)),
                     "modal must block background clicks while fading"
                 );
-                if interactive && on_tab {
+                if interactive && on_close {
                     assert!(
-                        messages.iter().any(|message| matches!(
-                            message,
-                            Message::AboutTabSelected(AboutTab::About)
-                        )),
+                        messages
+                            .iter()
+                            .any(|message| matches!(message, Message::AboutClosed)),
                         "control must be clickable before closing"
                     );
                 } else {
