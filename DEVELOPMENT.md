@@ -18,6 +18,13 @@ entering macOS fullscreen. Windows/Linux have custom edge and corner resize grip
 macOS retains AppKit's native resizing because winit does not support `drag_resize`
 there. Native file pickers retain their system chrome.
 
+Both styles use the transparent bunny at 24 logical pixels. Windows places it
+before the caption; macOS places it in the right side slot to preserve the
+centered caption and the traffic lights. The About logo keeps the rounded blue
+background, gently floats, and blinks once every four seconds on the existing
+header animation clock. See
+[Bunny artwork](assets/illustrations/bunny/README.md) for sources and regeneration.
+
 Debug builds provide a **Window controls** switch under **About → Debug**. Clicking
 it switches all application windows immediately, including windows opened later.
 The switch changes appearance only; it does not emulate the other operating

@@ -1,5 +1,9 @@
 # Info artwork
 
+The [bunny application artwork](bunny/README.md) supplies the README, title bars,
+About logo, and native window icon. The quill below remains the decorative
+illustration on the right of the About header.
+
 Copyright (c) 2026, Fragile Notepad authors. **All rights reserved.** Original
 illustrations, generated rasters, and reproductions are excluded from the
 project's BSD-3-Clause license. See [LICENSE](LICENSE) for the terms.

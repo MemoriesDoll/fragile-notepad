@@ -1,4 +1,4 @@
-<img src="assets/illustrations/macaw-quill.svg" align="right" width="72" alt="">
+<img src="assets/illustrations/bunny/app.svg" align="right" width="96" alt="Bunny holding a notebook">
 
 # Fragile Notepad
 
@@ -12,8 +12,9 @@ A desktop text editor for notes and source files. Written in Rust with
 ## Build from source
 
 You need Git, a current stable [Rust toolchain](https://rustup.rs), and Python
-3.10 or newer with [Pillow](https://pillow.readthedocs.io/en/stable/installation/basic-installation.html)
-installed in your Python environment. Use the native build tools for your platform.
+3.10 or newer. After cloning, install the asset tooling with
+`python -m pip install -r scripts/requirements-assets.txt`.
+Use the native build tools for your platform.
 The Linux windowing libraries are listed in the [CI workflow](.github/workflows/ci.yml).
 
 ```sh

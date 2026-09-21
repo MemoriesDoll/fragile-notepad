@@ -62,7 +62,9 @@ Release archives include it as `ICON-NOTICES.txt` alongside the project license.
 
 Run `scripts/generate_icon_assets.ps1` (Windows) or
 `bash scripts/generate_icon_assets.sh` (Unix) from the repository root. Python
-with Pillow is the only asset dependency. Each vector is rasterized at 8x and
+with Pillow handles this UI icon set; install the complete asset tooling from
+`scripts/requirements-assets.txt` (the bunny illustration also needs resvg).
+Each UI vector is rasterized at 8x and
 downsampled once to straight-alpha 22x22 RGBA, using the same bytes for CPU/GPU
 renderers. Generated RGBA is ignored by Git.
 

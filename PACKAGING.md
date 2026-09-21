@@ -19,7 +19,8 @@ package contract.
 
 Run the vendor setup before building from a fresh clone:
 
-Use the Rust stable toolchain and Python with Pillow installed (the same asset
+Use the Rust stable toolchain and Python with
+`python -m pip install -r scripts/requirements-assets.txt` (the same asset
 tooling used by `.github/workflows/ci.yml`). Platform windowing dependencies must
 also be available; the Linux CI job lists the required X11/Wayland packages.
 
@@ -52,6 +53,13 @@ bash scripts/generate_icon_assets.sh
 UI icon embedding is owned by `src/ui/icons/`; non-UI assets are owned by
 `src/assets.rs`. See `assets/icons/README.md` for the source inventory and review
 gallery. Original colored artwork lives in `assets/icons/colored/`.
+
+The bunny sources live in `assets/illustrations/bunny/`. Standard asset generation
+also exports `target/app-icons/app.ico`, `app.icns`, and `app.png` for packaging.
+Large icons retain the rounded blue tile; the in-app title icon is transparent.
+Windows builds embed the generated ICO in the executable through `build.rs`.
+The existing macOS release remains a standalone binary, not an `.app` bundle;
+`app.icns` is available for a future bundle's `CFBundleIconFile`.
 
 Distribute the project `LICENSE` and `assets/icons/NOTICE.txt` (renamed to
 `ICON-NOTICES.txt`) beside the binary. The nightly archive jobs include both;
