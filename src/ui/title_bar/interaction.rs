@@ -5,11 +5,11 @@ use iced::{Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vect
 use super::Action;
 use crate::message::Message;
 
-pub(super) fn frame<'a>(
-    content: Element<'a, Message>,
+pub(super) fn frame(
+    content: Element<Message>,
     id: window::Id,
     border: f32,
-) -> Element<'a, Message> {
+) -> Element<Message> {
     Element::new(ChromeRegion {
         content,
         id,
@@ -17,10 +17,10 @@ pub(super) fn frame<'a>(
     })
 }
 
-pub(super) fn drag_region<'a>(
-    content: Element<'a, Message>,
+pub(super) fn drag_region(
+    content: Element<Message>,
     id: window::Id,
-) -> Element<'a, Message> {
+) -> Element<Message> {
     Element::new(ChromeRegion {
         content,
         id,
@@ -41,15 +41,6 @@ struct State {
 }
 
 impl Widget<Message, Theme, Renderer> for ChromeRegion<'_> {
-    fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<State>()
-    }
-    fn state(&self) -> tree::State {
-        tree::State::new(State::default())
-    }
-    fn diff(&mut self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_mut(&mut self.content));
-    }
     fn size(&self) -> Size<Length> {
         self.content.as_widget().size()
     }
@@ -64,6 +55,49 @@ impl Widget<Message, Theme, Renderer> for ChromeRegion<'_> {
             .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits);
         layout::Node::with_children(node.size(), vec![node])
+    }
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout.child(0),
+            cursor,
+            viewport,
+        );
+    }
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<State>()
+    }
+    fn state(&self) -> tree::State {
+        tree::State::new(State::default())
+    }
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_mut(&mut self.content));
+    }
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout.child(0),
+            renderer,
+            operation,
+        );
     }
     fn update(
         &mut self,
@@ -161,40 +195,6 @@ impl Widget<Message, Theme, Renderer> for ChromeRegion<'_> {
             shell.publish(Message::WindowChrome(self.id, action));
             shell.capture_event();
         }
-    }
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        self.content.as_widget().draw(
-            &tree.children[0],
-            renderer,
-            theme,
-            style,
-            layout.child(0),
-            cursor,
-            viewport,
-        );
-    }
-    fn operate(
-        &mut self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn widget::Operation,
-    ) {
-        self.content.as_widget_mut().operate(
-            &mut tree.children[0],
-            layout.child(0),
-            renderer,
-            operation,
-        );
     }
     fn mouse_interaction(
         &self,
