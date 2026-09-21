@@ -8,8 +8,10 @@ use crate::ui::window_list_dialog::WindowListEntry;
 
 mod managed;
 mod platform_activation;
+mod title;
 
 pub(super) use managed::{AdvancedSearchWindow, ManagedWindow, SettingsWindow};
+pub(super) use title::Title;
 
 pub(super) fn custom_chrome(mut settings: window::Settings) -> window::Settings {
     settings.decorations = !crate::ui::title_bar::SUPPORTED;
@@ -180,10 +182,13 @@ impl App {
 
         self.open_window_targets()
             .into_iter()
-            .map(|target| WindowListEntry {
-                target,
-                title: self.window_title(target),
-                is_focused: focused == Some(target),
+            .filter_map(|target| {
+                let id = self.window_id(target)?;
+                Some(WindowListEntry {
+                    target,
+                    title: self.title(id),
+                    is_focused: focused == Some(target),
+                })
             })
             .collect()
     }
@@ -254,18 +259,6 @@ impl App {
             WindowTarget::Main => self.main_window_id,
             WindowTarget::Settings => self.settings_window.map(|window| window.id()),
             WindowTarget::AdvancedSearch => self.advanced_search_window.map(|window| window.id()),
-        }
-    }
-
-    fn window_title(&self, target: WindowTarget) -> String {
-        match target {
-            WindowTarget::Main => self
-                .workspace
-                .active_document()
-                .map(|document| format!("{} - Fragile Notepad", document.title()))
-                .unwrap_or_else(|| String::from("Fragile Notepad")),
-            WindowTarget::Settings => SettingsWindow::TITLE.to_owned(),
-            WindowTarget::AdvancedSearch => AdvancedSearchWindow::TITLE.to_owned(),
         }
     }
 }

@@ -15,7 +15,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use windowing::{AdvancedSearchWindow, ManagedWindow, SettingsWindow};
+use windowing::{AdvancedSearchWindow, ManagedWindow, SettingsWindow, Title};
 
 mod editor;
 mod editor_ops;
@@ -597,22 +597,18 @@ impl App {
     }
 
     pub fn title(&self, window_id: window::Id) -> String {
-        if let Some(settings_window) = &self.settings_window
-            && settings_window.is(window_id)
-        {
-            return settings_window.title();
-        }
+        let windows: [Option<&dyn ManagedWindow>; 2] = [
+            self.settings_window.as_ref().map(|window| window as _),
+            self.advanced_search_window
+                .as_ref()
+                .map(|window| window as _),
+        ];
 
-        if let Some(search_window) = &self.advanced_search_window
-            && search_window.is(window_id)
-        {
-            return search_window.title();
-        }
-
-        self.workspace
-            .active_document()
-            .map(|document| format!("{} - Fragile Notepad", document.title()))
-            .unwrap_or_else(|| String::from("Fragile Notepad"))
+        windows
+            .into_iter()
+            .flatten()
+            .find(|window| window.is(window_id))
+            .map_or_else(|| self.workspace.title(), Title::title)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

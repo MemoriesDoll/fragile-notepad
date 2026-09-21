@@ -6,14 +6,14 @@ use crate::search_dialog::SearchDialogState;
 use crate::settings_dialog::SettingsDialogState;
 use crate::ui;
 
-pub(crate) trait ManagedWindow {
+use super::Title;
+
+pub(crate) trait ManagedWindow: Title {
     fn id(&self) -> window::Id;
 
     fn is(&self, id: window::Id) -> bool {
         self.id() == id
     }
-
-    fn title(&self) -> String;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,7 +43,9 @@ impl ManagedWindow for SettingsWindow {
     fn id(&self) -> window::Id {
         self.id
     }
+}
 
+impl Title for SettingsWindow {
     fn title(&self) -> String {
         Self::TITLE.to_owned()
     }
@@ -102,7 +104,9 @@ impl ManagedWindow for AdvancedSearchWindow {
     fn id(&self) -> window::Id {
         self.id
     }
+}
 
+impl Title for AdvancedSearchWindow {
     fn title(&self) -> String {
         Self::TITLE.to_owned()
     }
