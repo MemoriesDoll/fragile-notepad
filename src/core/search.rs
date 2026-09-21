@@ -19,11 +19,7 @@ impl TextMatch {
     }
 
     pub const fn len(self) -> usize {
-        if self.end >= self.start {
-            self.end - self.start
-        } else {
-            0
-        }
+        self.end.saturating_sub(self.start)
     }
 
     pub const fn is_empty(self) -> bool {

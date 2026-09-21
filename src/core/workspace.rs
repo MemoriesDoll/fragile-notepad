@@ -189,13 +189,7 @@ impl Workspace {
         }
 
         let document = self.documents.remove(from_index);
-        let insert_index = if from_index < to_index {
-            to_index
-        } else {
-            to_index
-        };
-
-        self.documents.insert(insert_index, document);
+        self.documents.insert(to_index, document);
         true
     }
 

@@ -1011,7 +1011,7 @@ fn callable_signature_terminator(
             '>' => angle_depth = angle_depth.saturating_sub(1),
             ';' if angle_depth == 0 && rule.declaration_terminator.as_deref() == Some(";") => {
                 return (matches!(statement.terminator, CallableStatementTerminator::Semicolon)
-                    && cursor + 1 <= statement.range.end)
+                    && cursor < statement.range.end)
                     .then_some(RuleTerminator::Declaration { end: cursor + 1 });
             }
             '{' if angle_depth == 0 => {

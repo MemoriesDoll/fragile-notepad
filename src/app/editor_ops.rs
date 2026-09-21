@@ -177,9 +177,11 @@ pub(super) fn duplicate_line(document: &mut crate::core::Document) -> bool {
     }
 
     let duplicate_start_offset = end_offset
-        + needs_leading_line_ending
-            .then_some(line_ending.len())
-            .unwrap_or(0);
+        + if needs_leading_line_ending {
+            line_ending.len()
+        } else {
+            0
+        };
     let duplicate_end_offset = end_offset + insertion.len();
     let Some(duplicate_start) = document
         .buffer

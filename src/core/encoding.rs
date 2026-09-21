@@ -322,7 +322,7 @@ fn decode_with_encoding(encoding: &'static encoding_rs::Encoding, bytes: &[u8]) 
 }
 
 fn decode_utf16(bytes: &[u8], encoding: TextEncoding, big_endian: bool) -> DecodedText {
-    let mut had_errors = bytes.len() % 2 != 0;
+    let mut had_errors = !bytes.len().is_multiple_of(2);
     let units = bytes
         .chunks_exact(2)
         .map(|chunk| {

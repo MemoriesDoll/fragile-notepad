@@ -97,7 +97,7 @@ impl VisualPalette {
             danger: Color::from_rgb8(255, 121, 137),
             danger_soft: Color::from_rgb8(86, 39, 48),
             shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.34),
-            selection: Color::from_rgba(96.0 / 255.0, 174.0 / 255.0, 255.0 / 255.0, 0.30),
+            selection: Color::from_rgba(96.0 / 255.0, 174.0 / 255.0, 1.0, 0.30),
             is_dark: true,
         }
     }
@@ -246,9 +246,7 @@ pub fn tab_top_bar_style(theme: &Theme, is_active: bool, is_dragged: bool) -> co
     let palette = VisualPalette::from_theme(theme);
 
     container::Style {
-        background: Some(Background::Color(if is_dragged {
-            palette.accent
-        } else if is_active {
+        background: Some(Background::Color(if is_dragged || is_active {
             palette.accent
         } else {
             Color::TRANSPARENT

@@ -662,11 +662,7 @@ impl ShortcutModifiers {
             });
         }
         if self.ctrl {
-            parts.push(if cfg!(target_os = "macos") {
-                String::from("Ctrl")
-            } else {
-                String::from("Ctrl")
-            });
+            parts.push(String::from("Ctrl"));
         }
         if self.shift {
             parts.push(String::from("Shift"));
