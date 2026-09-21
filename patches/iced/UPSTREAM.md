@@ -27,6 +27,11 @@ The vendor patch also backports recent fixes without the intervening API migrati
   Keep strict handoff failure/rollback handling outside this normal recovery path.
   Reset the recovery timestamp when replacing a window's rendering state.
 
+- `ca79fdb70`: preserve remaining input events when an overlay disappears during
+  an event batch, and clear its cached layout. Prevents menu dismissal from
+  swallowing subsequent releases or keystrokes. The adapted upstream regression
+  test passes with this fix and fails against the original runtime.
+
 `BASE_REVISION` and `fragile-notepad-iced.patch` are the reproducible source of the
 vendor checkout. Run `scripts/setup-vendor.ps1 apply` (Windows) or
 `scripts/setup-vendor.sh apply` (Linux) to reconstruct it in a fresh checkout.
