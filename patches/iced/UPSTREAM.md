@@ -40,11 +40,34 @@ The vendor patch also backports recent fixes without the intervening API migrati
   dropdown rebuilds its scrollable. The regression covers hover styling after
   rebuilding and redraw on pointer exit; it fails before the fix and passes after.
 
+- `d8dabb4ab`: suppress the content cursor while a scrollbar is grabbed, even
+  when the pointer moves off the scrollbar. A regression test covers both axes
+  and restores content interaction after release; it fails before the fix and
+  passes after it.
+
 `BASE_REVISION` and `fragile-notepad-iced.patch` are the reproducible source of the
 vendor checkout. Run `scripts/setup-vendor.ps1 apply` (Windows) or
 `scripts/setup-vendor.sh apply` (Linux) to reconstruct it in a fresh checkout.
 
-## Validation
+## Backport selection
+
+The follow-up review selected the four input/overlay fixes above because the
+affected runtime paths are used by the application's menus, dropdowns, tabs,
+and scrollable panels. They apply without the newer widget or renderer APIs.
+
+Other reviewed changes are not required on this base:
+
+- The newer text-input submit/paste fixes address the replacement input
+  implementation; this base already checks focus and dispatches paste handlers.
+- The negative image-coordinate regression was introduced by the newer pixel
+  snapping changes; this base already keeps signed image bounds.
+- Smooth scrolling and built-in editor changes do not apply to the custom
+  document editor. Adopting those features would be a separate change.
+- Resize notification on application scale changes is not needed by the app's
+  current zoom, which changes editor font size instead of Iced application scale.
+- New layout/overlay invalidation fixes depend on APIs absent from this base.
+
+## Base update validation
 
 - Windows: `cargo test --locked --all-targets` — 686 passed.
 - Debian WSL 2: the same command — 695 passed.
@@ -60,3 +83,15 @@ vendor checkout. Run `scripts/setup-vendor.ps1 apply` (Windows) or
 
 The GPU probes test handoff success and rollback. Normal driver surface-error
 recovery is an upstream backport; a real driver surface failure was not induced.
+
+## Follow-up input/overlay backport validation
+
+- Windows: `cargo test --locked --all-targets` — 686 passed.
+- Debian WSL 2: the same command — 695 passed.
+- On both platforms: `cargo test --locked -p iced_core -p iced_runtime -p iced_widget --lib` — 9 passed per platform, including all four new regressions.
+- Each new regression test was run against the unfixed implementation on Windows
+  and failed its behavioral assertion, then passed with its upstream fix.
+- A fresh checkout of the unchanged base plus the exported patch reproduces all
+  34 modified vendor files in the tested checkout.
+- No system settings were changed. The renderer handoff, syntax parser, and
+  appearance implementations were not modified in these four backports.
