@@ -85,9 +85,8 @@ shortcut hints but are disabled; the toolbar shares the same availability rules.
 Cut, Cut Line, and Delete Line operate on all unique touched lines in one undo
 transaction, including multiple carets and rectangular selections.
 
-The interaction design was checked against the default Notepad++ menu in
-`../notepad-plus-plus/PowerEditor/src/MISC/Common/NppConstants.h` and selection
-handling in `../notepad-plus-plus/scintilla/win32/ScintillaWin.cxx`.
+Selection behavior and context-menu interactions are covered by regression tests
+in `src/editor/widget/tests.rs` and `src/ui/editor_context_menu/tests.rs`.
 
 Word Wrap reflows logical lines into screen rows at the current text width.
 `ViewportModel` stores byte and visual-column boundaries for each fragment;
