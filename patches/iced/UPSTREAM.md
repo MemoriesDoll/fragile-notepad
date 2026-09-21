@@ -36,6 +36,10 @@ The vendor patch also backports recent fixes without the intervening API migrati
   An inactive child no longer masks the parent menu cursor. A nested-overlay
   regression test fails before the fix and passes after it.
 
+- `3c81aac2e`: retain scrollbar interaction status in widget-tree state when a
+  dropdown rebuilds its scrollable. The regression covers hover styling after
+  rebuilding and redraw on pointer exit; it fails before the fix and passes after.
+
 `BASE_REVISION` and `fragile-notepad-iced.patch` are the reproducible source of the
 vendor checkout. Run `scripts/setup-vendor.ps1 apply` (Windows) or
 `scripts/setup-vendor.sh apply` (Linux) to reconstruct it in a fresh checkout.
