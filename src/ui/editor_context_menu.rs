@@ -51,6 +51,7 @@ struct State {
     highlighted: Vec<Option<usize>>,
     offsets: Vec<f32>,
     scroll_motion: Option<ScrollMotion>,
+    wheel_input: iced::widget::scrollable::WheelScrollInput,
 }
 
 #[derive(Clone, PartialEq)]
@@ -68,6 +69,7 @@ impl State {
         self.highlighted = vec![keyboard.then(|| first_enabled(entries)).flatten()];
         self.offsets = vec![0.0];
         self.scroll_motion = None;
+        self.wheel_input = iced::widget::scrollable::WheelScrollInput::default();
     }
 
     fn close(&mut self) {
@@ -727,7 +729,11 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                     self.state.offsets.truncate(depth + 1);
                     self.state.highlighted.truncate(depth + 1);
                     self.state.highlighted[depth] = None;
-                    if matches!(delta, mouse::ScrollDelta::Lines { .. }) {
+                    if self
+                        .state
+                        .wheel_input
+                        .should_animate(*delta, std::time::Instant::now())
+                    {
                         let base = if pixels * (pending - origin) > 0.0 {
                             origin
                         } else {
@@ -745,6 +751,8 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                         }
                     } else {
                         self.state.scroll_motion = None;
+                        // Direct input interrupts at the displayed position,
+                        // without jumping through the unfinished wheel target.
                         self.state.offsets[depth] = (origin - pixels).clamp(0.0, maximum);
                     }
                 }

@@ -2,11 +2,17 @@
 
 ## Editor interactions
 
-Mouse-wheel scrolling in settings, search results, function lists, About tabs,
-menus, dropdowns, the tab strip, and the toolbar eases over 150 ms. Repeated
-steps accumulate and reversing direction responds from the displayed position.
-Touchpad pixel input, touch gestures, scrollbar dragging, and keyboard reveal
-remain direct. Scrolling animations retain state across widget rebuilds, clamp
+Whole mouse-wheel steps in settings, search results, function lists,
+About tabs, menus, dropdowns, the tab strip, and the toolbar ease over 150 ms.
+Repeated steps accumulate and reversing direction responds from the displayed
+position, including during rapid or batched wheel input. Pixel deltas and
+fractional line deltas remain direct. Windows also reports touchpads as line
+deltas, so units alone cannot identify the device. A shared input heuristic
+keeps a gesture direct after a fractional/pixel packet until a 250 ms pause;
+event frequency alone never changes the scrolling mode. Direct input cancels
+pending wheel motion at the displayed position without jumping to its target.
+Touch gestures, scrollbar dragging, and keyboard reveal remain direct.
+Scrolling animations retain state across widget rebuilds, clamp
 to content bounds, and stop requesting frames when finished. The custom text
 editor keeps its existing scrolling behavior.
 

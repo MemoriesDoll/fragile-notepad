@@ -6225,7 +6225,7 @@ index 05760dc1..b959b20b 100644
  
  /// The settings of a [`Compositor`].
 diff --git a/vendor/iced/widget/src/scrollable.rs b/vendor/iced/widget/src/scrollable.rs
-index eccaa211..d6877e7b 100644
+index eccaa211..9b33c737 100644
 --- a/vendor/iced/widget/src/scrollable.rs
 +++ b/vendor/iced/widget/src/scrollable.rs
 @@ -41,6 +41,9 @@ use crate::core::{
@@ -6262,12 +6262,13 @@ index eccaa211..d6877e7b 100644
          }
      }
  
-@@ -112,6 +115,13 @@ where
+@@ -112,6 +115,14 @@ where
          self.direction(Direction::Horizontal(Scrollbar::default()))
      }
  
-+    /// Eases discrete mouse-wheel steps. Pixel scrolling, touch, scrollbar
-+    /// dragging, and programmatic scrolling remain immediate.
++    /// Eases whole mouse-wheel steps. Pixel scrolling, fractional
++    /// line gestures, and their subsequent whole-line packets remain immediate, as do touch,
++    /// scrollbar dragging, and programmatic scrolling.
 +    pub fn smooth_scroll(mut self, enabled: bool) -> Self {
 +        self.smooth_scroll = enabled;
 +        self
@@ -6276,7 +6277,7 @@ index eccaa211..d6877e7b 100644
      /// Sets the [`Direction`] of the [`Scrollable`].
      pub fn direction(mut self, direction: impl Into<Direction>) -> Self {
          self.direction = direction.into();
-@@ -558,6 +568,28 @@ where
+@@ -558,6 +569,28 @@ where
          let content = layout.children().next().unwrap();
          let content_bounds = content.bounds();
  
@@ -6305,7 +6306,7 @@ index eccaa211..d6877e7b 100644
          let scrollbars = Scrollbars::new(state, self.direction, bounds, content_bounds);
  
          let (mouse_over_y_scrollbar, mouse_over_x_scrollbar) = scrollbars.is_mouse_over(cursor);
-@@ -730,7 +762,9 @@ where
+@@ -730,7 +763,9 @@ where
  
                  let cursor = match cursor_over_scrollable {
                      Some(cursor_position)
@@ -6316,20 +6317,22 @@ index eccaa211..d6877e7b 100644
                      {
                          mouse::Cursor::Available(cursor_position + translation)
                      }
-@@ -804,7 +838,26 @@ where
+@@ -781,6 +816,8 @@ where
+                         return;
+                     }
+ 
++                    let animate = self.smooth_scroll
++                        && state.wheel_input.should_animate(*delta, Instant::now());
+                     let delta = match *delta {
+                         mouse::ScrollDelta::Lines { x, y } => {
+                             let is_shift_pressed = state.keyboard_modifiers.shift();
+@@ -804,7 +841,21 @@ where
                          mouse::ScrollDelta::Pixels { x, y } => -Vector::new(x, y),
                      };
  
 -                    state.scroll(self.direction.align(delta), bounds, content_bounds);
 +                    let delta = self.direction.align(delta);
-+                    if self.smooth_scroll
-+                        && matches!(
-+                            event,
-+                            Event::Mouse(mouse::Event::WheelScrolled {
-+                                delta: mouse::ScrollDelta::Lines { .. }
-+                            })
-+                        )
-+                    {
++                    if animate {
 +                        if state.queue_smooth_scroll(delta, bounds, content_bounds, Instant::now())
 +                        {
 +                            state.last_scrolled = Some(Instant::now());
@@ -6340,11 +6343,13 @@ index eccaa211..d6877e7b 100644
 +                        }
 +                        return;
 +                    }
++                    // Precise input takes over from the displayed position.
++                    // Flushing the pending wheel target here would cause a jump.
 +                    state.scroll(delta, bounds, content_bounds);
  
                      let has_scrolled =
                          notify_scroll(state, &self.on_scroll, bounds, content_bounds, shell);
-@@ -1004,11 +1057,11 @@ where
+@@ -1004,11 +1055,11 @@ where
          };
  
          if let Event::Window(window::Event::RedrawRequested(_now)) = event {
@@ -6358,7 +6363,7 @@ index eccaa211..d6877e7b 100644
                  .last_status
                  .is_some_and(|last_status| last_status != status)
          {
-@@ -1052,7 +1105,7 @@ where
+@@ -1052,7 +1103,7 @@ where
  
          let style = theme.style(
              &self.class,
@@ -6367,36 +6372,77 @@ index eccaa211..d6877e7b 100644
                  is_horizontal_scrollbar_disabled: false,
                  is_vertical_scrollbar_disabled: false,
              }),
-@@ -1498,8 +1551,19 @@ struct State {
+@@ -1498,8 +1549,59 @@ struct State {
      last_notified: Option<Viewport>,
      last_scrolled: Option<Instant>,
      is_scrollbar_visible: bool,
 +    last_status: Option<Status>,
 +    smooth_motion: Option<SmoothMotion>,
++    wheel_input: WheelScrollInput,
 +}
 +
++/// Distinguishes whole wheel steps from precise scrolling by their input
++/// pattern. Delta units alone do not identify a device: Windows touchpads also
++/// produce line deltas. Fractional and pixel input stay direct, including later
++/// whole-line packets within that gesture. Event timing does not establish
++/// precision: fast wheel notches and batched events must remain animated.
++#[derive(Debug, Default, Clone, Copy, PartialEq)]
++pub struct WheelScrollInput {
++    last_event: Option<Instant>,
++    continuous: bool,
++}
++
++impl WheelScrollInput {
++    /// Records an input packet and reports whether it should receive wheel
++    /// easing. A pause of 250 ms starts a new gesture; fractional line deltas
++    /// and pixel deltas select direct scrolling
++    /// for the remainder of the gesture.
++    pub fn should_animate(&mut self, delta: mouse::ScrollDelta, now: Instant) -> bool {
++        let gap = self
++            .last_event
++            .map(|last| now.saturating_duration_since(last));
++        if gap.is_none_or(|gap| gap >= Duration::from_millis(250)) {
++            self.continuous = false;
++        }
++        let whole_steps = match delta {
++            mouse::ScrollDelta::Lines { x, y } => {
++                x.is_finite()
++                    && y.is_finite()
++                    && x.fract() == 0.0
++                    && y.fract() == 0.0
++                    && (x != 0.0 || y != 0.0)
++            }
++            mouse::ScrollDelta::Pixels { .. } => false,
++        };
++        self.continuous |= !whole_steps;
++        self.last_event = Some(now);
++        !self.continuous
++    }
+ }
+ 
 +#[derive(Debug, Clone, Copy)]
 +struct SmoothMotion {
 +    origin: Vector,
 +    target: Vector,
 +    started: Instant,
- }
- 
++}
++
 +const WHEEL_EASING_DURATION: Duration = Duration::from_millis(150);
 +
  #[derive(Debug, Clone, Copy)]
  enum Interaction {
      None,
-@@ -1523,6 +1587,8 @@ impl Default for State {
+@@ -1523,6 +1625,9 @@ impl Default for State {
              last_notified: None,
              last_scrolled: None,
              is_scrollbar_visible: true,
 +            last_status: None,
 +            smooth_motion: None,
++            wheel_input: WheelScrollInput::default(),
          }
      }
  }
-@@ -1627,7 +1693,82 @@ impl State {
+@@ -1627,7 +1732,82 @@ impl State {
          State::default()
      }
  
@@ -6479,7 +6525,7 @@ index eccaa211..d6877e7b 100644
          if bounds.height < content_bounds.height {
              self.offset_y = Offset::Absolute(
                  (self.offset_y.absolute(bounds.height, content_bounds.height) + delta.y)
-@@ -1644,16 +1785,19 @@ impl State {
+@@ -1644,16 +1824,19 @@ impl State {
      }
  
      fn scroll_y_to(&mut self, percentage: f32, bounds: Rectangle, content_bounds: Rectangle) {
@@ -6499,7 +6545,7 @@ index eccaa211..d6877e7b 100644
          if let Some(x) = offset.x {
              self.offset_x = Offset::Relative(x.clamp(0.0, 1.0));
          }
-@@ -1664,6 +1808,7 @@ impl State {
+@@ -1664,6 +1847,7 @@ impl State {
      }
  
      fn scroll_to(&mut self, offset: AbsoluteOffset<Option<f32>>) {
@@ -6509,10 +6555,10 @@ index eccaa211..d6877e7b 100644
          }
 diff --git a/vendor/iced/widget/src/scrollable/tests.rs b/vendor/iced/widget/src/scrollable/tests.rs
 new file mode 100644
-index 00000000..dcf16269
+index 00000000..123b30dc
 --- /dev/null
 +++ b/vendor/iced/widget/src/scrollable/tests.rs
-@@ -0,0 +1,362 @@
+@@ -0,0 +1,538 @@
 +use super::*;
 +use crate::core::shell::Waker;
 +use std::cell::Cell;
@@ -6733,7 +6779,13 @@ index 00000000..dcf16269
 +        tree.state.downcast_ref::<State>().offset_y,
 +        Offset::Absolute(0.0)
 +    );
++    // Back-to-back wheel packets must accumulate without switching modes or
++    // moving immediately, even when the event loop delivers a batch at once.
 +    let _ = update(&mut widget, &mut tree, &node, wheel(), cursor);
++    assert_eq!(
++        tree.state.downcast_ref::<State>().offset_y,
++        Offset::Absolute(0.0)
++    );
 +    let started = tree
 +        .state
 +        .downcast_ref::<State>()
@@ -6874,6 +6926,176 @@ index 00000000..dcf16269
 +    );
 +    assert!(!shell.is_event_captured());
 +    assert!(tree.state.downcast_ref::<State>().smooth_motion.is_none());
++}
++
++#[test]
++fn continuous_input_stays_direct_through_whole_line_packets_and_resets_after_pause() {
++    let now = Instant::now();
++    let line = |y| mouse::ScrollDelta::Lines { x: 0.0, y };
++    let mut input = WheelScrollInput::default();
++    assert!(!input.should_animate(line(-0.125), now));
++    assert!(!input.should_animate(line(-1.0), now + Duration::from_millis(60)));
++    assert!(!input.should_animate(line(1.0), now + Duration::from_millis(120)));
++    assert!(input.should_animate(line(-1.0), now + Duration::from_millis(400)));
++    assert!(input.should_animate(line(-1.0), now + Duration::from_millis(460)));
++    assert!(input.should_animate(line(-1.0), now + Duration::from_millis(470)));
++    assert!(input.should_animate(line(-1.0), now + Duration::from_millis(570)));
++    assert!(!input.should_animate(
++        mouse::ScrollDelta::Pixels { x: 0.0, y: -1.0 },
++        now + Duration::from_millis(900)
++    ));
++    assert!(!input.should_animate(line(-1.0), now + Duration::from_millis(950)));
++    assert!(!input.should_animate(
++        mouse::ScrollDelta::Lines { x: 0.25, y: 0.0 },
++        now + Duration::from_millis(1300)
++    ));
++}
++
++#[test]
++fn fractional_touchpad_streams_move_immediately_without_easing_or_a_tail() {
++    for horizontal in [false, true] {
++        let mut widget = smooth_widget();
++        let mut tree = Tree::empty();
++        tree.diff(&mut widget as &mut dyn Widget<(), Theme, ()>);
++        let node = widget.layout(
++            &mut tree,
++            &(),
++            &layout::Limits::new(Size::ZERO, BOUNDS.size()),
++        );
++        let cursor = mouse::Cursor::Available(BOUNDS.center());
++        let mut expected = 0.0;
++        for delta in [-0.125, -0.25, -1.0, -0.125, 0.25] {
++            let (x, y) = if horizontal {
++                (delta, 0.0)
++            } else {
++                (0.0, delta)
++            };
++            let _ = update(
++                &mut widget,
++                &mut tree,
++                &node,
++                Event::Mouse(mouse::Event::WheelScrolled {
++                    delta: mouse::ScrollDelta::Lines { x, y },
++                }),
++                cursor,
++            );
++            expected -= delta * 60.0;
++            let state = tree.state.downcast_ref::<State>();
++            assert_eq!(
++                if horizontal {
++                    state.offset_x
++                } else {
++                    state.offset_y
++                },
++                Offset::Absolute(expected)
++            );
++            assert!(state.smooth_motion.is_none());
++        }
++        let _ = update(
++            &mut widget,
++            &mut tree,
++            &node,
++            Event::Window(window::Event::RedrawRequested(
++                Instant::now() + Duration::from_secs(1),
++            )),
++            cursor,
++        );
++        let state = tree.state.downcast_ref::<State>();
++        assert_eq!(
++            if horizontal {
++                state.offset_x
++            } else {
++                state.offset_y
++            },
++            Offset::Absolute(expected)
++        );
++        assert!(state.smooth_motion.is_none());
++    }
++}
++
++#[test]
++fn precise_input_interrupts_at_displayed_position_without_flushing_pending_distance() {
++    for next in [-0.25, 0.25] {
++        let mut widget = smooth_widget();
++        let mut tree = Tree::empty();
++        tree.diff(&mut widget as &mut dyn Widget<(), Theme, ()>);
++        let node = widget.layout(
++            &mut tree,
++            &(),
++            &layout::Limits::new(Size::ZERO, BOUNDS.size()),
++        );
++        let cursor = mouse::Cursor::Available(BOUNDS.center());
++        let _ = update(
++            &mut widget,
++            &mut tree,
++            &node,
++            Event::Mouse(mouse::Event::WheelScrolled {
++                delta: mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
++            }),
++            cursor,
++        );
++        let started = tree
++            .state
++            .downcast_ref::<State>()
++            .smooth_motion
++            .unwrap()
++            .started;
++        let _ = update(
++            &mut widget,
++            &mut tree,
++            &node,
++            Event::Window(window::Event::RedrawRequested(
++                started + Duration::from_millis(40),
++            )),
++            cursor,
++        );
++        let before = tree
++            .state
++            .downcast_ref::<State>()
++            .offset_y
++            .absolute(100.0, 1000.0);
++        assert!(before > 15.0 && before < 180.0);
++        let _ = update(
++            &mut widget,
++            &mut tree,
++            &node,
++            Event::Mouse(mouse::Event::WheelScrolled {
++                delta: mouse::ScrollDelta::Lines { x: 0.0, y: next },
++            }),
++            cursor,
++        );
++        let expected = before - next * 60.0;
++        assert_eq!(
++            tree.state.downcast_ref::<State>().offset_y,
++            Offset::Absolute(expected)
++        );
++        assert!(tree.state.downcast_ref::<State>().smooth_motion.is_none());
++        let _ = update(
++            &mut widget,
++            &mut tree,
++            &node,
++            Event::Window(window::Event::RedrawRequested(
++                started + Duration::from_secs(1),
++            )),
++            cursor,
++        );
++        assert_eq!(
++            tree.state.downcast_ref::<State>().offset_y,
++            Offset::Absolute(expected)
++        );
++    }
++}
++
++#[test]
++fn mouse_wheel_speed_and_batched_delivery_never_change_easing_mode() {
++    let now = Instant::now();
++    let mut input = WheelScrollInput::default();
++    for milliseconds in [0, 0, 8, 24, 63, 104, 165, 200, 500, 501] {
++        assert!(input.should_animate(
++            mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
++            now + Duration::from_millis(milliseconds)
++        ));
++    }
 +}
 diff --git a/vendor/iced/winit/Cargo.toml b/vendor/iced/winit/Cargo.toml
 index 7024dec3..39a59954 100644

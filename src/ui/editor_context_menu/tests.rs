@@ -479,8 +479,11 @@ fn wheel_scroll_animates_and_keyboard_navigation_cancels_pending_motion() {
             delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
         })
     };
-    let _ = dispatch(&mut menu, &renderer, viewport, wheel(), cursor);
-    assert_eq!(menu.state.offsets[0], 0.0);
+    for _ in 0..3 {
+        let _ = dispatch(&mut menu, &renderer, viewport, wheel(), cursor);
+        assert_eq!(menu.state.offsets[0], 0.0);
+        assert!(menu.state.scroll_motion.is_some());
+    }
     let started = menu.state.scroll_motion.as_ref().unwrap().started;
     let tick = |menu: &mut ContextMenu<'_>, elapsed| {
         let node = menu.layout(&renderer, viewport);
@@ -498,10 +501,12 @@ fn wheel_scroll_animates_and_keyboard_navigation_cancels_pending_motion() {
         assert!(messages.is_empty());
     };
     tick(&mut menu, 50);
-    assert!(menu.state.offsets[0] > 0.0 && menu.state.offsets[0] < ROW_HEIGHT * 3.0);
+    assert!(menu.state.offsets[0] > 0.0 && menu.state.offsets[0] < ROW_HEIGHT * 9.0);
     tick(&mut menu, 150);
-    assert_eq!(menu.state.offsets[0], ROW_HEIGHT * 3.0);
+    assert_eq!(menu.state.offsets[0], ROW_HEIGHT * 9.0);
     assert!(menu.state.scroll_motion.is_none());
+    // Begin another gesture after the synthetic animation's completion.
+    menu.state.wheel_input = iced::widget::scrollable::WheelScrollInput::default();
     let _ = dispatch(&mut menu, &renderer, viewport, wheel(), cursor);
     assert!(menu.state.scroll_motion.is_some());
     let _ = dispatch(&mut menu, &renderer, viewport, key(Named::Home), cursor);
@@ -519,5 +524,55 @@ fn wheel_scroll_animates_and_keyboard_navigation_cancels_pending_motion() {
         cursor,
     );
     assert_eq!(menu.state.offsets[0], 12.0);
+    assert!(menu.state.scroll_motion.is_none());
+}
+
+#[test]
+fn context_menu_touchpad_line_stream_is_direct_and_preserves_whole_packets() {
+    let renderer = renderer();
+    let settings = EditorSettings::default();
+    let entries = (0..40)
+        .map(|_| menu::item("Copy", Message::Copy))
+        .collect::<Vec<_>>();
+    let mut state = State::default();
+    state.open(Point::new(10.0, 10.0), &entries, true);
+    let mut menu = ContextMenu {
+        state: &mut state,
+        entries,
+        settings: &settings,
+        anchor: Point::new(10.0, 10.0),
+    };
+    let viewport = Size::new(400.0, 250.0);
+    let cursor = mouse::Cursor::Available(Point::new(80.0, 80.0));
+    let mut expected = 0.0;
+    for delta in [-0.125, -0.25, -1.0, -0.125, 0.25] {
+        let _ = dispatch(
+            &mut menu,
+            &renderer,
+            viewport,
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Lines { x: 0.0, y: delta },
+            }),
+            cursor,
+        );
+        expected -= delta * ROW_HEIGHT * 3.0;
+        assert_eq!(menu.state.offsets[0], expected);
+        assert!(menu.state.scroll_motion.is_none());
+    }
+    // Precise input following an ambiguous whole-line event must take over
+    // from the displayed position without jumping to the unfinished target.
+    menu.state.open(Point::new(10.0, 10.0), &menu.entries, true);
+    for delta in [-1.0, -0.25] {
+        let _ = dispatch(
+            &mut menu,
+            &renderer,
+            viewport,
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Lines { x: 0.0, y: delta },
+            }),
+            cursor,
+        );
+    }
+    assert_eq!(menu.state.offsets[0], 0.25 * ROW_HEIGHT * 3.0);
     assert!(menu.state.scroll_motion.is_none());
 }
