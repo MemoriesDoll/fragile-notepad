@@ -1,5 +1,5 @@
 diff --git a/vendor/iced/Cargo.toml b/vendor/iced/Cargo.toml
-index 01fdf955..698e992f 100644
+index 6203a80b..08826424 100644
 --- a/vendor/iced/Cargo.toml
 +++ b/vendor/iced/Cargo.toml
 @@ -26,7 +26,7 @@ default = ["wgpu", "tiny-skia", "crisp", "hinting", "web-colors", "thread-pool",
@@ -12,7 +12,7 @@ index 01fdf955..698e992f 100644
  tiny-skia = ["iced_renderer/tiny-skia"]
  # Enables the `image` widget and image clipboard support
 diff --git a/vendor/iced/core/src/backend.rs b/vendor/iced/core/src/backend.rs
-index 6b8ac2d4..b8ae58f7 100644
+index 24ffe5b8..b611454c 100644
 --- a/vendor/iced/core/src/backend.rs
 +++ b/vendor/iced/core/src/backend.rs
 @@ -2,6 +2,8 @@
@@ -24,7 +24,7 @@ index 6b8ac2d4..b8ae58f7 100644
  /// A graphical backend.
  ///
  /// You can override the default strategy by setting the `ICED_BACKEND` environment variable.
-@@ -163,6 +165,157 @@ impl From<&crate::Settings> for Settings {
+@@ -186,6 +188,157 @@ impl From<&crate::Settings> for Settings {
      }
  }
  
@@ -1733,10 +1733,10 @@ index 7e87faff..bc50c58f 100644
 +    task::oneshot(|sender| crate::Action::Backend(Action::PrepareWarmAndCommit(settings, sender)))
 +}
 diff --git a/vendor/iced/src/application.rs b/vendor/iced/src/application.rs
-index f042ac7d..fa910ba0 100644
+index 5604f185..80522091 100644
 --- a/vendor/iced/src/application.rs
 +++ b/vendor/iced/src/application.rs
-@@ -79,12 +79,15 @@ pub fn application<State, Message, Theme, Renderer>(
+@@ -81,12 +81,15 @@ pub fn application<State, Message, Theme, Renderer>(
      boot: impl BootFn<State, Message>,
      update: impl UpdateFn<State, Message>,
      view: impl for<'a> ViewFn<'a, State, Message, Theme, Renderer>,
@@ -1753,7 +1753,7 @@ index f042ac7d..fa910ba0 100644
  {
      use std::marker::PhantomData;
  
-@@ -104,6 +107,7 @@ where
+@@ -106,6 +109,7 @@ where
          Message: Send + 'static,
          Theme: theme::Base,
          Renderer: program::Renderer,
@@ -1761,7 +1761,7 @@ index f042ac7d..fa910ba0 100644
          Boot: self::BootFn<State, Message>,
          Update: self::UpdateFn<State, Message>,
          View: for<'a> self::ViewFn<'a, State, Message, Theme, Renderer>,
-@@ -182,6 +186,7 @@ impl<P: Program> Application<P> {
+@@ -184,6 +188,7 @@ impl<P: Program> Application<P> {
      where
          Self: 'static,
          P::Message: message::MaybeDebug + message::MaybeClone,
@@ -1769,7 +1769,7 @@ index f042ac7d..fa910ba0 100644
      {
          #[cfg(feature = "debug")]
          iced_debug::init(iced_debug::Metadata {
-@@ -341,7 +346,9 @@ impl<P: Program> Application<P> {
+@@ -365,7 +370,9 @@ impl<P: Program> Application<P> {
      pub fn title(
          self,
          title: impl TitleFn<P::State>,
@@ -1780,7 +1780,7 @@ index f042ac7d..fa910ba0 100644
          Application {
              raw: program::with_title(self.raw, move |state, _window| title.title(state)),
              settings: self.settings,
-@@ -354,7 +361,9 @@ impl<P: Program> Application<P> {
+@@ -378,7 +385,9 @@ impl<P: Program> Application<P> {
      pub fn subscription(
          self,
          f: impl Fn(&P::State) -> Subscription<P::Message>,
@@ -1791,7 +1791,7 @@ index f042ac7d..fa910ba0 100644
          Application {
              raw: program::with_subscription(self.raw, f),
              settings: self.settings,
-@@ -367,7 +376,9 @@ impl<P: Program> Application<P> {
+@@ -391,7 +400,9 @@ impl<P: Program> Application<P> {
      pub fn theme(
          self,
          f: impl ThemeFn<P::State, P::Theme>,
@@ -1802,7 +1802,7 @@ index f042ac7d..fa910ba0 100644
          Application {
              raw: program::with_theme(self.raw, move |state, _window| f.theme(state)),
              settings: self.settings,
-@@ -380,7 +391,9 @@ impl<P: Program> Application<P> {
+@@ -404,7 +415,9 @@ impl<P: Program> Application<P> {
      pub fn style(
          self,
          f: impl Fn(&P::State, &P::Theme) -> theme::Style,
@@ -1813,7 +1813,7 @@ index f042ac7d..fa910ba0 100644
          Application {
              raw: program::with_style(self.raw, f),
              settings: self.settings,
-@@ -393,7 +406,9 @@ impl<P: Program> Application<P> {
+@@ -417,7 +430,9 @@ impl<P: Program> Application<P> {
      pub fn scale_factor(
          self,
          f: impl Fn(&P::State) -> f32,
@@ -1824,7 +1824,7 @@ index f042ac7d..fa910ba0 100644
          Application {
              raw: program::with_scale_factor(self.raw, move |state, _window| f(state)),
              settings: self.settings,
-@@ -405,7 +420,9 @@ impl<P: Program> Application<P> {
+@@ -429,7 +444,9 @@ impl<P: Program> Application<P> {
      /// Sets the executor of the [`Application`].
      pub fn executor<E>(
          self,
@@ -1949,10 +1949,10 @@ index 4950b8a4..eec393ca 100644
          }
      }
 diff --git a/vendor/iced/src/lib.rs b/vendor/iced/src/lib.rs
-index 431488be..5e11e92c 100644
+index a584ce86..0dce8b20 100644
 --- a/vendor/iced/src/lib.rs
 +++ b/vendor/iced/src/lib.rs
-@@ -716,6 +716,7 @@ where
+@@ -717,6 +717,7 @@ where
      Message: Send + message::MaybeDebug + message::MaybeClone + 'static,
      Theme: theme::Base + 'static,
      Renderer: program::Renderer + 'static,
@@ -1961,7 +1961,7 @@ index 431488be..5e11e92c 100644
      application(State::default, update, view).run()
  }
 diff --git a/vendor/iced/tiny_skia/src/engine.rs b/vendor/iced/tiny_skia/src/engine.rs
-index af14962d..39e1c363 100644
+index bb8dcad3..b667ca0b 100644
 --- a/vendor/iced/tiny_skia/src/engine.rs
 +++ b/vendor/iced/tiny_skia/src/engine.rs
 @@ -2,7 +2,8 @@ use crate::Primitive;
@@ -5903,10 +5903,10 @@ index a3df7c7a..10a9fe51 100644
                  let font_size = (buffer.metrics().font_size / hint_factor).round() as u32;
  
 diff --git a/vendor/iced/wgpu/src/window/compositor.rs b/vendor/iced/wgpu/src/window/compositor.rs
-index 31af6daa..52309d33 100644
+index 05760dc1..b959b20b 100644
 --- a/vendor/iced/wgpu/src/window/compositor.rs
 +++ b/vendor/iced/wgpu/src/window/compositor.rs
-@@ -140,7 +140,19 @@ impl Compositor {
+@@ -145,7 +145,19 @@ impl Compositor {
  
                  format.zip(Some(preferred_alpha))
              })
@@ -5927,7 +5927,7 @@ index 31af6daa..52309d33 100644
  
          log::info!("Selected format: {format:?} with alpha mode: {alpha_mode:?}");
  
-@@ -358,6 +370,43 @@ impl graphics::Compositor for Compositor {
+@@ -366,6 +378,43 @@ impl graphics::Compositor for Compositor {
      ) -> Vec<u8> {
          renderer.screenshot(viewport, background_color)
      }
@@ -6045,7 +6045,7 @@ index 5dbb7c74..5204f46f 100644
  
  impl From<backend::Error> for Error {
 diff --git a/vendor/iced/winit/src/lib.rs b/vendor/iced/winit/src/lib.rs
-index a3da2ff3..9a9d78cd 100644
+index c1cae8af..d195dd5e 100644
 --- a/vendor/iced/winit/src/lib.rs
 +++ b/vendor/iced/winit/src/lib.rs
 @@ -31,6 +31,7 @@ pub mod conversion;
@@ -6088,6 +6088,15 @@ index a3da2ff3..9a9d78cd 100644
  {
      use winit::event_loop::EventLoop;
  
+@@ -286,7 +291,7 @@ where
+                                     (
+                                         ControlFlow::WaitUntil(current),
+                                         ControlFlow::WaitUntil(new),
+-                                    ) if current < new => {}
++                                    ) if current > Instant::now() && current < new => {}
+                                     (ControlFlow::WaitUntil(target), ControlFlow::Wait)
+                                         if target > Instant::now() => {}
+                                     _ => {
 @@ -425,7 +430,9 @@ where
      #[cfg(not(target_arch = "wasm32"))]
      {
@@ -6668,7 +6677,7 @@ index a3da2ff3..9a9d78cd 100644
  
                          if let user_interface::State::Updated {
                              redraw_request,
-@@ -935,60 +1416,214 @@ async fn run_instance<P>(
+@@ -935,60 +1416,228 @@ async fn run_instance<P>(
                          window.draw_preedit();
  
                          let present_span = debug::present(id);
@@ -6810,41 +6819,55 @@ index a3da2ff3..9a9d78cd 100644
 +                                            // This is an unrecoverable error.
 +                                            panic!("{error:?}");
 +                                        }
-+                                        compositor::SurfaceError::Outdated
-+                                        | compositor::SurfaceError::Lost => {
-+                                            present_span.finish();
-+
-+                                            // Reconfigure surface and try redrawing
-+                                            let physical_size = window.state.physical_size();
-+
-+                                            if error == compositor::SurfaceError::Lost {
-+                                                window.surface = current_compositor.create_surface(
-+                                                    window.raw.clone(),
-+                                                    physical_size.width,
-+                                                    physical_size.height,
-+                                                );
-+                                            } else {
-+                                                current_compositor.configure_surface(
-+                                                    &mut window.surface,
-+                                                    physical_size.width,
-+                                                    physical_size.height,
-+                                                );
-+                                            }
-+
-+                                            window.raw.request_redraw();
-+                                        }
 +                                        compositor::SurfaceError::Occluded => {
 +                                            present_span.finish();
 +
 +                                            // Do nothing and wait for window to become visible again
 +                                        }
-+                                        _ => {
++                                        compositor::SurfaceError::Timeout => {
 +                                            present_span.finish();
 +
-+                                            log::error!("Error {error:?} when presenting surface.");
++                                            window.raw.request_redraw();
++                                        }
++                                        compositor::SurfaceError::Lost
++                                        | compositor::SurfaceError::Outdated
++                                        | compositor::SurfaceError::Other => {
++                                            present_span.finish();
 +
-+                                            // Try rendering all windows again next frame.
-+                                            for (_id, window) in window_manager.iter_mut() {
++                                            // Reconfigure or recreate at most once a second,
++                                            // and do not request a redraw in between, so a
++                                            // surface that keeps failing cannot spin the loop.
++                                            let due = window.surface_error_at.is_none_or(|at| {
++                                                at.elapsed() > Duration::from_secs(1)
++                                            });
++
++                                            if due {
++                                                window.surface_error_at = Some(Instant::now());
++
++                                                log::warn!(
++                                                    "Error {error:?} when presenting surface. Recovering it."
++                                                );
++
++                                                let physical_size = window.state.physical_size();
++
++                                                if matches!(
++                                                    error,
++                                                    compositor::SurfaceError::Outdated
++                                                ) {
++                                                    current_compositor.configure_surface(
++                                                        &mut window.surface,
++                                                        physical_size.width,
++                                                        physical_size.height,
++                                                    );
++                                                } else {
++                                                    window.surface = current_compositor
++                                                        .create_surface(
++                                                            window.raw.clone(),
++                                                            physical_size.width,
++                                                            physical_size.height,
++                                                        );
++                                                }
++
 +                                                window.raw.request_redraw();
 +                                            }
 +                                        }
@@ -6855,7 +6878,7 @@ index a3da2ff3..9a9d78cd 100644
 +                            }
 +                        }
  
--                                    log::error!("Error {error:?} when presenting surface.");
+-                                    log::warn!("Error {error:?} when presenting surface.");
 +                        if let Some(after_present) = backend_handoff_after_present {
 +                            match after_present {
 +                                BackendHandoffAfterPresent::Complete { awaiting, evidence } => {
@@ -6920,7 +6943,7 @@ index a3da2ff3..9a9d78cd 100644
                          }
                      }
                      event::Event::WindowEvent {
-@@ -1000,6 +1635,16 @@ async fn run_instance<P>(
+@@ -1000,6 +1649,16 @@ async fn run_instance<P>(
                              && !is_window_opening
                              && window_manager.is_empty()
                          {
@@ -6937,7 +6960,7 @@ index a3da2ff3..9a9d78cd 100644
                              control_sender
                                  .start_send(Control::Exit)
                                  .expect("Send control action");
-@@ -1038,6 +1683,9 @@ async fn run_instance<P>(
+@@ -1038,6 +1697,9 @@ async fn run_instance<P>(
                                  &proxy,
                                  &mut runtime,
                                  &mut compositor,
@@ -6947,7 +6970,7 @@ index a3da2ff3..9a9d78cd 100644
                                  &mut events,
                                  &mut messages,
                                  &mut clipboard,
-@@ -1067,7 +1715,20 @@ async fn run_instance<P>(
+@@ -1067,7 +1729,20 @@ async fn run_instance<P>(
                              actions = 0;
                          }
  
@@ -6969,7 +6992,7 @@ index a3da2ff3..9a9d78cd 100644
                              continue;
                          }
  
-@@ -1170,6 +1831,9 @@ async fn run_instance<P>(
+@@ -1170,6 +1845,9 @@ async fn run_instance<P>(
                                      &proxy,
                                      &mut runtime,
                                      &mut compositor,
@@ -6979,7 +7002,7 @@ index a3da2ff3..9a9d78cd 100644
                                      &mut events,
                                      &mut messages,
                                      &mut clipboard,
-@@ -1199,68 +1863,1219 @@ async fn run_instance<P>(
+@@ -1199,69 +1877,1220 @@ async fn run_instance<P>(
                      _ => {}
                  }
              }
@@ -7122,6 +7145,7 @@ index a3da2ff3..9a9d78cd 100644
 -                        futures::task::Poll::Ready(None) => {
 -                            break;
 -                        }
+-                        futures::task::Poll::Pending => {
 +    graphics::cache::invalidate_all();
 +
 +    let mut retained_windows = Vec::new();
@@ -8243,10 +8267,11 @@ index a3da2ff3..9a9d78cd 100644
 +                        futures::task::Poll::Ready(None) => {
 +                            break;
 +                        }
-                         futures::task::Poll::Pending => {
++                        futures::task::Poll::Pending => {
                              runtime.run(stream);
                              break;
-@@ -1287,6 +3102,9 @@ fn run_action<'a, P, C>(
+                         }
+@@ -1287,6 +3116,9 @@ fn run_action<'a, P, C>(
      _proxy: &Proxy<P::Message>,
      runtime: &mut Runtime<P::Executor, Proxy<P::Message>, Action<P::Message>>,
      compositor: &mut Option<C>,
@@ -8256,7 +8281,7 @@ index a3da2ff3..9a9d78cd 100644
      events: &mut Vec<(window::Id, core::Event)>,
      messages: &mut Vec<P::Message>,
      clipboard: &mut Clipboard,
-@@ -1299,7 +3117,7 @@ fn run_action<'a, P, C>(
+@@ -1299,7 +3131,7 @@ fn run_action<'a, P, C>(
      renderer_settings: &mut renderer::Settings,
  ) where
      P: Program,
@@ -8265,7 +8290,7 @@ index a3da2ff3..9a9d78cd 100644
      P::Theme: theme::Base,
  {
      use crate::core::Renderer as _;
-@@ -1345,6 +3163,24 @@ fn run_action<'a, P, C>(
+@@ -1345,6 +3177,24 @@ fn run_action<'a, P, C>(
                  let _ = interfaces.remove(&id);
  
                  if window_manager.remove(id).is_some() {
@@ -8290,7 +8315,7 @@ index a3da2ff3..9a9d78cd 100644
                      events.push((id, core::Event::Window(core::window::Event::Closed)));
                  }
  
-@@ -1724,6 +3560,16 @@ fn run_action<'a, P, C>(
+@@ -1724,6 +3574,16 @@ fn run_action<'a, P, C>(
          Action::Backend(action) => match action {
              #[cfg(not(target_arch = "wasm32"))]
              backend::Action::Configure(settings, sender) => {
@@ -8307,7 +8332,7 @@ index a3da2ff3..9a9d78cd 100644
                  let shell = Shell::new(_proxy.clone());
  
                  let mut new_compositor = if let Some(window) = window_manager.first() {
-@@ -1740,6 +3586,9 @@ fn run_action<'a, P, C>(
+@@ -1740,6 +3600,9 @@ fn run_action<'a, P, C>(
                          }
                      }
                  } else {
@@ -8317,7 +8342,7 @@ index a3da2ff3..9a9d78cd 100644
                      return;
                  };
  
-@@ -1760,10 +3609,125 @@ fn run_action<'a, P, C>(
+@@ -1760,10 +3623,125 @@ fn run_action<'a, P, C>(
  
                  *compositor = Some(new_compositor);
  
@@ -8443,7 +8468,7 @@ index a3da2ff3..9a9d78cd 100644
          },
          Action::Event { window, event } => {
              events.push((window, event));
-@@ -1791,6 +3755,16 @@ fn run_action<'a, P, C>(
+@@ -1791,6 +3769,16 @@ fn run_action<'a, P, C>(
              }
          }
          Action::Exit => {
@@ -8580,10 +8605,18 @@ index 00000000..48b33d32
 +        .map_or(0, |duration| duration.as_micros())
 +}
 diff --git a/vendor/iced/winit/src/window.rs b/vendor/iced/winit/src/window.rs
-index 7f4ee6f4..638aa70d 100644
+index 7f4ee6f4..c59a5da1 100644
 --- a/vendor/iced/winit/src/window.rs
 +++ b/vendor/iced/winit/src/window.rs
-@@ -156,6 +156,13 @@ where
+@@ -84,6 +84,7 @@ where
+                 exit_on_close_request,
+                 surface,
+                 surface_version,
++                surface_error_at: None,
+                 renderer,
+                 mouse_interaction: mouse::Interaction::None,
+                 redraw_at: None,
+@@ -156,6 +157,13 @@ where
              .map(|(id, window)| (id, f(window)))
              .collect();
      }
@@ -8597,7 +8630,14 @@ index 7f4ee6f4..638aa70d 100644
  }
  
  impl<P, C> Default for Manager<P, C>
-@@ -188,12 +195,65 @@ where
+@@ -182,18 +190,74 @@ where
+     pub mouse_interaction: mouse::Interaction,
+     pub surface: C::Surface,
+     pub surface_version: u64,
++    pub surface_error_at: Option<Instant>,
+     pub renderer: P::Renderer,
+     pub redraw_at: Option<Instant>,
+     preedit: Option<Preedit<P::Renderer>>,
      ime_state: Option<(Rectangle, input_method::Purpose)>,
  }
  
@@ -8630,6 +8670,7 @@ index 7f4ee6f4..638aa70d 100644
 +            mouse_interaction,
 +            surface,
 +            surface_version,
++            surface_error_at: _,
 +            renderer,
 +            redraw_at,
 +            preedit,
@@ -8651,6 +8692,7 @@ index 7f4ee6f4..638aa70d 100644
 +                mouse_interaction,
 +                surface: rendering_state.surface,
 +                surface_version: rendering_state.surface_version,
++                surface_error_at: None,
 +                renderer: rendering_state.renderer,
 +                redraw_at,
 +                preedit,

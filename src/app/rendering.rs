@@ -308,6 +308,7 @@ fn configure_hardware_backend() -> Task<Message> {
 
     backend::prepare_warm_and_commit(backend::Settings {
         backend: Backend::Hardware(Api::Best),
+        power_preference: backend::PowerPreference::HighPerformance,
         antialiasing: false,
         vsync: true,
     })
