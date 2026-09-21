@@ -2,6 +2,14 @@
 
 ## Editor interactions
 
+Mouse-wheel scrolling in settings, search results, function lists, About tabs,
+menus, dropdowns, the tab strip, and the toolbar eases over 150 ms. Repeated
+steps accumulate and reversing direction responds from the displayed position.
+Touchpad pixel input, touch gestures, scrollbar dragging, and keyboard reveal
+remain direct. Scrolling animations retain state across widget rebuilds, clamp
+to content bounds, and stop requesting frames when finished. The custom text
+editor keeps its existing scrolling behavior.
+
 The editing surface is the custom Iced `AdvancedEditor` widget. Its pointer and
 keyboard handling lives under `src/editor/widget/`; commands go through
 `EditorAction` and the application handlers so menus and shortcuts share undo,

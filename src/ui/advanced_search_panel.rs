@@ -290,7 +290,9 @@ fn results(dialog: &SearchDialogState) -> Element<'_, Message> {
             .spacing(10)
             .align_y(Center)
             .padding([8, 12]),
-            scrollable(result_list.padding([0, 8])).height(Fill),
+            scrollable(result_list.padding([0, 8]))
+                .smooth_scroll(true)
+                .height(Fill),
         ]
         .height(Fill),
     )

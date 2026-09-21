@@ -20,6 +20,7 @@ const ROW_HEIGHT: f32 = 28.0;
 const SEPARATOR_HEIGHT: f32 = 9.0;
 const PADDING: f32 = 5.0;
 const EDGE: f32 = 8.0;
+const WHEEL_EASING_DURATION: std::time::Duration = std::time::Duration::from_millis(150);
 
 pub(super) fn wrap<'a>(
     editor: Element<'a, Message>,
@@ -49,6 +50,15 @@ struct State {
     path: Vec<usize>,
     highlighted: Vec<Option<usize>>,
     offsets: Vec<f32>,
+    scroll_motion: Option<ScrollMotion>,
+}
+
+#[derive(Clone, PartialEq)]
+struct ScrollMotion {
+    depth: usize,
+    origin: f32,
+    target: f32,
+    started: std::time::Instant,
 }
 
 impl State {
@@ -57,6 +67,7 @@ impl State {
         self.path.clear();
         self.highlighted = vec![keyboard.then(|| first_enabled(entries)).flatten()];
         self.offsets = vec![0.0];
+        self.scroll_motion = None;
     }
 
     fn close(&mut self) {
@@ -64,6 +75,7 @@ impl State {
         self.path.clear();
         self.highlighted.clear();
         self.offsets.clear();
+        self.scroll_motion = None;
     }
 
     fn highlight(&mut self, depth: usize, index: usize) {
@@ -73,6 +85,13 @@ impl State {
         self.highlighted[depth] = Some(index);
         self.offsets.truncate(depth + 1);
         self.offsets.resize(depth + 1, 0.0);
+        if self
+            .scroll_motion
+            .as_ref()
+            .is_some_and(|motion| motion.depth > depth)
+        {
+            self.scroll_motion = None;
+        }
     }
 
     fn enter(&mut self, depth: usize, index: usize, children: &[MenuNode], keyboard: bool) {
@@ -629,6 +648,25 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
         }
         let before = self.state.clone();
         match event {
+            Event::Window(iced::window::Event::RedrawRequested(now)) => {
+                if let Some(motion) = self.state.scroll_motion.clone() {
+                    if motion.depth <= self.state.path.len() {
+                        let progress =
+                            (now.saturating_duration_since(motion.started).as_secs_f32()
+                                / WHEEL_EASING_DURATION.as_secs_f32())
+                            .min(1.0);
+                        self.state.offsets[motion.depth] = motion.origin
+                            + (motion.target - motion.origin) * (1.0 - (1.0 - progress).powi(3));
+                        if progress < 1.0 {
+                            shell.request_redraw_at(*now + std::time::Duration::from_millis(16));
+                        } else {
+                            self.state.scroll_motion = None;
+                        }
+                    } else {
+                        self.state.scroll_motion = None;
+                    }
+                }
+            }
             Event::Window(iced::window::Event::Unfocused | iced::window::Event::Resized(_)) => {
                 self.state.close()
             }
@@ -644,6 +682,7 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                 }
             }
             Event::Mouse(mouse::Event::ButtonPressed(button)) => {
+                self.state.scroll_motion = None;
                 if let Some((depth, index)) =
                     cursor.position().and_then(|point| self.hit(layout, point))
                 {
@@ -663,20 +702,51 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                 shell.capture_event();
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                if let Some(depth) = layout
+                if let Some((depth, panel)) = layout
                     .children()
                     .take(self.state.path.len() + 1)
                     .enumerate()
                     .filter(|(_, panel)| cursor.is_over(panel.bounds()))
-                    .map(|(depth, _)| depth)
                     .last()
                 {
-                    let delta = match delta {
+                    let pixels = match delta {
                         mouse::ScrollDelta::Lines { y, .. } => y * ROW_HEIGHT * 3.0,
                         mouse::ScrollDelta::Pixels { y, .. } => *y,
                     };
+                    let maximum = (rows_height(self.at_depth(depth)) + PADDING * 2.0
+                        - panel.bounds().height)
+                        .max(0.0);
+                    let origin = self.state.offsets[depth];
+                    let pending = self
+                        .state
+                        .scroll_motion
+                        .as_ref()
+                        .filter(|motion| motion.depth == depth)
+                        .map_or(origin, |motion| motion.target);
                     self.state.path.truncate(depth);
-                    self.state.offsets[depth] = (self.state.offsets[depth] - delta).max(0.0);
+                    self.state.offsets.truncate(depth + 1);
+                    self.state.highlighted.truncate(depth + 1);
+                    self.state.highlighted[depth] = None;
+                    if matches!(delta, mouse::ScrollDelta::Lines { .. }) {
+                        let base = if pixels * (pending - origin) > 0.0 {
+                            origin
+                        } else {
+                            pending
+                        };
+                        let target = (base - pixels).clamp(0.0, maximum);
+                        self.state.scroll_motion = (target != origin).then(|| ScrollMotion {
+                            depth,
+                            origin,
+                            target,
+                            started: std::time::Instant::now(),
+                        });
+                        if self.state.scroll_motion.is_some() {
+                            shell.request_redraw();
+                        }
+                    } else {
+                        self.state.scroll_motion = None;
+                        self.state.offsets[depth] = (origin - pixels).clamp(0.0, maximum);
+                    }
                 }
                 shell.capture_event();
             }
@@ -686,6 +756,7 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                 modifiers,
                 ..
             }) => {
+                self.state.scroll_motion = None;
                 let depth = self.state.path.len();
                 let current = self.state.highlighted.get(depth).copied().flatten();
                 let modified_shortcut = (!modifiers.is_empty()
@@ -782,7 +853,12 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
         } else if self.state.path != before.path || self.state.offsets != before.offsets {
             shell.invalidate_layout();
         }
-        shell.request_redraw();
+        if !matches!(
+            event,
+            Event::Window(iced::window::Event::RedrawRequested(_))
+        ) {
+            shell.request_redraw();
+        }
     }
 
     fn mouse_interaction(

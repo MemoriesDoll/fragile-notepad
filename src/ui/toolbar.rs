@@ -188,11 +188,16 @@ pub fn tool_bar<'a>(document: Option<&Document>) -> Element<'a, Message> {
     .align_y(Center)
     .width(Fill);
 
-    container(scrollable(buttons).horizontal().width(Fill))
-        .height(30)
-        .width(Fill)
-        .style(styles::tool_bar)
-        .into()
+    container(
+        scrollable(buttons)
+            .smooth_scroll(true)
+            .horizontal()
+            .width(Fill),
+    )
+    .height(30)
+    .width(Fill)
+    .style(styles::tool_bar)
+    .into()
 }
 
 fn menu_button<'a>(

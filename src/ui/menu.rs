@@ -211,7 +211,10 @@ fn menu_panel<'a>(
         });
 
     let content: Element<_> = if let Some(height) = max_height {
-        scrollable(content).height(Length::Fixed(height)).into()
+        scrollable(content)
+            .smooth_scroll(true)
+            .height(Length::Fixed(height))
+            .into()
     } else {
         content.into()
     };

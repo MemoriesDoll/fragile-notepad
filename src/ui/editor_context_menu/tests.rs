@@ -456,3 +456,68 @@ fn dismissing_or_switching_submenus_tolerates_cursor_queries_with_previous_layou
         None
     );
 }
+
+#[test]
+fn wheel_scroll_animates_and_keyboard_navigation_cancels_pending_motion() {
+    let renderer = renderer();
+    let settings = EditorSettings::default();
+    let entries = (0..40)
+        .map(|_| menu::item("Copy", Message::Copy))
+        .collect::<Vec<_>>();
+    let mut state = State::default();
+    state.open(Point::new(10.0, 10.0), &entries, true);
+    let mut menu = ContextMenu {
+        state: &mut state,
+        entries,
+        settings: &settings,
+        anchor: Point::new(10.0, 10.0),
+    };
+    let viewport = Size::new(400.0, 250.0);
+    let cursor = mouse::Cursor::Available(Point::new(80.0, 80.0));
+    let wheel = || {
+        Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        })
+    };
+    let _ = dispatch(&mut menu, &renderer, viewport, wheel(), cursor);
+    assert_eq!(menu.state.offsets[0], 0.0);
+    let started = menu.state.scroll_motion.as_ref().unwrap().started;
+    let tick = |menu: &mut ContextMenu<'_>, elapsed| {
+        let node = menu.layout(&renderer, viewport);
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&iced::window::Headless, Waker::noop(), &mut messages);
+        menu.update(
+            &Event::Window(iced::window::Event::RedrawRequested(
+                started + std::time::Duration::from_millis(elapsed),
+            )),
+            Layout::new(&node),
+            mouse::Cursor::Unavailable,
+            &renderer,
+            &mut shell,
+        );
+        assert!(messages.is_empty());
+    };
+    tick(&mut menu, 50);
+    assert!(menu.state.offsets[0] > 0.0 && menu.state.offsets[0] < ROW_HEIGHT * 3.0);
+    tick(&mut menu, 150);
+    assert_eq!(menu.state.offsets[0], ROW_HEIGHT * 3.0);
+    assert!(menu.state.scroll_motion.is_none());
+    let _ = dispatch(&mut menu, &renderer, viewport, wheel(), cursor);
+    assert!(menu.state.scroll_motion.is_some());
+    let _ = dispatch(&mut menu, &renderer, viewport, key(Named::Home), cursor);
+    assert_eq!(menu.state.offsets[0], 0.0);
+    assert!(menu.state.scroll_motion.is_none());
+    tick(&mut menu, 500);
+    assert_eq!(menu.state.offsets[0], 0.0);
+    let _ = dispatch(
+        &mut menu,
+        &renderer,
+        viewport,
+        Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -12.0 },
+        }),
+        cursor,
+    );
+    assert_eq!(menu.state.offsets[0], 12.0);
+    assert!(menu.state.scroll_motion.is_none());
+}

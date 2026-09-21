@@ -31,7 +31,7 @@ pub fn view<'a>(_: &'a Document, outline_state: Option<&'a OutlineState>) -> Ele
                 .padding([8, 10])
                 .width(Fill)
                 .style(styles::function_list_header),
-            scrollable(body).height(Fill),
+            scrollable(body).smooth_scroll(true).height(Fill),
         ]
         .height(Fill),
     )

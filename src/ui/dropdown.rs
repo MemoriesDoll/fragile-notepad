@@ -329,7 +329,7 @@ impl<T: Clone + PartialEq> Widget<Message, Theme, Renderer> for Dropdown<'_, T> 
                 )
             });
         let mut content = motion::dropdown(
-            container(scrollable(rows).height(Length::Shrink))
+            container(scrollable(rows).smooth_scroll(true).height(Length::Shrink))
                 .padding(MENU_PADDING)
                 .width(Fill)
                 .style(styles::dropdown_menu),
@@ -895,6 +895,34 @@ mod tests {
                 delta: mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
             }),
             mouse::Cursor::Available(settled.bounds().center()),
+        );
+        assert_eq!(
+            scroll_position(&mut content, &mut tree, &node, &renderer),
+            0.0
+        );
+        // The overlay is rebuilt for every event. Its scroll animation must
+        // remain in the retained tree and advance even with no pointer present.
+        menu_event(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                Instant::now() + Duration::from_millis(75),
+            )),
+            mouse::Cursor::Unavailable,
+        );
+        let midway = scroll_position(&mut content, &mut tree, &node, &renderer);
+        assert!(midway > 0.0 && midway < 180.0);
+        menu_event(
+            &mut content,
+            &mut tree,
+            &node,
+            &renderer,
+            Event::Window(window::Event::RedrawRequested(
+                Instant::now() + Duration::from_millis(200),
+            )),
+            mouse::Cursor::Unavailable,
         );
         assert!(scroll_position(&mut content, &mut tree, &node, &renderer) > 0.0);
 

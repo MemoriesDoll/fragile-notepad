@@ -337,7 +337,10 @@ fn shortcuts_pane(
 
     content = content.push(rows);
 
-    scrollable(content.spacing(16)).height(Fill).into()
+    scrollable(content.spacing(16))
+        .smooth_scroll(true)
+        .height(Fill)
+        .into()
 }
 
 fn shortcut_row<'a>(

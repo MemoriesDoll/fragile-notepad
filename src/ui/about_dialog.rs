@@ -278,7 +278,7 @@ fn about_content(progress: f32) -> Element<'static, Message> {
             muted(text(AUTHOR_EMAIL).size(13), progress),
         ].spacing(6)).padding(18).width(Fill)
             .style(move |theme| fade_container(styles::info_card(theme), progress)),
-    ].spacing(22).padding([2, 0]).width(Fill))
+    ].spacing(22).padding([2, 0]).width(Fill)).smooth_scroll(true)
         .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
         .height(Fill)
         .width(Fill)
@@ -385,6 +385,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
         .padding(iced::Padding::new(0.0).right(10))
         .width(Fill),
     )
+    .smooth_scroll(true)
     .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
     .height(Fill)
     .width(Fill)
@@ -440,6 +441,7 @@ fn licenses_content(progress: f32) -> Element<'static, Message> {
         .padding(iced::Padding::new(0.0).right(10))
         .width(Fill),
     )
+    .smooth_scroll(true)
     .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
     .height(Fill)
     .width(Fill)

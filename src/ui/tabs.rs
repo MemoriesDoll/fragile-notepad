@@ -61,11 +61,13 @@ pub fn view(
             })
             .push(new_file_button());
         let scrollable = if needs_scroll {
-            scrollable(tabs).horizontal().spacing(0)
+            scrollable(tabs).smooth_scroll(true).horizontal().spacing(0)
         } else {
-            scrollable(tabs).direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::hidden(),
-            ))
+            scrollable(tabs)
+                .smooth_scroll(true)
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::hidden(),
+                ))
         };
         container(scrollable.width(Fill))
             .padding([0, 0])
