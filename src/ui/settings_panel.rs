@@ -106,7 +106,7 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
     column![
         pane_title("General"),
         option_row(
-            "Startup appearance",
+            "Appearance",
             dropdown(
                 Some(settings.appearance),
                 APPEARANCE_OPTIONS,

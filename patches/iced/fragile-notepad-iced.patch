@@ -6045,7 +6045,7 @@ index 5dbb7c74..5204f46f 100644
  
  impl From<backend::Error> for Error {
 diff --git a/vendor/iced/winit/src/lib.rs b/vendor/iced/winit/src/lib.rs
-index a3da2ff3..380c53bb 100644
+index a3da2ff3..9a9d78cd 100644
 --- a/vendor/iced/winit/src/lib.rs
 +++ b/vendor/iced/winit/src/lib.rs
 @@ -31,6 +31,7 @@ pub mod conversion;
@@ -6553,7 +6553,35 @@ index a3da2ff3..380c53bb 100644
          match event {
              Event::WindowCreated {
                  id,
-@@ -727,6 +1160,9 @@ async fn run_instance<P>(
+@@ -616,15 +1049,20 @@ async fn run_instance<P>(
+                     }
+                 }
+ 
+-                let window_theme = window
+-                    .theme()
+-                    .map(conversion::theme_mode)
+-                    .unwrap_or_default();
++                // On Linux, keep the desktop preference supplied by mundy.
++                // X11 reports no window theme; Wayland reports its decoration theme.
++                #[cfg(not(all(feature = "linux-theme-detection", target_os = "linux")))]
++                {
++                    let window_theme = window
++                        .theme()
++                        .map(conversion::theme_mode)
++                        .unwrap_or_default();
+ 
+-                if system_theme != window_theme {
+-                    system_theme = window_theme;
++                    if system_theme != window_theme {
++                        system_theme = window_theme;
+ 
+-                    runtime.broadcast(subscription::Event::SystemThemeChanged(window_theme));
++                        runtime.broadcast(subscription::Event::SystemThemeChanged(window_theme));
++                    }
+                 }
+ 
+                 let is_first = window_manager.is_empty();
+@@ -727,6 +1165,9 @@ async fn run_instance<P>(
                              &proxy,
                              &mut runtime,
                              &mut compositor,
@@ -6563,7 +6591,7 @@ index a3da2ff3..380c53bb 100644
                              &mut events,
                              &mut messages,
                              &mut clipboard,
-@@ -760,6 +1196,29 @@ async fn run_instance<P>(
+@@ -760,6 +1201,29 @@ async fn run_instance<P>(
                              continue;
                          }
  
@@ -6593,7 +6621,7 @@ index a3da2ff3..380c53bb 100644
                          // Window was resized between redraws
                          if window.surface_version != window.state.surface_version() {
                              #[cfg(feature = "hinting")]
-@@ -790,6 +1249,7 @@ async fn run_instance<P>(
+@@ -790,6 +1254,7 @@ async fn run_instance<P>(
                              user_interfaces.get_mut(&id).expect("Get user interface");
  
                          let interact_span = debug::interact(id);
@@ -6601,7 +6629,7 @@ index a3da2ff3..380c53bb 100644
                          let mut redraw_count = 0;
  
                          let state = loop {
-@@ -847,6 +1307,9 @@ async fn run_instance<P>(
+@@ -847,6 +1312,9 @@ async fn run_instance<P>(
                                          &proxy,
                                          &mut runtime,
                                          &mut compositor,
@@ -6611,7 +6639,7 @@ index a3da2ff3..380c53bb 100644
                                          &mut events,
                                          &mut messages,
                                          &mut clipboard,
-@@ -899,8 +1362,17 @@ async fn run_instance<P>(
+@@ -899,8 +1367,17 @@ async fn run_instance<P>(
                              }
                          };
                          interact_span.finish();
@@ -6629,7 +6657,7 @@ index a3da2ff3..380c53bb 100644
                          interface.draw(
                              &mut window.renderer,
                              window.state.theme(),
-@@ -910,6 +1382,10 @@ async fn run_instance<P>(
+@@ -910,6 +1387,10 @@ async fn run_instance<P>(
                              cursor,
                          );
                          draw_span.finish();
@@ -6640,7 +6668,7 @@ index a3da2ff3..380c53bb 100644
  
                          if let user_interface::State::Updated {
                              redraw_request,
-@@ -935,60 +1411,214 @@ async fn run_instance<P>(
+@@ -935,60 +1416,214 @@ async fn run_instance<P>(
                          window.draw_preedit();
  
                          let present_span = debug::present(id);
@@ -6892,7 +6920,7 @@ index a3da2ff3..380c53bb 100644
                          }
                      }
                      event::Event::WindowEvent {
-@@ -1000,6 +1630,16 @@ async fn run_instance<P>(
+@@ -1000,6 +1635,16 @@ async fn run_instance<P>(
                              && !is_window_opening
                              && window_manager.is_empty()
                          {
@@ -6909,7 +6937,7 @@ index a3da2ff3..380c53bb 100644
                              control_sender
                                  .start_send(Control::Exit)
                                  .expect("Send control action");
-@@ -1038,6 +1678,9 @@ async fn run_instance<P>(
+@@ -1038,6 +1683,9 @@ async fn run_instance<P>(
                                  &proxy,
                                  &mut runtime,
                                  &mut compositor,
@@ -6919,7 +6947,7 @@ index a3da2ff3..380c53bb 100644
                                  &mut events,
                                  &mut messages,
                                  &mut clipboard,
-@@ -1067,7 +1710,20 @@ async fn run_instance<P>(
+@@ -1067,7 +1715,20 @@ async fn run_instance<P>(
                              actions = 0;
                          }
  
@@ -6941,7 +6969,7 @@ index a3da2ff3..380c53bb 100644
                              continue;
                          }
  
-@@ -1170,6 +1826,9 @@ async fn run_instance<P>(
+@@ -1170,6 +1831,9 @@ async fn run_instance<P>(
                                      &proxy,
                                      &mut runtime,
                                      &mut compositor,
@@ -6951,7 +6979,7 @@ index a3da2ff3..380c53bb 100644
                                      &mut events,
                                      &mut messages,
                                      &mut clipboard,
-@@ -1199,71 +1858,1222 @@ async fn run_instance<P>(
+@@ -1199,68 +1863,1219 @@ async fn run_instance<P>(
                      _ => {}
                  }
              }
@@ -7094,9 +7122,6 @@ index a3da2ff3..380c53bb 100644
 -                        futures::task::Poll::Ready(None) => {
 -                            break;
 -                        }
--                        futures::task::Poll::Pending => {
--                            runtime.run(stream);
--                            break;
 +    graphics::cache::invalidate_all();
 +
 +    let mut retained_windows = Vec::new();
@@ -8218,13 +8243,10 @@ index a3da2ff3..380c53bb 100644
 +                        futures::task::Poll::Ready(None) => {
 +                            break;
 +                        }
-+                        futures::task::Poll::Pending => {
-+                            runtime.run(stream);
-+                            break;
-                         }
-                     }
-                 }
-@@ -1287,6 +3097,9 @@ fn run_action<'a, P, C>(
+                         futures::task::Poll::Pending => {
+                             runtime.run(stream);
+                             break;
+@@ -1287,6 +3102,9 @@ fn run_action<'a, P, C>(
      _proxy: &Proxy<P::Message>,
      runtime: &mut Runtime<P::Executor, Proxy<P::Message>, Action<P::Message>>,
      compositor: &mut Option<C>,
@@ -8234,7 +8256,7 @@ index a3da2ff3..380c53bb 100644
      events: &mut Vec<(window::Id, core::Event)>,
      messages: &mut Vec<P::Message>,
      clipboard: &mut Clipboard,
-@@ -1299,7 +3112,7 @@ fn run_action<'a, P, C>(
+@@ -1299,7 +3117,7 @@ fn run_action<'a, P, C>(
      renderer_settings: &mut renderer::Settings,
  ) where
      P: Program,
@@ -8243,7 +8265,7 @@ index a3da2ff3..380c53bb 100644
      P::Theme: theme::Base,
  {
      use crate::core::Renderer as _;
-@@ -1345,6 +3158,24 @@ fn run_action<'a, P, C>(
+@@ -1345,6 +3163,24 @@ fn run_action<'a, P, C>(
                  let _ = interfaces.remove(&id);
  
                  if window_manager.remove(id).is_some() {
@@ -8268,7 +8290,7 @@ index a3da2ff3..380c53bb 100644
                      events.push((id, core::Event::Window(core::window::Event::Closed)));
                  }
  
-@@ -1724,6 +3555,16 @@ fn run_action<'a, P, C>(
+@@ -1724,6 +3560,16 @@ fn run_action<'a, P, C>(
          Action::Backend(action) => match action {
              #[cfg(not(target_arch = "wasm32"))]
              backend::Action::Configure(settings, sender) => {
@@ -8285,7 +8307,7 @@ index a3da2ff3..380c53bb 100644
                  let shell = Shell::new(_proxy.clone());
  
                  let mut new_compositor = if let Some(window) = window_manager.first() {
-@@ -1740,6 +3581,9 @@ fn run_action<'a, P, C>(
+@@ -1740,6 +3586,9 @@ fn run_action<'a, P, C>(
                          }
                      }
                  } else {
@@ -8295,7 +8317,7 @@ index a3da2ff3..380c53bb 100644
                      return;
                  };
  
-@@ -1760,10 +3604,125 @@ fn run_action<'a, P, C>(
+@@ -1760,10 +3609,125 @@ fn run_action<'a, P, C>(
  
                  *compositor = Some(new_compositor);
  
@@ -8421,7 +8443,7 @@ index a3da2ff3..380c53bb 100644
          },
          Action::Event { window, event } => {
              events.push((window, event));
-@@ -1791,6 +3750,16 @@ fn run_action<'a, P, C>(
+@@ -1791,6 +3755,16 @@ fn run_action<'a, P, C>(
              }
          }
          Action::Exit => {

@@ -673,7 +673,7 @@ mod tests {
     fn light_field_cache_reuses_handles_and_invalidates_only_for_paint_changes() {
         let mut renderer = renderer();
         let (mut widget, mut tree, node) = mount(&renderer);
-        let theme = crate::ui::styles::modern_theme(crate::core::AppearanceMode::Light);
+        let theme = crate::ui::styles::modern_theme(crate::core::AppearanceMode::Light).unwrap();
         let draw = |widget: &Element<'_, Message>,
                     tree: &Tree,
                     renderer: &mut Renderer,
@@ -706,7 +706,7 @@ mod tests {
         tree.state.downcast_mut::<State>().elapsed = 3.0;
         let moved = draw(&widget, &tree, &mut renderer, &theme, &node);
         assert_ne!(first, moved);
-        let dark = crate::ui::styles::modern_theme(crate::core::AppearanceMode::Dark);
+        let dark = crate::ui::styles::modern_theme(crate::core::AppearanceMode::Dark).unwrap();
         assert_ne!(moved, draw(&widget, &tree, &mut renderer, &dark, &node));
         let previous = draw(&widget, &tree, &mut renderer, &dark, &node);
         let narrow = layout::Node::new(Size::new(440.0, HEADER_HEIGHT));
@@ -802,7 +802,7 @@ mod tests {
             crate::core::AppearanceMode::Light,
             crate::core::AppearanceMode::Dark,
         ] {
-            let theme = crate::ui::styles::modern_theme(appearance);
+            let theme = crate::ui::styles::modern_theme(appearance).unwrap();
             for scale in [1.0, 1.5] {
                 let invisible = snapshot(&mut renderer, &theme, 0.0, 0.0, scale);
                 assert!(invisible.chunks_exact(4).all(|pixel| pixel[3] == 0));

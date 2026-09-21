@@ -603,7 +603,7 @@ impl App {
         ])
     }
 
-    pub fn theme(&self, _window_id: window::Id) -> Theme {
+    pub fn theme(&self, _window_id: window::Id) -> Option<Theme> {
         ui::styles::modern_theme(self.settings.appearance)
     }
 

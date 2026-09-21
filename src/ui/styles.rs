@@ -103,9 +103,11 @@ impl VisualPalette {
     }
 }
 
-pub fn modern_theme(appearance: crate::core::AppearanceMode) -> Theme {
+pub fn modern_theme(appearance: crate::core::AppearanceMode) -> Option<Theme> {
     match appearance {
-        crate::core::AppearanceMode::Dark => Theme::custom(
+        // No override lets Iced use the OS theme at startup and follow changes.
+        crate::core::AppearanceMode::System => None,
+        crate::core::AppearanceMode::Dark => Some(Theme::custom(
             "Fragile Modern Dark",
             iced::theme::palette::Seed {
                 background: Color::from_rgb8(25, 28, 33),
@@ -115,8 +117,8 @@ pub fn modern_theme(appearance: crate::core::AppearanceMode) -> Theme {
                 warning: Color::from_rgb8(245, 190, 91),
                 danger: Color::from_rgb8(255, 121, 137),
             },
-        ),
-        crate::core::AppearanceMode::System | crate::core::AppearanceMode::Light => Theme::custom(
+        )),
+        crate::core::AppearanceMode::Light => Some(Theme::custom(
             "Fragile Modern Light",
             iced::theme::palette::Seed {
                 background: Color::from_rgb8(246, 247, 249),
@@ -126,7 +128,7 @@ pub fn modern_theme(appearance: crate::core::AppearanceMode) -> Theme {
                 warning: Color::from_rgb8(181, 118, 20),
                 danger: Color::from_rgb8(190, 45, 65),
             },
-        ),
+        )),
     }
 }
 
