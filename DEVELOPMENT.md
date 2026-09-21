@@ -103,6 +103,20 @@ blocking workers. Superseded outline tasks are aborted; a parse already running
 can finish, but its stale result is rejected. Full syntax/fold/outline analysis
 remains limited to documents at or below 1 MiB of decoded text.
 
+Syntax highlighting is progressive. The editor draws immediately using available
+spans. A blocking worker prioritizes visible logical lines (skipping folded blocks
+and duplicate wrapped fragments), then nearby lines. These initial colors are
+provisional because parsing starts without earlier document context. Interleaved
+context passes parse from the beginning and replace provisional spans with exact
+highlighting, including multiline comments and embedded languages.
+
+Only one syntax batch is outstanding. Batches yield after 128 lines or about 4 ms;
+a single slow line may exceed that budget on the worker. Viewport requests follow
+the latest scroll position, provisional storage is bounded to 1,024 lines, and
+document revision, language, theme, and cache generation checks reject stale
+results. Editing clears provisional spans and invalidates the affected exact
+suffix. Syntax results redraw the editor without triggering session writes.
+
 The tab strip reserves space below the labels for a visible horizontal scrollbar
 when the tabs overflow. When they fit, that strip disappears. Window resizing,
 opening/closing tabs, and title changes update this decision during layout.

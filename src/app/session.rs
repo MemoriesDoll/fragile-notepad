@@ -281,6 +281,7 @@ impl App {
             && !matches!(
                 message,
                 Message::None
+                    | Message::SyntaxParsed(..)
                     | Message::SessionFlush
                     | Message::SessionPersisted(_)
                     | Message::ShutdownPersisted(_)

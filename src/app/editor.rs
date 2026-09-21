@@ -110,8 +110,6 @@ impl App {
             false
         };
 
-        self.prewarm_active_syntax_cache();
-
         if changed {
             self.schedule_outline_parse(document_id)
         } else {

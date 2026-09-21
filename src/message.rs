@@ -85,6 +85,10 @@ pub enum Message {
     SettingsFlush,
     RefreshLoadingFind,
     DocumentAnalyzed(crate::core::document::DocumentAnalysis),
+    SyntaxParsed(
+        u64,
+        Result<crate::editor::render::SyntaxParseResult, String>,
+    ),
     Shortcut(ShortcutCommand),
     EditorAction(DocumentId, EditorAction),
     OutlineParseCompleted(OutlineParseResult),

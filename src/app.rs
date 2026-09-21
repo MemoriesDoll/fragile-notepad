@@ -26,9 +26,9 @@ mod search;
 mod session;
 mod settings;
 mod shortcuts;
+mod syntax;
 mod windowing;
 
-const SYNTAX_PREWARM_VISIBLE_LINES: usize = 96;
 const CHROME_REVEAL_ANIMATION_DURATION: Duration = Duration::from_millis(140);
 
 static SINGLE_INSTANCE: OnceLock<PrimaryInstance> = OnceLock::new();
@@ -41,6 +41,7 @@ pub struct App {
     outline_states: HashMap<DocumentId, OutlineState>,
     outline_handles: HashMap<DocumentId, iced::task::Handle>,
     outline_registry_hash: u64,
+    syntax_parsing: syntax::SyntaxParsing,
     is_loading: bool,
     pending_save: Option<SaveRequest>,
     pending_reloads: HashMap<DocumentId, crate::core::Document>,
@@ -134,6 +135,7 @@ impl App {
             outline_states: HashMap::new(),
             outline_handles: HashMap::new(),
             outline_registry_hash,
+            syntax_parsing: syntax::SyntaxParsing::default(),
             is_loading: false,
             pending_save: None,
             pending_reloads: HashMap::new(),
@@ -205,6 +207,7 @@ impl App {
             && !matches!(
                 message,
                 Message::ShutdownPersisted(_)
+                    | Message::SyntaxParsed(..)
                     | Message::SettingsPersisted(_)
                     | Message::SessionPersisted(_)
             )
@@ -226,7 +229,8 @@ impl App {
             Task::none()
         };
         let analysis = self.schedule_active_analysis();
-        Task::batch([task, search_task, session_task, analysis])
+        let syntax = self.schedule_syntax_parse();
+        Task::batch([task, search_task, session_task, analysis, syntax])
     }
 
     fn update_traced(&mut self, message: Message) -> Task<Message> {
@@ -246,6 +250,7 @@ impl App {
             self.initial_settings_edits |= session::settings_edit_mask(&message);
         }
         match message {
+            Message::SyntaxParsed(id, result) => self.complete_syntax_parse(id, result),
             Message::ForwardedFiles(paths, request, receipt) => {
                 if !receipt.try_accept() {
                     return Task::none();
@@ -615,33 +620,6 @@ impl App {
 
         self.find
             .refresh_matches_in_chunks(document.buffer.chunks());
-    }
-
-    fn prewarm_active_syntax_cache(&self) {
-        let Some(document) = self.workspace.active_document() else {
-            return;
-        };
-
-        if !document.uses_syntax_highlighting() {
-            return;
-        }
-
-        if !document.can_run_full_document_analysis() {
-            return;
-        }
-
-        let first_row = document.scroll.first_visible_row;
-        let first_line = document
-            .viewport
-            .visible_row_to_document_line(first_row)
-            .unwrap_or(0);
-        let last_row = first_row.saturating_add(SYNTAX_PREWARM_VISIBLE_LINES);
-        let last_line = document
-            .viewport
-            .visible_row_to_document_line(last_row)
-            .unwrap_or_else(|| document.buffer.line_count().saturating_sub(1));
-
-        document.ensure_visible_syntax_cache(self.settings.syntax_theme, first_line, last_line);
     }
 
     fn active_outline_state(&self) -> Option<&OutlineState> {

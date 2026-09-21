@@ -193,6 +193,29 @@ fn wrapped_fold_indicator_hits_only_the_final_header_fragment() {
 }
 
 #[test]
+fn drawing_a_deep_uncached_viewport_never_runs_the_syntax_parser() {
+    let fixture = FoldPointerFixture::new(&"<p>hello</p>\n".repeat(5000), FoldModel::default());
+    let mut editor = fixture.editor();
+    editor.syntax_settings.token = "html".into();
+    editor.scroll.first_visible_row = 4000;
+    let tree = widget::Tree::new(&editor as &dyn Widget<EditorAction, Theme, ()>);
+    let node = fold_test_node();
+    <AdvancedEditor<'_, EditorAction> as Widget<EditorAction, Theme, ()>>::draw(
+        &editor,
+        &tree,
+        &mut (),
+        &Theme::Light,
+        &renderer::Style {
+            text_color: Color::BLACK,
+        },
+        Layout::new(&node),
+        mouse::Cursor::Unavailable,
+        &node.bounds(),
+    );
+    assert_eq!(fixture.syntax_cache.borrow().cached_line_count(), 0);
+}
+
+#[test]
 fn wrapped_fragments_render_distinct_geometry_with_software_renderer() {
     use iced::advanced::renderer::Headless;
     let mut renderer = futures::executor::block_on(<iced::Renderer as Headless>::new(

@@ -22,7 +22,6 @@ impl App {
                 if self.workspace.select(document_id) {
                     let load = self.activate_document(document_id);
                     self.refresh_find_matches();
-                    self.prewarm_active_syntax_cache();
                     return Task::batch([load, self.schedule_outline_parse(document_id)]);
                 }
 
@@ -218,7 +217,6 @@ impl App {
                     document.set_word_wrap(self.settings.word_wrap);
                 }
                 self.refresh_find_matches();
-                self.prewarm_active_syntax_cache();
                 Task::batch([
                     self.schedule_outline_parse(document_id),
                     self.record_open_history(opened_path),
@@ -285,7 +283,6 @@ impl App {
             document.set_word_wrap(self.settings.word_wrap);
         }
         self.refresh_find_matches();
-        self.prewarm_active_syntax_cache();
 
         self.start_load_request(FileLoadRequest {
             document_id,
@@ -331,7 +328,6 @@ impl App {
         self.is_loading = true;
         self.file_status = None;
         self.refresh_find_matches();
-        self.prewarm_active_syntax_cache();
 
         self.start_load_request(FileLoadRequest {
             document_id,
@@ -450,7 +446,6 @@ impl App {
                 self.apply_session_metadata(finished.document_id);
                 if finished.document_id == self.workspace.active_document_id {
                     self.refresh_find_matches();
-                    self.prewarm_active_syntax_cache();
                 }
                 Task::batch([
                     self.schedule_outline_parse(finished.document_id),

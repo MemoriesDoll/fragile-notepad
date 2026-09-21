@@ -1,6 +1,6 @@
 mod test_support {
     pub(super) use crate::app::windowing::ManagedWindow;
-    pub(super) use crate::app::{App, CloseGoal, SYNTAX_PREWARM_VISIBLE_LINES};
+    pub(super) use crate::app::{App, CloseGoal};
     pub(super) use crate::core::{HardwareAccelerationMode, IndentationMode};
     pub(super) use crate::editor::{EditorAction, EditorBuffer, EditorPosition, EditorSelection};
     pub(super) use crate::message::{

@@ -133,7 +133,6 @@ impl App {
                     );
                     self.settings_dialog.reset_from(&self.settings);
                     self.apply_decorations();
-                    self.prewarm_active_syntax_cache();
 
                     if super::rendering::startup_gpu_boost_requested(&self.settings) {
                         if self.main_window_opened {
@@ -296,14 +295,9 @@ impl App {
     }
 
     fn apply_settings_dialog(&mut self) -> bool {
-        let old_syntax_theme = self.settings.syntax_theme;
         let old_hardware_acceleration = self.settings.hardware_acceleration;
         self.settings_dialog.apply_to(&mut self.settings);
         self.apply_decorations();
-
-        if self.settings.syntax_theme != old_syntax_theme {
-            self.prewarm_active_syntax_cache();
-        }
 
         self.settings.hardware_acceleration != old_hardware_acceleration
             && super::rendering::startup_gpu_boost_requested(&self.settings)

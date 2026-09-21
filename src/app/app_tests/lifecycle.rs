@@ -973,7 +973,7 @@ fn menu_path_can_collapse_to_parent_and_ignores_closed_menu_hover() {
 }
 
 #[test]
-fn opening_rust_file_prewarms_visible_syntax_cache() {
+fn opening_rust_file_defers_syntax_parsing_to_worker() {
     let (mut app, _) = App::new();
     let contents = (0..200)
         .map(|line| format!("pub fn function_{line}() -> usize {{ {line} }}"))
@@ -992,9 +992,10 @@ fn opening_rust_file_prewarms_visible_syntax_cache() {
     let document = app.workspace.active_document().expect("active document");
 
     assert_eq!(document.syntax_token, "rs");
-    assert!(
-        document.syntax_cache.borrow().cached_line_count() >= SYNTAX_PREWARM_VISIBLE_LINES,
-        "opening a highlighted file should prepare the initial syntax window before first draw"
+    assert_eq!(
+        document.syntax_cache.borrow().cached_line_count(),
+        0,
+        "opening a highlighted file must not parse on the UI thread"
     );
 }
 

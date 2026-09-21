@@ -214,26 +214,11 @@ where
             .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>();
         let fast_text = is_scroll_fast_frame(state);
         let caret_visible = state.is_caret_visible();
-        let syntax_us = if trace_enabled {
-            let syntax_started = StdInstant::now();
-            prepare_visible_syntax_cache(
-                self.syntax_cache,
-                self.buffer,
-                self.viewport,
-                &self.syntax_settings,
-                editor_layout,
-            );
-            syntax_started.elapsed().as_micros()
-        } else {
-            prepare_visible_syntax_cache(
-                self.syntax_cache,
-                self.buffer,
-                self.viewport,
-                &self.syntax_settings,
-                editor_layout,
-            );
-            0
-        };
+        // Drawing only consumes completed spans. Parser work is scheduled by
+        // the app on a blocking worker, including during GPU warm-up.
+        self.syntax_cache
+            .borrow_mut()
+            .configure(&self.syntax_settings);
         let syntax_cache = self.syntax_cache.borrow();
         let plan_started = trace_enabled.then(StdInstant::now);
         let main_caret = self
@@ -338,7 +323,7 @@ where
             crate::perf_trace::event(
                 "editor_draw",
                 format_args!(
-                    "total_us={} syntax_us={syntax_us} plan_us={plan_us} record_us={record_us} bounds={:.0}x{:.0} first_row={} rows={plan_rows} spans={plan_spans} selection_range_lines={selection_range_lines} visible_selection_lines={visible_selection_lines} visible_selection_area={visible_selection_area:.1} visible_selection_max_width={visible_selection_max_width:.1} fast_text={fast_text} token={}",
+                    "total_us={} syntax_us=0 plan_us={plan_us} record_us={record_us} bounds={:.0}x{:.0} first_row={} rows={plan_rows} spans={plan_spans} selection_range_lines={selection_range_lines} visible_selection_lines={visible_selection_lines} visible_selection_area={visible_selection_area:.1} visible_selection_max_width={visible_selection_max_width:.1} fast_text={fast_text} token={}",
                     draw_started.elapsed().as_micros(),
                     bounds.width,
                     bounds.height,
@@ -573,27 +558,6 @@ where
     fn from(editor: AdvancedEditor<'a, Message>) -> Self {
         Element::new(editor)
     }
-}
-
-fn prepare_visible_syntax_cache(
-    syntax_cache: &RefCell<SyntaxLineCache>,
-    buffer: &EditorBuffer,
-    viewport: &ViewportModel,
-    syntax_settings: &highlighter::Settings,
-    layout: EditorLayout,
-) {
-    let first_row = layout.scroll.first_visible_row;
-    let last_row = first_row.saturating_add(layout.visible_row_capacity());
-    let first_line = viewport
-        .visible_row_to_document_line(first_row)
-        .unwrap_or(0);
-    let last_line = viewport
-        .visible_row_to_document_line(last_row)
-        .unwrap_or_else(|| buffer.line_count().saturating_sub(1));
-
-    syntax_cache
-        .borrow_mut()
-        .ensure_visible(buffer, syntax_settings, first_line, last_line);
 }
 
 #[cfg(test)]
