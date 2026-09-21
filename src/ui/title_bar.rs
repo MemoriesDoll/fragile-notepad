@@ -133,20 +133,20 @@ fn bar<'a>(
 
     let contents = match style {
         ControlStyle::Windows => row![
-            container(
-                iced::widget::image(crate::assets::quill_handle())
-                    .width(18)
-                    .height(20)
-            )
-            .padding(iced::Padding::ZERO.left(12).right(2))
-            .center_y(HEIGHT),
+            container(title_icon(focused))
+                .padding(iced::Padding::ZERO.left(12).right(6))
+                .center_y(HEIGHT),
             caption,
             controls,
         ],
         ControlStyle::MacOS => row![
             container(controls).width(84),
             caption,
-            iced::widget::Space::new().width(84),
+            container(title_icon(focused))
+                .width(84)
+                .padding(iced::Padding::ZERO.right(12))
+                .align_x(iced::alignment::Horizontal::Right)
+                .center_y(HEIGHT),
         ],
     };
     interaction::drag_region(
@@ -156,6 +156,13 @@ fn bar<'a>(
             .into(),
         id,
     )
+}
+
+fn title_icon(focused: bool) -> iced::widget::Image {
+    iced::widget::image(crate::assets::title_icon_handle())
+        .width(24)
+        .height(24)
+        .opacity(if focused { 1.0 } else { 0.55 })
 }
 
 fn control<'a>(

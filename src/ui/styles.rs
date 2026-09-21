@@ -567,17 +567,6 @@ pub fn info_tab(theme: &Theme, status: button::Status, active: bool) -> button::
     }
 }
 
-pub fn logo_placeholder(theme: &Theme) -> container::Style {
-    let palette = VisualPalette::from_theme(theme);
-
-    container::Style {
-        background: Some(Background::Color(palette.accent_soft)),
-        text_color: Some(palette.accent),
-        border: border(1.0, palette.accent.scale_alpha(0.38), RADIUS),
-        ..container::Style::default()
-    }
-}
-
 pub fn tooltip(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 

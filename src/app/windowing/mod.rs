@@ -15,6 +15,10 @@ pub(super) use title::Title;
 
 pub(super) fn custom_chrome(mut settings: window::Settings) -> window::Settings {
     settings.decorations = !crate::ui::title_bar::SUPPORTED;
+    settings.icon = Some(
+        window::icon::from_rgba(crate::assets::APP_ICON_RGBA.to_vec(), 256, 256)
+            .expect("generated application icon has valid RGBA dimensions"),
+    );
     #[cfg(windows)]
     {
         settings.platform_specific.undecorated_shadow = true;

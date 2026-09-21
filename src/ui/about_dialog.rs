@@ -192,12 +192,10 @@ fn header(progress: f32, effects_running: bool) -> Element<'static, Message> {
         info_vfx::view(progress, effects_running),
         container(
             row![
-                container(text("FN").size(20))
-                    .width(Length::Fixed(52.0))
-                    .height(Length::Fixed(52.0))
-                    .center_x(Length::Fixed(52.0))
-                    .center_y(Length::Fixed(52.0))
-                    .style(move |theme| fade_container(styles::logo_placeholder(theme), progress)),
+                // The shared VFX widget draws and animates the logo in this slot.
+                space()
+                    .width(info_vfx::LOGO_SIZE)
+                    .height(info_vfx::LOGO_SIZE),
                 column![
                     text(APP_NAME).size(22),
                     muted(

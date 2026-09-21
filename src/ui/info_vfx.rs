@@ -1,4 +1,4 @@
-//! Diffuse color and slow light rays for the Info header.
+//! Floating application logo, diffuse color and slow light rays for the Info header.
 
 use std::cell::RefCell;
 use std::sync::LazyLock;
@@ -13,6 +13,7 @@ use crate::message::Message;
 
 const FRAME_INTERVAL: Duration = Duration::from_nanos(41_666_667);
 const HEADER_HEIGHT: f32 = 84.0;
+pub(super) const LOGO_SIZE: f32 = 64.0;
 const QUIET_WIDTH: f32 = 260.0;
 const ART_WIDTH: f32 = 280.0;
 const QUILL_WIDTH: f32 = 100.0;
@@ -92,11 +93,32 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
             return;
         }
         let bounds = layout.bounds();
+        let state = tree.state.downcast_ref::<State>();
+        let logo = Rectangle {
+            x: bounds.x,
+            y: bounds.y
+                + (HEADER_HEIGHT - LOGO_SIZE) * 0.5
+                + 2.0 * (state.elapsed as f32 * std::f32::consts::TAU / 4.0).sin(),
+            width: LOGO_SIZE,
+            height: LOGO_SIZE,
+        };
+        if let Some(clip) = logo.intersection(viewport) {
+            renderer.draw_image(
+                image::Image::new(match blink_frame(state.elapsed) {
+                    1 => crate::assets::app_blink_handle(false),
+                    2 => crate::assets::app_blink_handle(true),
+                    _ => crate::assets::app_icon_handle(),
+                })
+                .filter_method(image::FilterMethod::Linear)
+                .opacity(self.progress),
+                logo,
+                clip,
+            );
+        }
         let Some(clip) = visible_art(bounds, *viewport) else {
             return;
         };
         let art = art_bounds(bounds);
-        let state = tree.state.downcast_ref::<State>();
         // This deliberately low-resolution field has no sharp details. Linear
         // sampling stays diffuse at every DPI while keeping generation bounded.
         let key = FieldKey {
@@ -206,7 +228,7 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
             || self.progress <= 0.0
             || !state.focused
             || state.zero_sized
-            || visible_art(layout.bounds(), *viewport).is_none()
+            || layout.bounds().intersection(viewport).is_none()
         {
             state.pause();
             return;
@@ -232,6 +254,21 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
         }
         let deadline = *state.next_tick.get_or_insert(now + FRAME_INTERVAL);
         shell.request_redraw_at(deadline);
+    }
+}
+
+// A 250ms close/hold/open gesture every four seconds, on the same pausable
+// clock as the floating motion. Static application/title icons never blink.
+fn blink_frame(elapsed: f64) -> u8 {
+    let phase = elapsed.rem_euclid(4.0);
+    if (2.75..3.0).contains(&phase) {
+        if (2.75 + 1.0 / 12.0..2.75 + 1.0 / 6.0).contains(&phase) {
+            2
+        } else {
+            1
+        }
+    } else {
+        0
     }
 }
 
@@ -415,6 +452,63 @@ mod tests {
         assert!(shell.is_layout_invalid().is_none());
         assert!(shell.is_empty());
         shell.redraw_request()
+    }
+
+    #[test]
+    fn blink_is_brief_returns_to_open_and_repeats() {
+        for (at, expected) in [
+            (0.0, 0),
+            (2.7, 0),
+            (2.78, 1),
+            (2.87, 2),
+            (2.96, 1),
+            (3.0, 0),
+        ] {
+            assert_eq!(blink_frame(at), expected);
+            assert_eq!(blink_frame(at + 4.0), expected);
+        }
+    }
+
+    #[test]
+    fn narrow_header_keeps_the_logo_visible_without_the_decorative_field() {
+        let mut renderer = renderer();
+        let mut widget = view(1.0, true);
+        let mut tree = Tree::empty();
+        tree.diff(widget.as_widget_mut());
+        let bounds = Rectangle::with_size(Size::new(240.0, HEADER_HEIGHT));
+        let node = widget.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, bounds.size()),
+        );
+        assert!(visible_art(bounds, bounds).is_none());
+        renderer.reset(bounds);
+        widget.as_widget().draw(
+            &tree,
+            &mut renderer,
+            &Theme::Light,
+            &renderer::Style::default(),
+            Layout::new(&node),
+            mouse::Cursor::Unavailable,
+            &bounds,
+        );
+        let pixels = renderer.screenshot(
+            Size::new(240, HEADER_HEIGHT as u32),
+            1.0,
+            iced::Color::TRANSPARENT,
+        );
+        assert!(pixels.chunks_exact(4).any(|pixel| pixel[3] > 0));
+        assert!(matches!(
+            update(
+                &mut widget,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(Instant::now())),
+                bounds,
+            ),
+            window::RedrawRequest::At(_)
+        ));
     }
 
     #[test]
@@ -816,7 +910,7 @@ mod tests {
                 let calm_width = (QUIET_WIDTH * scale) as usize;
                 for row in first.chunks_exact(width * 4) {
                     assert!(
-                        row[..calm_width * 4]
+                        row[(LOGO_SIZE * scale) as usize * 4..calm_width * 4]
                             .chunks_exact(4)
                             .all(|pixel| pixel[3] == 0)
                     );
