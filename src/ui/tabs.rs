@@ -10,6 +10,7 @@ use iced::{Background, Border, Center, Color, Element, Event, Fill, Length, Rect
 
 use crate::core::{Document, DocumentId, Workspace};
 use crate::message::Message;
+use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::shortcut;
 use crate::ui::icons::tango::{self, TangoIcon};
 use crate::ui::{centered_button_content, styles};
@@ -17,6 +18,9 @@ use crate::ui::{centered_button_content, styles};
 const TAB_HEIGHT: f32 = 27.0;
 const TAB_SCROLLBAR_HEIGHT: f32 = 10.0;
 const TAB_TOP_BAR_HEIGHT: f32 = 3.0;
+const TAB_CLOSE_WIDTH: f32 = 26.0;
+const NEW_FILE_WIDTH: f32 = 28.0;
+const NEW_FILE_MARGIN: f32 = 4.0;
 const TAB_LABEL_MAX_CHARS: usize = 28;
 const TAB_LABEL_MIN_WIDTH: f32 = 62.0;
 const TAB_LABEL_MAX_WIDTH: f32 = 172.0;
@@ -45,16 +49,17 @@ pub fn view(
 ) -> Element<'_, Message> {
     responsive(move |size| {
         let needs_scroll = total_tab_width(workspace) > size.width;
-        let tabs = workspace.documents().iter().fold(
-            row![].spacing(0).align_y(Center),
-            |tabs, document| {
+        let tabs = workspace
+            .documents()
+            .iter()
+            .fold(row![].spacing(0).align_y(Center), |tabs, document| {
                 tabs.push(tab(
                     document,
                     document.id == workspace.active_document_id,
                     drag_visual(workspace, document, dragged_tab, hovered_drop_tab),
                 ))
-            },
-        );
+            })
+            .push(new_file_button());
         let scrollable = if needs_scroll {
             scrollable(tabs).horizontal().spacing(0)
         } else {
@@ -81,8 +86,35 @@ fn total_tab_width(workspace: &Workspace) -> f32 {
     workspace
         .documents()
         .iter()
-        .map(|document| tab_label_width(&compact_tab_title(&tab_title(document))) + 72.0)
-        .sum()
+        .map(|document| {
+            tab_label_width(&compact_tab_title(&tab_title(document))) + 52.0 + TAB_CLOSE_WIDTH
+        })
+        .sum::<f32>()
+        + NEW_FILE_WIDTH
+        + NEW_FILE_MARGIN * 2.0
+}
+
+fn new_file_button() -> Element<'static, Message> {
+    let button = button(centered_button_content(hero::icon(
+        HeroIcon::Plus,
+        16,
+        IconTone::Text,
+    )))
+    .width(NEW_FILE_WIDTH)
+    .height(23)
+    .padding(0)
+    .style(styles::icon_button)
+    .on_press(Message::NewFile);
+
+    tooltip(
+        container(button).padding([0.0, NEW_FILE_MARGIN]),
+        container(text("New File").size(TOOLTIP_TEXT_SIZE))
+            .padding([4, 7])
+            .style(styles::tooltip),
+        tooltip::Position::Bottom,
+    )
+    .gap(4)
+    .into()
 }
 
 fn tab(document: &Document, is_active: bool, drag_visual: DragVisual) -> Element<'_, Message> {
@@ -127,11 +159,11 @@ fn tab(document: &Document, is_active: bool, drag_visual: DragVisual) -> Element
 
     let close_button = button(centered_button_content(
         image::Image::new(close_icon())
-            .width(12)
-            .height(12)
+            .width(22)
+            .height(22)
             .filter_method(image::FilterMethod::Linear),
     ))
-    .width(20)
+    .width(TAB_CLOSE_WIDTH)
     .height(23)
     .padding(0)
     .style(styles::tab_close_button(is_active))
