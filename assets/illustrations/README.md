@@ -7,7 +7,10 @@ anatomical references; no pixels or paths from them are included in the artwork:
 - [Isolated blue-and-yellow macaw feather](https://commons.wikimedia.org/wiki/File:Feather_of_a_Ara_ararauna_1.jpg)
 - [Scarlet macaw plumage](https://commons.wikimedia.org/wiki/File:Red_feathers1a_(8306378464).jpg)
 
-Regenerate the checked-in 400 × 440 straight-RGBA asset with:
+The generated 400 × 440 straight-RGBA asset is ignored by Git. The standard
+`scripts/generate_icon_assets.ps1` and `scripts/generate_icon_assets.sh` entry
+points regenerate it along with the icons before CI and release builds.
+To regenerate just the illustration, run:
 
 ```sh
 python scripts/rasterize_illustrations.py

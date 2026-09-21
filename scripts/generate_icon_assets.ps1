@@ -9,3 +9,5 @@ python .\scripts\rasterize_svg_icons.py --svg-dir .\assets\icons\heroicons\svg -
 if ($LASTEXITCODE -ne 0) { throw "Control icon generation failed" }
 python .\scripts\rasterize_svg_icons.py --svg-dir .\assets\icons\bootstrap\svg --out-dir .\assets\icons\bootstrap\rgba --size 22
 if ($LASTEXITCODE -ne 0) { throw "Shortcut icon generation failed" }
+python .\scripts\rasterize_illustrations.py
+if ($LASTEXITCODE -ne 0) { throw "Illustration generation failed" }

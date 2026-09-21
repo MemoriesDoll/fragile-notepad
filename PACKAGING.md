@@ -35,9 +35,9 @@ bash scripts/setup-vendor.sh apply
 
 ## Generated Assets
 
-RGBA icon files are generated from the tracked SVG sources. Regenerate them
-on a fresh checkout and after changing any icon source; the generated files are
-ignored by Git:
+RGBA icon and illustration files are generated from the tracked SVG sources.
+Regenerate them on a fresh checkout and after changing any artwork source; all
+generated `.rgba` files are ignored by Git:
 
 ```powershell
 .\scripts\generate_icon_assets.ps1
