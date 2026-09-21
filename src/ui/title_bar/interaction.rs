@@ -5,11 +5,7 @@ use iced::{Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vect
 use super::Action;
 use crate::message::Message;
 
-pub(super) fn frame(
-    content: Element<Message>,
-    id: window::Id,
-    border: f32,
-) -> Element<Message> {
+pub(super) fn frame(content: Element<Message>, id: window::Id, border: f32) -> Element<Message> {
     Element::new(ChromeRegion {
         content,
         id,
@@ -17,10 +13,7 @@ pub(super) fn frame(
     })
 }
 
-pub(super) fn drag_region(
-    content: Element<Message>,
-    id: window::Id,
-) -> Element<Message> {
+pub(super) fn drag_region(content: Element<Message>, id: window::Id) -> Element<Message> {
     Element::new(ChromeRegion {
         content,
         id,

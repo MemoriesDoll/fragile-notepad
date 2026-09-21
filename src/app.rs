@@ -1,10 +1,7 @@
-use iced::{Element, Subscription, Task, Theme, event, keyboard, stream, window};
+use iced::{Subscription, Task, event, keyboard, stream, window};
 
 use crate::core::{DocumentId, EditorSettings, FindState, Workspace};
-use crate::editor::{
-    EditorAction, EditorSelection, OutlineParseResult, OutlineSnapshotMetadata, OutlineState,
-    outline_registry_hash, outline_request_for_document, parse_outline_request,
-};
+use crate::editor::{EditorAction, EditorSelection, OutlineParseResult, OutlineState};
 use crate::ipc::{PrimaryInstance, Signal};
 use crate::message::{AboutTab, Menu, Message, SaveRequest};
 use crate::search_dialog::SearchDialogState;
@@ -15,12 +12,19 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use windowing::{AdvancedSearchWindow, ManagedWindow, SettingsWindow, Title};
+use animation::ChromeAnimation;
+use close_prompt::ClosePrompt;
 
+use windowing::{AdvancedSearchWindow, SettingsWindow};
+
+mod animation;
+mod close_prompt;
 mod editor;
 mod editor_ops;
 mod files;
 mod menu;
+mod outline;
+mod presentation;
 mod rendering;
 mod search;
 mod session;
@@ -29,8 +33,6 @@ mod shortcuts;
 mod syntax;
 mod windowing;
 
-const CHROME_REVEAL_ANIMATION_DURATION: Duration = Duration::from_millis(140);
-
 static SINGLE_INSTANCE: OnceLock<PrimaryInstance> = OnceLock::new();
 
 #[derive(Debug)]
@@ -38,9 +40,7 @@ pub struct App {
     workspace: Workspace,
     find: FindState,
     settings: EditorSettings,
-    outline_states: HashMap<DocumentId, OutlineState>,
-    outline_handles: HashMap<DocumentId, iced::task::Handle>,
-    outline_registry_hash: u64,
+    outline_parsing: outline::OutlineParsing,
     syntax_parsing: syntax::SyntaxParsing,
     is_loading: bool,
     pending_save: Option<SaveRequest>,
@@ -48,8 +48,7 @@ pub struct App {
     pending_save_all: VecDeque<crate::core::DocumentId>,
     pending_close_after_save: Option<crate::core::DocumentId>,
     pending_close_documents: VecDeque<crate::core::DocumentId>,
-    pending_dirty_close: Option<crate::core::DocumentId>,
-    pending_dirty_close_decision: Option<crate::message::DirtyCloseDecision>,
+    close_prompt: ClosePrompt,
     close_goal: CloseGoal,
     file_status: Option<String>,
     is_find_visible: bool,
@@ -93,30 +92,6 @@ enum CloseGoal {
     ExitApp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ChromeAnimation {
-    find: RevealAnimation,
-    inline_replace: RevealAnimation,
-    function_list: RevealAnimation,
-    about: RevealAnimation,
-    dirty_close: RevealAnimation,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct RevealAnimation {
-    rendered_visible: bool,
-    target_visible: bool,
-    started_at: Option<Instant>,
-    from: f32,
-    progress: f32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct RevealAnimationInfo {
-    rendered_visible: bool,
-    progress: f32,
-}
-
 impl App {
     pub fn new() -> (Self, Task<Message>) {
         Self::new_with_options(crate::startup::StartupOptions {
@@ -132,14 +107,11 @@ impl App {
             ..window::Settings::default()
         }));
 
-        let outline_registry_hash = outline_registry_hash();
         let mut app = Self {
             workspace: Workspace::new(),
             find: FindState::new(),
             settings: EditorSettings::default(),
-            outline_states: HashMap::new(),
-            outline_handles: HashMap::new(),
-            outline_registry_hash,
+            outline_parsing: outline::OutlineParsing::new(),
             syntax_parsing: syntax::SyntaxParsing::default(),
             is_loading: false,
             pending_save: None,
@@ -147,8 +119,7 @@ impl App {
             pending_save_all: VecDeque::new(),
             pending_close_after_save: None,
             pending_close_documents: VecDeque::new(),
-            pending_dirty_close: None,
-            pending_dirty_close_decision: None,
+            close_prompt: ClosePrompt::new(),
             close_goal: CloseGoal::KeepOpen,
             file_status: None,
             is_find_visible: false,
@@ -535,88 +506,8 @@ impl App {
         }
     }
 
-    pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
-        let perf_span = crate::perf_trace::span("app_view", format_args!("window={window_id:?}"));
-
-        crate::startup::report_first_view_ready();
-
-        let element = if let Some(settings_window) = &self.settings_window
-            && settings_window.is(window_id)
-        {
-            settings_window.view(&self.settings_dialog)
-        } else if let Some(search_window) = &self.advanced_search_window
-            && search_window.is(window_id)
-        {
-            search_window.view(&self.search_dialog)
-        } else {
-            ui::view(
-                &self.workspace,
-                &self.find,
-                &self.settings,
-                self.is_find_visible,
-                self.is_inline_replace_visible,
-                self.is_function_list_visible,
-                self.chrome_animation_info(),
-                self.active_menu,
-                &self.active_menu_path,
-                self.window_menu_state(),
-                self.dragged_tab,
-                self.hovered_drop_tab,
-                self.pending_dirty_close
-                    .and_then(|id| self.workspace.document(id)),
-                self.chrome_animation
-                    .about
-                    .rendered_visible
-                    .then_some(self.about_tab),
-                ui::about_dialog::RenderingDebugInfo {
-                    title_bar_style: self.title_bar_style,
-                    current_renderer: self.rendering.label(),
-                    rendering_policy: rendering::current_policy_label(&self.settings),
-                },
-                self.is_window_list_visible
-                    .then(|| self.window_list_entries()),
-                self.file_status.as_deref(),
-                self.active_outline_state(),
-            )
-        };
-        if let Some(span) = perf_span {
-            span.end_with("");
-        }
-
-        if ui::title_bar::SUPPORTED {
-            ui::title_bar::frame(
-                element,
-                window_id,
-                self.title(window_id),
-                self.title_bar_style,
-                self.focused_window_id == Some(window_id),
-                self.maximized_windows
-                    .get(&window_id)
-                    .copied()
-                    .unwrap_or(false),
-            )
-        } else {
-            element
-        }
-    }
-
-    pub fn title(&self, window_id: window::Id) -> String {
-        let windows: [Option<&dyn ManagedWindow>; 2] = [
-            self.settings_window.as_ref().map(|window| window as _),
-            self.advanced_search_window
-                .as_ref()
-                .map(|window| window as _),
-        ];
-
-        windows
-            .into_iter()
-            .flatten()
-            .find(|window| window.is(window_id))
-            .map_or_else(|| self.workspace.title(), Title::title)
-    }
-
     pub fn subscription(&self) -> Subscription<Message> {
-        let chrome_animation = if self.chrome_animation.needs_frames() {
+        let chrome_animation = if self.needs_animation_frames() {
             window::frames().map(Message::ChromeAnimationFrame)
         } else {
             Subscription::none()
@@ -629,10 +520,6 @@ impl App {
             window::close_events().map(Message::WindowClosed),
             chrome_animation,
         ])
-    }
-
-    pub fn theme(&self, _window_id: window::Id) -> Option<Theme> {
-        ui::styles::modern_theme(self.settings.appearance)
     }
 
     fn refresh_find_matches(&mut self) {
@@ -651,96 +538,27 @@ impl App {
     }
 
     fn active_outline_state(&self) -> Option<&OutlineState> {
-        let document = self.workspace.active_document()?;
-        let metadata = OutlineSnapshotMetadata::from_document(document, self.outline_registry_hash);
-
-        self.outline_states
-            .get(&document.id)
-            .filter(|state| state.matches_metadata(&metadata))
+        self.workspace
+            .active_document()
+            .and_then(|document| self.outline_parsing.state_for(document))
     }
 
     fn schedule_outline_parse(&mut self, document_id: DocumentId) -> Task<Message> {
         if document_id != self.workspace.active_document_id {
             return Task::none();
         }
-        let inactive = self
-            .outline_handles
-            .keys()
-            .copied()
-            .filter(|id| *id != document_id)
-            .collect::<Vec<_>>();
-        for id in inactive {
-            if let Some(handle) = self.outline_handles.remove(&id) {
-                handle.abort();
-            }
-            self.outline_states.remove(&id);
-        }
         let Some(document) = self.workspace.document(document_id) else {
-            self.outline_states.remove(&document_id);
+            self.outline_parsing.remove(document_id);
             return Task::none();
         };
-
-        if !document.can_run_full_document_analysis() {
-            let metadata =
-                OutlineSnapshotMetadata::from_document(document, self.outline_registry_hash);
-            self.outline_states
-                .entry(document_id)
-                .and_modify(|state| {
-                    if !state.matches_metadata(&metadata) {
-                        *state = OutlineState::pending_metadata(metadata.clone());
-                    }
-                })
-                .or_insert_with(|| OutlineState::pending_metadata(metadata));
-            return Task::none();
-        }
-
-        let metadata = OutlineSnapshotMetadata::from_document(document, self.outline_registry_hash);
-
-        if self
-            .outline_states
-            .get(&document_id)
-            .is_some_and(|state| state.matches_metadata(&metadata))
-        {
-            return Task::none();
-        }
-
-        let request = outline_request_for_document(document, self.outline_registry_hash);
-
-        self.outline_states
-            .insert(document_id, OutlineState::pending(&request));
-
-        let (task, handle) = Task::perform(
-            parse_outline_request(request),
-            Message::OutlineParseCompleted,
-        )
-        .abortable();
-        if let Some(previous) = self.outline_handles.insert(document_id, handle) {
-            previous.abort();
-        }
-        task
+        self.outline_parsing
+            .schedule(document)
+            .map(Message::OutlineParseCompleted)
     }
 
     fn complete_outline_parse(&mut self, result: OutlineParseResult) -> Task<Message> {
-        let metadata = OutlineSnapshotMetadata::from_result(&result);
-        let Some(document) = self.workspace.document(metadata.document_id) else {
-            self.outline_states.remove(&metadata.document_id);
-            return Task::none();
-        };
-
-        if !document.can_run_full_document_analysis()
-            || !metadata.matches_document(document, self.outline_registry_hash)
-            || !self
-                .outline_states
-                .get(&metadata.document_id)
-                .is_some_and(|state| state.matches_metadata(&metadata))
-        {
-            return Task::none();
-        }
-
-        self.outline_states
-            .insert(metadata.document_id, OutlineState::ready(result));
-        self.outline_handles.remove(&metadata.document_id);
-
+        self.outline_parsing
+            .complete(self.workspace.document(result.document_id), result);
         Task::none()
     }
 
@@ -773,7 +591,7 @@ impl App {
         self.active_menu = None;
         self.active_menu_path.clear();
         self.is_about_visible = true;
-        if !self.chrome_animation.about.rendered_visible {
+        if !self.chrome_animation.about.rendered_visible() {
             self.about_tab = AboutTab::About;
         }
         self.chrome_animation.about.set_visible(true);
@@ -781,21 +599,16 @@ impl App {
         Task::none()
     }
 
-    fn chrome_animation_info(&self) -> ui::ChromeAnimationInfo {
-        self.chrome_animation.into()
+    fn needs_animation_frames(&self) -> bool {
+        self.chrome_animation.needs_frames() || self.close_prompt.needs_frames()
     }
 
     fn update_chrome_animation_frame(&mut self, at: Instant) -> Task<Message> {
         self.chrome_animation.update_frame(at);
-
-        if !self.chrome_animation.dirty_close.rendered_visible
-            && self.pending_dirty_close_decision.is_some()
-            && let Some(document_id) = self.pending_dirty_close
-        {
-            return Task::done(Message::DirtyCloseFadeFinished(document_id));
-        }
-
-        Task::none()
+        self.close_prompt
+            .update_frame(at)
+            .map(Message::DirtyCloseFadeFinished)
+            .map_or_else(Task::none, Task::done)
     }
 
     fn select_function_list_entry(
@@ -816,139 +629,6 @@ impl App {
 
         Task::none()
     }
-}
-
-impl ChromeAnimation {
-    const fn new() -> Self {
-        Self {
-            find: RevealAnimation::hidden(),
-            inline_replace: RevealAnimation::hidden(),
-            function_list: RevealAnimation::hidden(),
-            about: RevealAnimation::hidden(),
-            dirty_close: RevealAnimation::hidden(),
-        }
-    }
-
-    fn needs_frames(self) -> bool {
-        self.find.needs_frames()
-            || self.inline_replace.needs_frames()
-            || self.function_list.needs_frames()
-            || self.about.needs_frames()
-            || self.dirty_close.needs_frames()
-    }
-
-    fn update_frame(&mut self, at: Instant) {
-        self.find.update_frame(at);
-        self.inline_replace.update_frame(at);
-        self.function_list.update_frame(at);
-        self.about.update_frame(at);
-        self.dirty_close.update_frame(at);
-    }
-}
-
-impl RevealAnimation {
-    const fn hidden() -> Self {
-        Self {
-            rendered_visible: false,
-            target_visible: false,
-            started_at: None,
-            from: 0.0,
-            progress: 0.0,
-        }
-    }
-
-    fn set_visible(&mut self, visible: bool) {
-        let target = if visible { 1.0 } else { 0.0 };
-
-        if (self.progress - target).abs() <= f32::EPSILON {
-            self.target_visible = visible;
-            self.rendered_visible = visible;
-            self.started_at = None;
-            self.from = target;
-            return;
-        }
-
-        if self.target_visible == visible {
-            return;
-        }
-
-        self.target_visible = visible;
-        self.rendered_visible = self.rendered_visible || visible || self.progress > 0.0;
-        self.started_at = None;
-        self.from = self.progress;
-    }
-
-    fn needs_frames(self) -> bool {
-        let target = if self.target_visible { 1.0 } else { 0.0 };
-
-        self.rendered_visible && (self.progress - target).abs() > f32::EPSILON
-    }
-
-    fn update_frame(&mut self, at: Instant) {
-        if !self.needs_frames() {
-            return;
-        }
-
-        let started_at = match self.started_at {
-            Some(started_at) => started_at,
-            None => {
-                self.started_at = Some(at);
-                return;
-            }
-        };
-
-        let elapsed = at.saturating_duration_since(started_at);
-        let raw = (elapsed.as_secs_f32() / CHROME_REVEAL_ANIMATION_DURATION.as_secs_f32()).min(1.0);
-        let eased = ease_out_cubic(raw);
-        let target = if self.target_visible { 1.0 } else { 0.0 };
-
-        self.progress = self.from + ((target - self.from) * eased);
-
-        if raw >= 1.0 {
-            self.progress = target;
-            self.started_at = None;
-            self.rendered_visible = self.target_visible;
-            self.from = target;
-        }
-    }
-}
-
-impl From<RevealAnimation> for RevealAnimationInfo {
-    fn from(animation: RevealAnimation) -> Self {
-        Self {
-            rendered_visible: animation.rendered_visible,
-            progress: animation.progress.clamp(0.0, 1.0),
-        }
-    }
-}
-
-impl From<ChromeAnimation> for ui::ChromeAnimationInfo {
-    fn from(animation: ChromeAnimation) -> Self {
-        let find = RevealAnimationInfo::from(animation.find);
-        let inline_replace = RevealAnimationInfo::from(animation.inline_replace);
-        let function_list = RevealAnimationInfo::from(animation.function_list);
-        let about = RevealAnimationInfo::from(animation.about);
-
-        Self {
-            find_rendered_visible: find.rendered_visible,
-            find_progress: find.progress,
-            inline_replace_rendered_visible: inline_replace.rendered_visible,
-            inline_replace_progress: inline_replace.progress,
-            function_list_rendered_visible: function_list.rendered_visible,
-            function_list_progress: function_list.progress,
-            about_rendered_visible: about.rendered_visible,
-            about_progress: about.progress,
-            about_interactive: animation.about.target_visible,
-            dirty_close_progress: animation.dirty_close.progress.clamp(0.0, 1.0),
-            dirty_close_interactive: animation.dirty_close.target_visible,
-        }
-    }
-}
-
-fn ease_out_cubic(progress: f32) -> f32 {
-    let inverse = 1.0 - progress.clamp(0.0, 1.0);
-
-    1.0 - (inverse * inverse * inverse)
 }
 
 pub fn register_single_instance(instance: PrimaryInstance) {

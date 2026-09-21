@@ -1,8 +1,8 @@
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::action::CaretMotion;
 use super::buffer::EditorBuffer;
 use super::position::EditorPosition;
-use super::widget::CaretMotion;
 use super::word::is_default_word_char;
 
 pub fn is_vertical_motion(motion: CaretMotion) -> bool {

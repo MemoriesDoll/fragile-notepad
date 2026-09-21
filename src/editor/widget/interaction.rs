@@ -11,12 +11,13 @@ use crate::editor::position::{EditorPosition, EditorSelection, SelectionRange, S
 use crate::editor::render::text_size;
 use crate::editor::viewport::ViewportModel;
 
-use super::actions::{EditorAction, key_action};
+use super::actions::key_action;
 use super::line_cache::{
     LineGeometry, measured_position_point, measured_text_hit_target, measured_virtual_caret_x,
 };
 use super::scrollbar::{scrollbar_row_for_position, vertical_scrollbar_geometry};
 use super::state::{AdvancedEditorState, CARET_BLINK_INTERVAL_MS, TextDrag};
+use crate::editor::action::EditorAction;
 
 const FAST_SCROLL_SETTLE_MS: u64 = 120;
 const DRAG_SCROLL_INTERVAL_MS: u64 = 50;

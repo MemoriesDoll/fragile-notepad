@@ -2,7 +2,8 @@ use super::App;
 use crate::core::session::{Session, SessionDocument};
 use crate::core::{Document, DocumentId, DocumentLoadState, EditorSettings};
 use crate::editor::{EditorBuffer, EditorPosition, EditorSelection};
-use crate::message::{FileLoadRequest, Message};
+use crate::message::Message;
+use crate::services::types::FileLoadRequest;
 use crate::startup::StartupOptions;
 use iced::Task;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
@@ -69,7 +70,7 @@ impl App {
             && let Some(id) = placeholder
         {
             self.workspace.close(id);
-            self.outline_states.remove(&id);
+            self.outline_parsing.remove(id);
         }
         // Poll the active (last requested) file first while retaining tab order.
         Task::batch(tasks.into_iter().rev())
@@ -109,7 +110,7 @@ impl App {
             if !saved.documents.is_empty() {
                 if untouched {
                     self.workspace.documents.clear();
-                    self.outline_states.clear();
+                    self.outline_parsing.clear();
                 }
                 let mut ids = Vec::new();
                 for entry in saved.documents {

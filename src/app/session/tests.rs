@@ -288,7 +288,7 @@ fn preserves_inactive_unsaved_tabs_and_recovers_exact_text_on_selection() {
     assert_eq!(document.main_selection().cursor, EditorPosition::new(1, 3));
     assert_eq!(app.snapshot_session().documents[1].text, unsaved.text);
     let _ = app.update(Message::TabClosed(id));
-    assert_eq!(app.pending_dirty_close, Some(id));
+    assert_eq!(app.close_prompt.document(), Some(id));
     let _ = app.update(Message::DirtyCloseResolved(id, DirtyCloseDecision::Cancel));
     assert!(app.workspace.document(id).is_some());
 }

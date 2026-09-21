@@ -1,7 +1,7 @@
 //! Persistence for application settings.
 
+use super::types::{SettingsError, SettingsLoadResult, SettingsSaveResult};
 use crate::core::EditorSettings;
-use crate::message::{SettingsError, SettingsLoadResult, SettingsSaveResult};
 use crate::platform::paths;
 
 use std::path::PathBuf;

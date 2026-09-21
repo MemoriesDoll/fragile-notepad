@@ -1,5 +1,6 @@
 //! Pure document and editing state modules.
 
+pub mod close;
 pub mod document;
 pub mod encoding;
 pub mod search;
@@ -8,6 +9,7 @@ pub mod settings;
 pub mod shortcuts;
 pub mod workspace;
 
+pub use close::DirtyCloseDecision;
 pub use document::{
     Document, DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState,
     MAX_FULL_DOCUMENT_ANALYSIS_BYTES,

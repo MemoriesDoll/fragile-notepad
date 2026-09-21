@@ -1,18 +1,23 @@
+pub use crate::core::DirtyCloseDecision;
+pub use crate::services::types::{
+    FileError, FileLoadChunk, FileLoadEvent, FileLoadFailure, FileLoadFinished, FileLoadProgress,
+    FileLoadRequest, FileLoadResult, FileOpenResult, FileResult, FileSaveResult, OpenedFile,
+    SettingsError, SettingsLoadResult, SettingsSaveResult,
+};
+
 use iced::event;
 use iced::highlighter;
 use iced::window;
 
 use crate::core::{
-    AppearanceMode, DecodedText, DocumentId, DocumentLoadGeneration, EditorSettings, EncodingError,
-    HardwareAccelerationMode, IndentationMode, KeyBinding, SearchMode, ShortcutCommand,
-    ShortcutConflict, TextEncoding,
+    AppearanceMode, DocumentId, HardwareAccelerationMode, IndentationMode, KeyBinding, SearchMode,
+    ShortcutCommand, ShortcutConflict, TextEncoding,
 };
 use crate::editor::{
     EditorAction, EditorPosition, EditorSelection, OutlineParseResult, SelectionSet,
 };
 use crate::ipc::ActivationRequest;
 
-use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -255,12 +260,6 @@ pub enum Message {
     LanguageSelected(String),
 }
 
-pub type FileOpenResult = Result<OpenedFile, FileError>;
-pub type FileResult<T> = Result<T, FileError>;
-pub type FileLoadResult = Result<FileLoadFinished, FileLoadFailure>;
-pub type FileSaveResult = Result<PathBuf, FileError>;
-pub type SettingsLoadResult = Result<Option<EditorSettings>, SettingsError>;
-pub type SettingsSaveResult = Result<(), SettingsError>;
 pub type ClipboardReadResult = Result<Arc<String>, iced::clipboard::Error>;
 pub type ClipboardWriteResult = Result<(), iced::clipboard::Error>;
 
@@ -286,102 +285,12 @@ pub struct SaveRequest {
     pub snapshot: Arc<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DirtyCloseDecision {
-    Save,
-    Discard,
-    Cancel,
-}
-
-#[derive(Debug, Clone)]
-pub struct OpenedFile {
-    pub path: PathBuf,
-    pub contents: Arc<DecodedText>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FileLoadRequest {
-    pub document_id: DocumentId,
-    pub generation: DocumentLoadGeneration,
-    pub path: PathBuf,
-    pub chunk_size: usize,
-}
-
-#[derive(Debug, Clone)]
-pub enum FileLoadEvent {
-    Progress(FileLoadProgress),
-    Chunk(FileLoadChunk),
-    Finished(FileLoadResult),
-}
-
-#[derive(Debug, Clone)]
-pub struct FileLoadProgress {
-    pub document_id: DocumentId,
-    pub generation: DocumentLoadGeneration,
-    pub path: PathBuf,
-    pub bytes_read: u64,
-    pub total_bytes: Option<u64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FileLoadChunk {
-    pub document_id: DocumentId,
-    pub generation: DocumentLoadGeneration,
-    pub path: PathBuf,
-    pub text: Arc<String>,
-    pub reset: bool,
-    pub bytes_read: u64,
-    pub total_bytes: Option<u64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FileLoadFinished {
-    pub document_id: DocumentId,
-    pub generation: DocumentLoadGeneration,
-    pub path: PathBuf,
-    pub encoding: TextEncoding,
-    pub had_errors: bool,
-    pub fallback_contents: Option<Arc<DecodedText>>,
-    pub bytes_read: u64,
-    pub total_bytes: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileLoadFailure {
-    pub document_id: DocumentId,
-    pub generation: DocumentLoadGeneration,
-    pub path: PathBuf,
-    pub error: FileError,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FileError {
-    DialogClosed,
-    Io(io::ErrorKind),
-    Encoding(EncodingError),
-}
-
-impl FileError {
-    pub fn summary(&self) -> &'static str {
-        match self {
-            Self::DialogClosed => "dialog closed",
-            Self::Io(_) => "I/O error",
-            Self::Encoding(_) => "encoding error",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SettingsError {
-    Unavailable,
-    Io(io::ErrorKind),
-}
-
-impl SettingsError {
-    pub fn summary(&self) -> &'static str {
-        match self {
-            Self::Unavailable => "settings directory unavailable",
-            Self::Io(_) => "I/O error",
+impl From<FileLoadEvent> for Message {
+    fn from(event: FileLoadEvent) -> Self {
+        match event {
+            FileLoadEvent::Progress(progress) => Self::FileLoadProgress(progress),
+            FileLoadEvent::Chunk(chunk) => Self::FileLoadChunk(chunk),
+            FileLoadEvent::Finished(result) => Self::FileLoadFinished(result),
         }
     }
 }

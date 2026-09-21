@@ -46,7 +46,8 @@ mod scrollbar;
 mod state;
 mod style;
 
-pub use actions::{CaretMotion, EditorAction, key_action};
+pub use crate::editor::action::{CaretMotion, EditorAction};
+pub use actions::key_action;
 #[cfg(test)]
 use cache::{RichParagraphCache, SyntaxSpanKey};
 use draw::{draw_plan, draw_vertical_scrollbar};

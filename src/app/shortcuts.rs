@@ -43,7 +43,7 @@ impl App {
         }
 
         if self.main_window_id == Some(window_id)
-            && self.pending_dirty_close.is_some()
+            && self.close_prompt.document().is_some()
             && !matches!(event, Event::Keyboard(keyboard::Event::ModifiersChanged(_)))
         {
             return Task::none();

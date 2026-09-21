@@ -189,14 +189,7 @@ impl App {
 
     fn cached_outline_entries(&self, document_id: DocumentId) -> Option<&[FunctionEntry]> {
         let document = self.workspace.document(document_id)?;
-        let metadata = crate::editor::OutlineSnapshotMetadata::from_document(
-            document,
-            self.outline_registry_hash,
-        );
-
-        self.outline_states
-            .get(&document_id)
-            .and_then(|state| state.current_functions(&metadata))
+        self.outline_parsing.functions_for(document)
     }
 
     fn outline_entries_for_editor_action(

@@ -19,16 +19,14 @@ pub mod styles;
 pub mod tabs;
 pub mod title_bar;
 pub mod toolbar;
+mod view_model;
 pub mod window_list_dialog;
+pub use view_model::WorkbenchView;
 
 use iced::widget::{column, container, row, stack, text};
 use iced::{Element, Fill, Length};
 
-use crate::core::{Document, DocumentId, EditorSettings, FindState, Workspace};
-use crate::editor::OutlineState;
-use crate::message::{AboutTab, Menu, Message};
-use crate::ui::toolbar::WindowMenuState;
-use crate::ui::window_list_dialog::WindowListEntry;
+use crate::message::Message;
 
 const FIND_PANEL_COLLAPSED_HEIGHT: f32 = 46.0;
 const FIND_PANEL_EXPANDED_HEIGHT: f32 = 86.0;
@@ -62,26 +60,27 @@ pub fn centered_fill_button_label<'a>(label: &'a str, size: u32) -> Element<'a, 
     container(text(label).size(size)).center_x(Fill).into()
 }
 
-pub fn view<'a>(
-    workspace: &'a Workspace,
-    find: &'a FindState,
-    settings: &'a EditorSettings,
-    is_find_visible: bool,
-    is_inline_replace_visible: bool,
-    is_function_list_visible: bool,
-    chrome_animation: ChromeAnimationInfo,
-    active_menu: Option<Menu>,
-    active_menu_path: &'a [String],
-    window_menu_state: WindowMenuState,
-    dragged_tab: Option<DocumentId>,
-    hovered_drop_tab: Option<DocumentId>,
-    dirty_close_document: Option<&'a Document>,
-    about_tab: Option<AboutTab>,
-    rendering_debug_info: about_dialog::RenderingDebugInfo,
-    window_list_entries: Option<Vec<WindowListEntry>>,
-    file_status: Option<&'a str>,
-    active_outline_state: Option<&'a OutlineState>,
-) -> Element<'a, Message> {
+pub fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
+    let WorkbenchView {
+        workspace,
+        find,
+        settings,
+        is_find_visible,
+        is_inline_replace_visible,
+        is_function_list_visible,
+        chrome_animation,
+        active_menu,
+        active_menu_path,
+        window_menu_state,
+        dragged_tab,
+        hovered_drop_tab,
+        dirty_close_document,
+        about_tab,
+        rendering_debug_info,
+        window_list_entries,
+        file_status,
+        active_outline_state,
+    } = model;
     let active_document = workspace.active_document();
     let editor = if let Some(document) = active_document {
         editor::view(document, settings)

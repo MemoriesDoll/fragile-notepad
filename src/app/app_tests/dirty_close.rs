@@ -16,7 +16,7 @@ fn finish_fade(app: &mut App, document: DocumentId, start: Instant) {
     let _ = app.update_inner(Message::ChromeAnimationFrame(
         start + Duration::from_millis(140),
     ));
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
     assert_eq!(app.chrome_animation_info().dirty_close_progress, 0.0);
     let _ = app.update(Message::DirtyCloseFadeFinished(document));
 }
@@ -36,7 +36,7 @@ fn decisions_wait_for_fade_and_ignore_repeat_clicks_and_early_completion() {
         let _ = app.update_inner(Message::DirtyCloseResolved(document, decision));
 
         assert!(!app.chrome_animation_info().dirty_close_interactive);
-        assert!(app.chrome_animation.needs_frames());
+        assert!(app.needs_animation_frames());
         let _ = app.update_inner(Message::ChromeAnimationFrame(start));
         let _ = app.update_inner(Message::ChromeAnimationFrame(
             start + Duration::from_millis(70),
@@ -49,14 +49,14 @@ fn decisions_wait_for_fade_and_ignore_repeat_clicks_and_early_completion() {
         ));
         let _ = app.update_inner(Message::DirtyCloseFadeFinished(document));
         let _ = app.update_inner(Message::WindowCloseRequested(app.main_window_id.unwrap()));
-        assert_eq!(app.pending_dirty_close_decision, Some(decision));
-        assert_eq!(app.pending_dirty_close, Some(document));
+        assert_eq!(app.close_prompt.decision(), Some(decision));
+        assert_eq!(app.close_prompt.document(), Some(document));
         assert!(app.workspace.document(document).is_some());
         assert!(app.pending_save.is_none());
 
         finish_fade(&mut app, document, start);
-        assert_eq!(app.pending_dirty_close, None);
-        assert_eq!(app.pending_dirty_close_decision, None);
+        assert_eq!(app.close_prompt.document(), None);
+        assert_eq!(app.close_prompt.decision(), None);
         match decision {
             DirtyCloseDecision::Save => {
                 let request = app.pending_save.clone().expect("save starts after fading");
@@ -72,7 +72,7 @@ fn decisions_wait_for_fade_and_ignore_repeat_clicks_and_early_completion() {
             DirtyCloseDecision::Cancel => assert!(app.workspace.document(document).is_some()),
         }
         let _ = app.update_inner(Message::DirtyCloseFadeFinished(document));
-        assert_eq!(app.pending_dirty_close, None);
+        assert_eq!(app.close_prompt.document(), None);
     }
 }
 
@@ -90,13 +90,13 @@ fn queued_dirty_documents_wait_for_previous_prompt_to_fade() {
         first,
         DirtyCloseDecision::Discard,
     ));
-    assert_eq!(app.pending_dirty_close, Some(first));
+    assert_eq!(app.close_prompt.document(), Some(first));
     finish_fade(&mut app, first, start);
     assert!(app.workspace.document(first).is_none());
-    assert_eq!(app.pending_dirty_close, Some(second));
+    assert_eq!(app.close_prompt.document(), Some(second));
     assert_eq!(app.chrome_animation_info().dirty_close_progress, 0.0);
     assert!(app.chrome_animation_info().dirty_close_interactive);
-    assert!(app.chrome_animation.needs_frames());
+    assert!(app.needs_animation_frames());
 }
 
 #[test]

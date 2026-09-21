@@ -1,13 +1,12 @@
 //! Chunked file loading for responsive open/drop flows.
 
-use crate::core::TextEncoding;
-use crate::message::{
+use super::types::{
     FileError, FileLoadChunk, FileLoadEvent, FileLoadFailure, FileLoadFinished, FileLoadProgress,
     FileLoadRequest,
 };
+use crate::core::TextEncoding;
 
-use futures::executor::block_on;
-use iced::futures::{SinkExt, channel::mpsc};
+use futures::{SinkExt, Stream, StreamExt, channel::mpsc, executor::block_on, stream};
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
@@ -17,26 +16,28 @@ const UTF8_BOM_BYTES: &[u8] = &[0xef, 0xbb, 0xbf];
 const UTF16BE_BOM_BYTES: &[u8] = &[0xfe, 0xff];
 const UTF16LE_BOM_BYTES: &[u8] = &[0xff, 0xfe];
 
-pub fn load_file_chunks(
-    request: FileLoadRequest,
-) -> impl iced::futures::Stream<Item = FileLoadEvent> {
-    iced::stream::channel(8, async move |sender| {
+pub fn load_file_chunks(request: FileLoadRequest) -> impl Stream<Item = FileLoadEvent> {
+    let (sender, receiver) = mpsc::channel(8);
+    let start = stream::once(async move {
         static LOAD_SLOTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
             std::sync::OnceLock::new();
         let slots = LOAD_SLOTS
             .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(4)))
             .clone();
         let Ok(permit) = slots.acquire_owned().await else {
-            return;
+            return None;
         };
         if sender.is_closed() {
-            return;
+            return None;
         }
         std::thread::spawn(move || {
             let _permit = permit;
             load_file_on_thread(request, sender);
         });
+        None::<FileLoadEvent>
     })
+    .filter_map(futures::future::ready);
+    stream::select(receiver, start)
 }
 
 fn load_file_on_thread(request: FileLoadRequest, mut sender: mpsc::Sender<FileLoadEvent>) {

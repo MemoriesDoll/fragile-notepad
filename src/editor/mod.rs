@@ -1,5 +1,6 @@
 //! App-local editor model primitives.
 
+pub mod action;
 pub mod buffer;
 pub mod decoration;
 pub mod delimiter;
@@ -15,6 +16,7 @@ pub mod viewport;
 pub mod widget;
 mod word;
 
+pub use action::{CaretMotion, EditorAction};
 pub use buffer::{EditDelta, EditorBuffer};
 pub use decoration::{
     DecorationModel, DecorationSettings, HiddenLineSpan, IndentGuide, LineDecoration,
@@ -52,5 +54,5 @@ pub use render::{
     visible_marker_columns,
 };
 pub use viewport::{RowSegment, ViewportModel, VisibleRow};
-pub use widget::{AdvancedEditor, AdvancedEditorState, CaretMotion, EditorAction, key_action};
+pub use widget::{AdvancedEditor, AdvancedEditorState, key_action};
 pub use word::word_range_at_position;

@@ -11,7 +11,7 @@ fn custom_caption_close_preserves_dirty_document_and_settings_cancel_behavior() 
     let document = app.workspace.active_document_id;
     app.workspace.active_document_mut().unwrap().mark_dirty();
     let _ = app.update(Message::WindowChrome(main, Action::Close));
-    assert_eq!(app.pending_dirty_close, Some(document));
+    assert_eq!(app.close_prompt.document(), Some(document));
     assert!(app.workspace.document(document).is_some());
     let _ = app.update(Message::DirtyCloseResolved(
         document,
@@ -553,7 +553,7 @@ fn close_dirty_prompts() {
     let task = app.update(Message::WindowCloseRequested(main_window));
 
     assert_eq!(task.units(), 0);
-    assert_eq!(app.pending_dirty_close, Some(document_id));
+    assert_eq!(app.close_prompt.document(), Some(document_id));
     assert_eq!(app.close_goal, crate::app::CloseGoal::ExitApp);
     assert!(app.workspace.document(document_id).is_some());
 }
@@ -666,7 +666,7 @@ fn about_fades_without_backend_work_and_stops_requesting_frames_when_settled() {
 
         assert!(app.is_about_visible);
         assert_eq!(app.rendering, rendering);
-        assert!(app.chrome_animation.needs_frames());
+        assert!(app.needs_animation_frames());
         assert!(app.chrome_animation_info().about_rendered_visible);
         assert!(app.chrome_animation_info().about_interactive);
         assert_eq!(app.chrome_animation_info().about_progress, 0.0);
@@ -677,20 +677,20 @@ fn about_fades_without_backend_work_and_stops_requesting_frames_when_settled() {
         let _ = app.update_inner(Message::ChromeAnimationFrame(first));
         let _ = app.update_inner(Message::ChromeAnimationFrame(settled));
         assert_eq!(app.chrome_animation_info().about_progress, 1.0);
-        assert!(!app.chrome_animation.needs_frames());
+        assert!(!app.needs_animation_frames());
 
         let _ = app.update_inner(Message::AboutClosed);
         assert!(!app.is_about_visible);
         assert!(!app.chrome_animation_info().about_interactive);
         assert!(app.chrome_animation_info().about_rendered_visible);
-        assert!(app.chrome_animation.needs_frames());
+        assert!(app.needs_animation_frames());
         let _ = app.update_inner(Message::ChromeAnimationFrame(settled));
         let _ = app.update_inner(Message::ChromeAnimationFrame(
             settled + std::time::Duration::from_millis(140),
         ));
         assert_eq!(app.chrome_animation_info().about_progress, 0.0);
         assert!(!app.chrome_animation_info().about_rendered_visible);
-        assert!(!app.chrome_animation.needs_frames());
+        assert!(!app.needs_animation_frames());
         assert_eq!(app.rendering, rendering);
     }
 }
@@ -712,7 +712,7 @@ fn about_tabs_keep_fade_progress_and_reopening_reverses_exit_without_a_jump() {
         first + std::time::Duration::from_millis(140),
     ));
     assert_eq!(app.chrome_animation_info().about_progress, 1.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 
     let _ = app.update_inner(Message::AboutClosed);
     let close_start = first + std::time::Duration::from_millis(150);
@@ -732,7 +732,7 @@ fn about_tabs_keep_fade_progress_and_reopening_reverses_exit_without_a_jump() {
         reverse_at + std::time::Duration::from_millis(140),
     ));
     assert_eq!(app.chrome_animation_info().about_progress, 1.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 }
 
 #[test]
@@ -743,7 +743,7 @@ fn about_closed_before_first_frame_does_not_leave_an_invisible_modal() {
     assert!(!app.is_about_visible);
     assert!(!app.chrome_animation_info().about_rendered_visible);
     assert_eq!(app.chrome_animation_info().about_progress, 0.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 }
 
 #[test]
@@ -790,7 +790,7 @@ fn chrome_find_closed_before_first_frame_is_removed_immediately() {
     let closed = app.chrome_animation_info();
     assert!(!closed.find_rendered_visible);
     assert!(!closed.inline_replace_rendered_visible);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 }
 
 #[test]
@@ -814,7 +814,7 @@ fn chrome_find_reversal_continues_from_visible_progress_and_finishes() {
 
     assert!(!app.chrome_animation_info().find_rendered_visible);
     assert_eq!(app.chrome_animation_info().find_progress, 0.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 }
 
 #[test]
@@ -838,7 +838,7 @@ fn chrome_repeated_show_does_not_restart_running_transition() {
     let opened = app.chrome_animation_info();
     assert_eq!(opened.find_progress, 1.0);
     assert_eq!(opened.inline_replace_progress, 1.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 }
 
 #[test]
@@ -850,7 +850,7 @@ fn chrome_find_panel_reveal_runs_only_while_transitioning() {
     let initial = app.chrome_animation_info();
     assert!(!initial.find_rendered_visible);
     assert_eq!(initial.find_progress, 0.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 
     let _ = app.update(Message::ToggleFind);
 
@@ -858,7 +858,7 @@ fn chrome_find_panel_reveal_runs_only_while_transitioning() {
     assert!(app.is_find_visible);
     assert!(opening.find_rendered_visible);
     assert_eq!(opening.find_progress, 0.0);
-    assert!(app.chrome_animation.needs_frames());
+    assert!(app.needs_animation_frames());
 
     let _ = app.update(Message::ChromeAnimationFrame(first_frame));
     let _ = app.update(Message::ChromeAnimationFrame(later_frame));
@@ -866,7 +866,7 @@ fn chrome_find_panel_reveal_runs_only_while_transitioning() {
     let opened = app.chrome_animation_info();
     assert!(opened.find_rendered_visible);
     assert_eq!(opened.find_progress, 1.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 
     let _ = app.update(Message::HideFind);
 
@@ -874,7 +874,7 @@ fn chrome_find_panel_reveal_runs_only_while_transitioning() {
     assert!(!app.is_find_visible);
     assert!(closing.find_rendered_visible);
     assert_eq!(closing.find_progress, 1.0);
-    assert!(app.chrome_animation.needs_frames());
+    assert!(app.needs_animation_frames());
 
     let _ = app.update(Message::ChromeAnimationFrame(later_frame));
     let _ = app.update(Message::ChromeAnimationFrame(
@@ -884,7 +884,7 @@ fn chrome_find_panel_reveal_runs_only_while_transitioning() {
     let closed = app.chrome_animation_info();
     assert!(!closed.find_rendered_visible);
     assert_eq!(closed.find_progress, 0.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 }
 
 #[test]
@@ -916,7 +916,7 @@ fn chrome_inline_replace_reveal_is_independent_of_find_panel_reveal() {
     assert!(closing_replace.inline_replace_rendered_visible);
     assert_eq!(closing_replace.find_progress, 1.0);
     assert_eq!(closing_replace.inline_replace_progress, 1.0);
-    assert!(app.chrome_animation.needs_frames());
+    assert!(app.needs_animation_frames());
 
     let _ = app.update(Message::ChromeAnimationFrame(later_frame));
     let _ = app.update(Message::ChromeAnimationFrame(
@@ -928,7 +928,7 @@ fn chrome_inline_replace_reveal_is_independent_of_find_panel_reveal() {
     assert_eq!(closed_replace.find_progress, 1.0);
     assert!(!closed_replace.inline_replace_rendered_visible);
     assert_eq!(closed_replace.inline_replace_progress, 0.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 }
 
 #[test]
@@ -945,7 +945,7 @@ fn chrome_function_list_reveal_tracks_panel_visibility() {
     assert!(app.is_function_list_visible);
     assert!(opening.function_list_rendered_visible);
     assert_eq!(opening.function_list_progress, 0.0);
-    assert!(app.chrome_animation.needs_frames());
+    assert!(app.needs_animation_frames());
 
     let _ = app.update(Message::ChromeAnimationFrame(first_frame));
     let _ = app.update(Message::ChromeAnimationFrame(later_frame));
@@ -953,7 +953,7 @@ fn chrome_function_list_reveal_tracks_panel_visibility() {
     let opened = app.chrome_animation_info();
     assert!(opened.function_list_rendered_visible);
     assert_eq!(opened.function_list_progress, 1.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 
     let _ = app.update(Message::ToggleFunctionList);
 
@@ -961,7 +961,7 @@ fn chrome_function_list_reveal_tracks_panel_visibility() {
     assert!(!app.is_function_list_visible);
     assert!(closing.function_list_rendered_visible);
     assert_eq!(closing.function_list_progress, 1.0);
-    assert!(app.chrome_animation.needs_frames());
+    assert!(app.needs_animation_frames());
 
     let _ = app.update(Message::ChromeAnimationFrame(later_frame));
     let _ = app.update(Message::ChromeAnimationFrame(
@@ -971,7 +971,7 @@ fn chrome_function_list_reveal_tracks_panel_visibility() {
     let closed = app.chrome_animation_info();
     assert!(!closed.function_list_rendered_visible);
     assert_eq!(closed.function_list_progress, 0.0);
-    assert!(!app.chrome_animation.needs_frames());
+    assert!(!app.needs_animation_frames());
 }
 
 #[test]

@@ -1,5 +1,8 @@
 # Development
 
+See [Architecture](ARCHITECTURE.md) for module ownership, dependency boundaries,
+and the contracts used by file workflows, editor commands, and UI presentation.
+
 ## Window title bars
 
 The main, Settings, and Find and Replace windows use application-drawn title bars

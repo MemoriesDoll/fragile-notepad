@@ -446,7 +446,7 @@ fn undo_during_save_cannot_keep_the_previous_clean_checkpoint() {
     let _ = app.update(Message::Undo);
     assert!(app.workspace.document(document_id).unwrap().is_dirty);
     let _ = app.update(Message::CloseFile);
-    assert_eq!(app.pending_dirty_close, Some(document_id));
+    assert_eq!(app.close_prompt.document(), Some(document_id));
 }
 
 #[test]
@@ -807,7 +807,7 @@ fn dirty_close_cancel_keeps_document_open() {
 
     assert!(app.workspace.document(document_id).is_some());
     assert_eq!(app.workspace.active_document_id, document_id);
-    assert_eq!(app.pending_dirty_close, None);
+    assert_eq!(app.close_prompt.document(), None);
 }
 
 #[test]
@@ -822,7 +822,7 @@ fn closing_dirty_document_opens_in_app_prompt() {
 
     let _ = app.update(Message::CloseFile);
 
-    assert_eq!(app.pending_dirty_close, Some(document_id));
+    assert_eq!(app.close_prompt.document(), Some(document_id));
     assert!(app.workspace.document(document_id).is_some());
 }
 
@@ -1031,7 +1031,7 @@ fn close_all_to_left_prompts_for_first_dirty_left_document() {
 
     let _ = app.update(Message::CloseAllToLeft);
 
-    assert_eq!(app.pending_dirty_close, Some(first));
+    assert_eq!(app.close_prompt.document(), Some(first));
     assert_eq!(
         app.pending_close_documents
             .iter()
