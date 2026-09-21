@@ -254,6 +254,19 @@ index 0c1b61ab..5a6f4768 100644
 +        }
 +    }
 +}
+diff --git a/vendor/iced/core/src/transformation.rs b/vendor/iced/core/src/transformation.rs
+index c27f3f45..5c31c93f 100644
+--- a/vendor/iced/core/src/transformation.rs
++++ b/vendor/iced/core/src/transformation.rs
+@@ -14,7 +14,7 @@ impl Transformation {
+     /// Creates an orthographic projection.
+     #[rustfmt::skip]
+     pub fn orthographic(width: u32, height: u32) -> Self{
+-        Self(Mat4::orthographic_rh_gl(
++        Self(glam::camera::rh::proj::opengl::orthographic(
+             0.0, width as f32,
+             height as f32, 0.0,
+             -1.0, 1.0
 diff --git a/vendor/iced/graphics/src/compositor.rs b/vendor/iced/graphics/src/compositor.rs
 index af8b8d73..a8494ce1 100644
 --- a/vendor/iced/graphics/src/compositor.rs
