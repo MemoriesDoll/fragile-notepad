@@ -235,6 +235,10 @@ window lifecycles. Bulk-load output separates file-completion handler time,
 all-files-loaded time, persistence results, and a 16 ms UI heartbeat. Startup tests
 report first-view entry and a separate screenshot-completion milestone after
 layout/rendering; screenshot completion is not an OS presentation timestamp.
+The debug startup test allows 200 ms on local native systems, 750 ms on hosted
+Windows/Linux runners, and 2 s on hosted macOS runners. These are wall-clock measurements that
+include native window setup. The first-view and first-frame probes each retain
+a five-second timeout, and test diagnostics report both timings and the budget.
 
 ## Vendored Dependencies
 
@@ -458,8 +462,11 @@ cargo test --manifest-path vendor/iced/Cargo.toml -p iced_winit -p iced_wgpu --l
 ```
 
 The application icon parity test also checks cached-frame equality at 100%,
-150%, and 200% scale. Re-export the iced patch after changing these vendor tests
-or implementation files so fresh checkouts include the same fixes.
+150%, and 200% scale. Its top-edge check allows a one-level alpha rounding
+difference at the same pixel; extra rows with greater coverage differences still
+fail. Pixel-difference limits remain separate from that edge check. Re-export the
+iced patch after changing vendor tests or implementation files so fresh checkouts
+include the same fixes.
 
 ## Backend Switch Probe
 

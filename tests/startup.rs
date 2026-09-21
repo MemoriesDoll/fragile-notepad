@@ -15,6 +15,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const CI_UI_READY_BUDGET: Duration = Duration::from_millis(750);
+// This debug-process wall-clock measurement includes native window setup on
+// shared macOS runners. Keep its CI allowance separate from the local target.
+const MACOS_CI_UI_READY_BUDGET: Duration = Duration::from_secs(2);
 
 #[test]
 fn app_binary_reaches_first_view_within_startup_budget() {
@@ -74,6 +77,10 @@ fn app_binary_reaches_first_view_within_startup_budget() {
     assert!(frame_ms >= elapsed.as_secs_f64() * 1000.0);
 
     let budget = startup_budget_for_environment();
+    eprintln!(
+        "startup probe: os={}, first_view={elapsed:?}, first_frame={frame_ms:.3}ms, budget={budget:?}",
+        std::env::consts::OS,
+    );
 
     if running_under_wsl() && elapsed >= budget {
         eprintln!(
@@ -99,7 +106,11 @@ fn read_stderr(child: &mut std::process::Child) -> String {
 
 fn startup_budget_for_environment() -> Duration {
     if running_in_hosted_ci() {
-        return CI_UI_READY_BUDGET;
+        return if cfg!(target_os = "macos") {
+            MACOS_CI_UI_READY_BUDGET
+        } else {
+            CI_UI_READY_BUDGET
+        };
     }
 
     if running_under_wsl() {

@@ -305,25 +305,28 @@ fn top_alpha_overshoot(
         };
     };
 
-    if cpu_top >= gpu_top {
-        return TopEdgeOvershoot {
-            amount: 0,
-            detail: None,
-        };
+    // CPU/GPU quantization can put the same edge at alpha 33 and 32. Check
+    // coverage at the same pixel before treating a threshold crossing as an
+    // extra row. Scan every candidate so rounding noise cannot hide a real edge.
+    const ALPHA_ROUNDING_TOLERANCE: u8 = 1;
+    for y in cpu_top..gpu_top {
+        for x in 0..width {
+            let cpu_alpha = alpha_at(cpu, width, x, y);
+            let gpu_alpha = alpha_at(gpu, width, x, y);
+            if cpu_alpha > alpha_threshold
+                && cpu_alpha.saturating_sub(gpu_alpha) > ALPHA_ROUNDING_TOLERANCE
+            {
+                return TopEdgeOvershoot {
+                    amount: gpu_top - y,
+                    detail: Some((x, y, gpu_top, cpu_alpha, gpu_alpha)),
+                };
+            }
+        }
     }
 
-    let x = (0..width)
-        .find(|&x| alpha_at(cpu, width, x, cpu_top) > alpha_threshold)
-        .unwrap_or(0);
     TopEdgeOvershoot {
-        amount: gpu_top - cpu_top,
-        detail: Some((
-            x,
-            cpu_top,
-            gpu_top,
-            alpha_at(cpu, width, x, cpu_top),
-            alpha_at(gpu, width, x, cpu_top),
-        )),
+        amount: 0,
+        detail: None,
     }
 }
 
@@ -335,6 +338,54 @@ fn top_alpha_row(image: &[u8], width: usize, alpha_threshold: u8) -> Option<usiz
 
 fn alpha_at(image: &[u8], width: usize, x: usize, y: usize) -> u8 {
     image[(y * width + x) * 4 + 3]
+}
+
+#[test]
+fn top_edge_ignores_single_level_alpha_rounding() {
+    // Same edge coverage, quantized on opposite sides of the visibility cutoff.
+    let cpu = alpha_image(&[&[0, 33], &[0, 255]]);
+    let gpu = alpha_image(&[&[0, 32], &[0, 255]]);
+
+    assert_eq!(top_alpha_overshoot(&cpu, &gpu, 2, 32).amount, 0);
+}
+
+#[test]
+fn top_edge_detects_real_coverage_above_gpu_edge() {
+    // Keep detecting both a faint extra edge and a full one-pixel translation.
+    for (cpu_alpha, gpu_alpha) in [(33, 0), (34, 32), (255, 0)] {
+        let cpu = alpha_image(&[&[cpu_alpha], &[255]]);
+        let gpu = alpha_image(&[&[gpu_alpha], &[255]]);
+        let overshoot = top_alpha_overshoot(&cpu, &gpu, 1, 32);
+
+        assert_eq!(overshoot.amount, 1, "alpha pair {cpu_alpha}/{gpu_alpha}");
+        assert_eq!(overshoot.detail, Some((0, 0, 1, cpu_alpha, gpu_alpha)));
+    }
+}
+
+#[test]
+fn top_edge_checks_past_rounding_noise_in_the_same_row() {
+    let cpu = alpha_image(&[&[33, 80], &[255, 255]]);
+    let gpu = alpha_image(&[&[32, 0], &[255, 255]]);
+    let overshoot = top_alpha_overshoot(&cpu, &gpu, 2, 32);
+
+    assert_eq!(overshoot.amount, 1);
+    assert_eq!(overshoot.detail, Some((1, 0, 1, 80, 0)));
+}
+
+#[test]
+fn top_edge_checks_later_rows_after_rounding_noise() {
+    let cpu = alpha_image(&[&[33, 0], &[0, 96], &[0, 255]]);
+    let gpu = alpha_image(&[&[32, 0], &[0, 0], &[0, 255]]);
+    let overshoot = top_alpha_overshoot(&cpu, &gpu, 2, 32);
+
+    assert_eq!(overshoot.amount, 1);
+    assert_eq!(overshoot.detail, Some((1, 1, 2, 96, 0)));
+}
+
+fn alpha_image(rows: &[&[u8]]) -> Vec<u8> {
+    rows.iter()
+        .flat_map(|row| row.iter().flat_map(|&alpha| [0, 0, 0, alpha]))
+        .collect()
 }
 
 #[test]
