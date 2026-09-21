@@ -180,8 +180,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Compress-Archive -Path target\release\fragile-notepad.exe -DestinationPath dist\${{ matrix.archive }} -Force
+          New-Item -ItemType Directory -Force -Path dist\package
+          Copy-Item target\release\fragile-notepad.exe dist\package\
+          Copy-Item LICENSE dist\package\
+          Copy-Item assets\icons\NOTICE.txt dist\package\ICON-NOTICES.txt
+          Compress-Archive -Path dist\package\* -DestinationPath dist\${{ matrix.archive }} -Force
 
       - name: Package Unix artifact
         if: runner.os != 'Windows'
@@ -189,7 +192,9 @@ jobs:
         run: |
           mkdir -p dist/package
           cp target/release/fragile-notepad dist/package/
-          tar -C dist/package -czf "dist/${{ matrix.archive }}" fragile-notepad
+          cp LICENSE dist/package/
+          cp assets/icons/NOTICE.txt dist/package/ICON-NOTICES.txt
+          tar -C dist/package -czf "dist/${{ matrix.archive }}" fragile-notepad LICENSE ICON-NOTICES.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

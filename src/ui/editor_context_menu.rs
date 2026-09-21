@@ -1,4 +1,5 @@
 use iced::advanced::Renderer as _;
+use iced::advanced::image::{self, Renderer as _};
 use iced::advanced::text::Renderer as _;
 use iced::advanced::widget::operation::Focusable;
 use iced::advanced::widget::{Operation, Tree, tree};
@@ -13,6 +14,7 @@ use crate::core::{
 };
 use crate::editor::{AdvancedEditorState, EditorMetrics};
 use crate::message::Message;
+use crate::ui::icons::hero::{self, HeroIcon};
 use crate::ui::menu::{self, MenuNode, MenuShortcutHint};
 use crate::ui::{styles, toolbar};
 
@@ -587,7 +589,7 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                                 label,
                                 shortcut.as_ref().map(shortcut_label).unwrap_or_default(),
                             ),
-                            MenuNode::Submenu { label, .. } => (label, String::from("›")),
+                            MenuNode::Submenu { label, .. } => (label, String::new()),
                             MenuNode::Separator => unreachable!(),
                         };
                         draw_text(
@@ -599,37 +601,46 @@ impl overlay::Overlay<Message, Theme, Renderer> for ContextMenu<'_> {
                             text::Alignment::Left,
                             clip,
                         );
-                        draw_text(
-                            renderer,
-                            &shortcut,
-                            Point::new(row.x + row.width - 10.0, row.center_y()),
-                            muted,
-                            12.0,
-                            text::Alignment::Right,
-                            clip,
-                        );
+                        if matches!(entry, MenuNode::Submenu { .. }) {
+                            draw_chevron(
+                                renderer,
+                                Point::new(row.x + row.width - 14.0, row.center_y()),
+                                muted,
+                                14.0,
+                                0.0,
+                                clip,
+                            );
+                        } else {
+                            draw_text(
+                                renderer,
+                                &shortcut,
+                                Point::new(row.x + row.width - 10.0, row.center_y()),
+                                muted,
+                                12.0,
+                                text::Alignment::Right,
+                                clip,
+                            );
+                        }
                     }
                 });
                 let total = rows_height(self.at_depth(depth));
                 if self.state.offsets[depth] > 0.0 {
-                    draw_text(
+                    draw_chevron(
                         renderer,
-                        "▴",
                         Point::new(bounds.center_x(), bounds.y + 3.0),
                         muted,
                         9.0,
-                        text::Alignment::Center,
+                        -std::f32::consts::FRAC_PI_2,
                         bounds,
                     );
                 }
                 if self.state.offsets[depth] + clip.height + 0.5 < total {
-                    draw_text(
+                    draw_chevron(
                         renderer,
-                        "▾",
                         Point::new(bounds.center_x(), bounds.y + bounds.height - 3.0),
                         muted,
                         9.0,
-                        text::Alignment::Center,
+                        std::f32::consts::FRAC_PI_2,
                         bounds,
                     );
                 }
@@ -981,6 +992,26 @@ fn shortcut_label(shortcut: &MenuShortcutHint) -> String {
             .collect::<Vec<_>>()
             .join("+"),
     }
+}
+
+fn draw_chevron(
+    renderer: &mut Renderer,
+    center: Point,
+    color: Color,
+    size: f32,
+    rotation: f32,
+    clip: Rectangle,
+) {
+    renderer.draw_image(
+        image::Image::new(hero::handle_with_color(HeroIcon::ChevronRight, color))
+            .filter_method(image::FilterMethod::Linear)
+            .rotation(iced::Radians(rotation)),
+        Rectangle::new(
+            Point::new(center.x - size / 2.0, center.y - size / 2.0),
+            Size::new(size, size),
+        ),
+        clip,
+    );
 }
 
 fn draw_text(

@@ -3,9 +3,9 @@ use iced::advanced::renderer::{self, Headless};
 use iced::{Color, Rectangle, Size};
 
 use fragile_notepad::ui::icons::ICON_SIZE;
+use fragile_notepad::ui::icons::colored::ColoredIconAsset;
 use fragile_notepad::ui::icons::hero::HeroIconAsset;
 use fragile_notepad::ui::icons::shortcut::ShortcutIconAsset;
-use fragile_notepad::ui::icons::tango::TangoIconAsset;
 
 const SURFACE_SIZE: u32 = 32;
 
@@ -13,7 +13,7 @@ const SURFACE_SIZE: u32 = 32;
 enum TestIconAsset {
     Hero(HeroIconAsset),
     Shortcut(ShortcutIconAsset),
-    Tango(TangoIconAsset),
+    Colored(ColoredIconAsset),
 }
 
 impl TestIconAsset {
@@ -21,7 +21,7 @@ impl TestIconAsset {
         match self {
             Self::Hero(asset) => asset.rgba_bytes(),
             Self::Shortcut(asset) => asset.rgba_bytes(),
-            Self::Tango(asset) => asset.rgba_bytes(),
+            Self::Colored(asset) => asset.rgba_bytes(),
         }
     }
 }
@@ -78,124 +78,136 @@ const ICONS: &[(&str, TestIconAsset)] = &[
         TestIconAsset::Hero(HeroIconAsset::XMark),
     ),
     (
-        "tango/accessories-character-map",
-        TestIconAsset::Tango(TangoIconAsset::AccessoriesCharacterMap),
+        "colored/accessories-character-map",
+        TestIconAsset::Colored(ColoredIconAsset::AccessoriesCharacterMap),
     ),
     (
-        "tango/document-new",
-        TestIconAsset::Tango(TangoIconAsset::DocumentNew),
+        "colored/document-new",
+        TestIconAsset::Colored(ColoredIconAsset::DocumentNew),
     ),
     (
-        "tango/document-open",
-        TestIconAsset::Tango(TangoIconAsset::DocumentOpen),
+        "colored/document-close",
+        TestIconAsset::Colored(ColoredIconAsset::DocumentClose),
     ),
     (
-        "tango/document-print",
-        TestIconAsset::Tango(TangoIconAsset::DocumentPrint),
+        "colored/document-close-all",
+        TestIconAsset::Colored(ColoredIconAsset::DocumentCloseAll),
     ),
     (
-        "tango/document-save-as",
-        TestIconAsset::Tango(TangoIconAsset::DocumentSaveAs),
+        "colored/document-save-all",
+        TestIconAsset::Colored(ColoredIconAsset::DocumentSaveAll),
     ),
     (
-        "tango/document-save",
-        TestIconAsset::Tango(TangoIconAsset::DocumentSave),
+        "colored/document-open",
+        TestIconAsset::Colored(ColoredIconAsset::DocumentOpen),
     ),
     (
-        "tango/edit-copy",
-        TestIconAsset::Tango(TangoIconAsset::EditCopy),
+        "colored/document-print",
+        TestIconAsset::Colored(ColoredIconAsset::DocumentPrint),
     ),
     (
-        "tango/edit-cut",
-        TestIconAsset::Tango(TangoIconAsset::EditCut),
+        "colored/document-save-as",
+        TestIconAsset::Colored(ColoredIconAsset::DocumentSaveAs),
     ),
     (
-        "tango/edit-delete",
-        TestIconAsset::Tango(TangoIconAsset::EditDelete),
+        "colored/document-save",
+        TestIconAsset::Colored(ColoredIconAsset::DocumentSave),
     ),
     (
-        "tango/edit-find-replace",
-        TestIconAsset::Tango(TangoIconAsset::EditFindReplace),
+        "colored/edit-copy",
+        TestIconAsset::Colored(ColoredIconAsset::EditCopy),
     ),
     (
-        "tango/edit-find",
-        TestIconAsset::Tango(TangoIconAsset::EditFind),
+        "colored/edit-cut",
+        TestIconAsset::Colored(ColoredIconAsset::EditCut),
     ),
     (
-        "tango/edit-paste",
-        TestIconAsset::Tango(TangoIconAsset::EditPaste),
+        "colored/edit-delete",
+        TestIconAsset::Colored(ColoredIconAsset::EditDelete),
     ),
     (
-        "tango/edit-redo",
-        TestIconAsset::Tango(TangoIconAsset::EditRedo),
+        "colored/edit-find-replace",
+        TestIconAsset::Colored(ColoredIconAsset::EditFindReplace),
     ),
     (
-        "tango/edit-undo",
-        TestIconAsset::Tango(TangoIconAsset::EditUndo),
+        "colored/edit-find",
+        TestIconAsset::Colored(ColoredIconAsset::EditFind),
     ),
     (
-        "tango/emblem-favorite",
-        TestIconAsset::Tango(TangoIconAsset::EmblemFavorite),
+        "colored/edit-paste",
+        TestIconAsset::Colored(ColoredIconAsset::EditPaste),
     ),
     (
-        "tango/emblem-important",
-        TestIconAsset::Tango(TangoIconAsset::EmblemImportant),
+        "colored/edit-redo",
+        TestIconAsset::Colored(ColoredIconAsset::EditRedo),
     ),
     (
-        "tango/format-indent-more",
-        TestIconAsset::Tango(TangoIconAsset::FormatIndentMore),
+        "colored/edit-undo",
+        TestIconAsset::Colored(ColoredIconAsset::EditUndo),
     ),
     (
-        "tango/format-justify-fill",
-        TestIconAsset::Tango(TangoIconAsset::FormatJustifyFill),
+        "colored/emblem-favorite",
+        TestIconAsset::Colored(ColoredIconAsset::EmblemFavorite),
     ),
     (
-        "tango/process-stop",
-        TestIconAsset::Tango(TangoIconAsset::ProcessStop),
+        "colored/emblem-important",
+        TestIconAsset::Colored(ColoredIconAsset::EmblemImportant),
     ),
     (
-        "tango/tab-close",
-        TestIconAsset::Tango(TangoIconAsset::TabClose),
+        "colored/format-indent-more",
+        TestIconAsset::Colored(ColoredIconAsset::FormatIndentMore),
     ),
     (
-        "tango/tab-document-monitoring",
-        TestIconAsset::Tango(TangoIconAsset::TabDocumentMonitoring),
+        "colored/format-justify-fill",
+        TestIconAsset::Colored(ColoredIconAsset::FormatJustifyFill),
     ),
     (
-        "tango/tab-document-read-only",
-        TestIconAsset::Tango(TangoIconAsset::TabDocumentReadOnly),
+        "colored/process-stop",
+        TestIconAsset::Colored(ColoredIconAsset::ProcessStop),
     ),
     (
-        "tango/tab-document-saved",
-        TestIconAsset::Tango(TangoIconAsset::TabDocumentSaved),
+        "colored/tab-close",
+        TestIconAsset::Colored(ColoredIconAsset::TabClose),
     ),
     (
-        "tango/tab-document-system-read-only",
-        TestIconAsset::Tango(TangoIconAsset::TabDocumentSystemReadOnly),
+        "colored/tab-document-monitoring",
+        TestIconAsset::Colored(ColoredIconAsset::TabDocumentMonitoring),
     ),
     (
-        "tango/tab-document-unsaved",
-        TestIconAsset::Tango(TangoIconAsset::TabDocumentUnsaved),
+        "colored/tab-document-read-only",
+        TestIconAsset::Colored(ColoredIconAsset::TabDocumentReadOnly),
     ),
     (
-        "tango/text-x-generic-template",
-        TestIconAsset::Tango(TangoIconAsset::TextXGenericTemplate),
+        "colored/tab-document-saved",
+        TestIconAsset::Colored(ColoredIconAsset::TabDocumentSaved),
     ),
     (
-        "tango/text-x-generic",
-        TestIconAsset::Tango(TangoIconAsset::TextXGeneric),
+        "colored/tab-document-system-read-only",
+        TestIconAsset::Colored(ColoredIconAsset::TabDocumentSystemReadOnly),
     ),
     (
-        "tango/text-x-script",
-        TestIconAsset::Tango(TangoIconAsset::TextXScript),
+        "colored/tab-document-unsaved",
+        TestIconAsset::Colored(ColoredIconAsset::TabDocumentUnsaved),
     ),
     (
-        "tango/zoom-in",
-        TestIconAsset::Tango(TangoIconAsset::ZoomIn),
+        "colored/text-x-generic-template",
+        TestIconAsset::Colored(ColoredIconAsset::TextXGenericTemplate),
     ),
     (
-        "tango/zoom-out",
-        TestIconAsset::Tango(TangoIconAsset::ZoomOut),
+        "colored/text-x-generic",
+        TestIconAsset::Colored(ColoredIconAsset::TextXGeneric),
+    ),
+    (
+        "colored/text-x-script",
+        TestIconAsset::Colored(ColoredIconAsset::TextXScript),
+    ),
+    (
+        "colored/zoom-in",
+        TestIconAsset::Colored(ColoredIconAsset::ZoomIn),
+    ),
+    (
+        "colored/zoom-out",
+        TestIconAsset::Colored(ColoredIconAsset::ZoomOut),
     ),
 ];
 

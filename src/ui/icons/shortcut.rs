@@ -11,6 +11,8 @@ use super::mask;
 pub enum ShortcutIcon {
     Command,
     Option,
+    PinAngle,
+    PinAngleFill,
     Shift,
     Windows,
 }
@@ -151,6 +153,8 @@ fn shortcut_asset(icon: ShortcutIcon) -> ShortcutIconAsset {
     match icon {
         ShortcutIcon::Command => ShortcutIconAsset::Command,
         ShortcutIcon::Option => ShortcutIconAsset::Option,
+        ShortcutIcon::PinAngle => ShortcutIconAsset::PinAngle,
+        ShortcutIcon::PinAngleFill => ShortcutIconAsset::PinAngleFill,
         ShortcutIcon::Shift => ShortcutIconAsset::Shift,
         ShortcutIcon::Windows => ShortcutIconAsset::Windows,
     }

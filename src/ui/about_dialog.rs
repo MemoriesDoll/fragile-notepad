@@ -84,21 +84,21 @@ const LICENSES: &[LicenseEntry] = &[
     },
     LicenseEntry {
         name: "Heroicons",
-        version: "24px outline icons",
+        version: "Refined outline icons",
         license: "MIT",
-        notes: "Text-icon replacements, bundled under assets/icons/heroicons/LICENSE.",
+        notes: "Locally refined controls; assets/icons/heroicons/LICENSE.",
     },
     LicenseEntry {
         name: "Bootstrap Icons",
-        version: "1.x SVG icons",
+        version: "Refined SVG icons",
         license: "MIT",
-        notes: "Shortcut modifier icons, bundled under assets/icons/bootstrap/LICENSE.",
+        notes: "Locally refined shortcuts and pins; assets/icons/bootstrap/LICENSE.",
     },
     LicenseEntry {
-        name: "Tango Icon Theme",
-        version: "22x22 icons",
-        license: "Public Domain",
-        notes: "Toolbar icons, bundled under assets/icons/tango/LICENSE.",
+        name: "Fragile Notepad icons",
+        version: "22px colored vectors",
+        license: "All rights reserved",
+        notes: "Original toolbar and document artwork; assets/icons/colored/LICENSE.",
     },
 ];
 
@@ -359,7 +359,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
                     "Folding hints",
                     "assets/syntax/folding-hints.xml".to_owned()
                 ),
-                ("Toolbar icons", "assets/icons/tango".to_owned()),
+                ("Toolbar icons", "assets/icons/colored".to_owned()),
                 ("Shortcut icons", "assets/icons/bootstrap".to_owned()),
                 ("Dialog icons", "assets/icons/heroicons".to_owned()),
             ],

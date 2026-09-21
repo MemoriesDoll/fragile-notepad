@@ -378,7 +378,7 @@ experiments do not enter project patches.
 ## Validation
 
 Generated raw RGBA icon files are not tracked. Rebuild them after changing SVG
-or PNG icon sources:
+icon sources (the colored family now uses SVGs too):
 
 ```powershell
 .\scripts\generate_icon_assets.ps1
@@ -389,6 +389,11 @@ On Linux or macOS:
 ```bash
 bash scripts/generate_icon_assets.sh
 ```
+
+Icon design, online references, and licensing are documented in
+[`assets/icons/README.md`](assets/icons/README.md). After regeneration,
+`python scripts/preview_icons.py` builds an offline light/dark gallery at
+`target/icon-review/index.html` with native-size raster/vector comparisons.
 
 The CI entry points run the standard local validation sequence without
 formatting vendored path dependencies. They call the icon generation script

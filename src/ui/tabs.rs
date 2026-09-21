@@ -10,9 +10,9 @@ use iced::{Background, Border, Center, Color, Element, Event, Fill, Length, Rect
 
 use crate::core::{Document, DocumentId, Workspace};
 use crate::message::Message;
+use crate::ui::icons::colored::{self, ColoredIcon};
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::shortcut;
-use crate::ui::icons::tango::{self, TangoIcon};
 use crate::ui::{centered_button_content, styles};
 
 const TAB_HEIGHT: f32 = 27.0;
@@ -147,12 +147,15 @@ fn tab(document: &Document, is_active: bool, drag_visual: DragVisual) -> Element
     .on_exit(Message::TabDragLeft(document.id))
     .on_release(Message::TabDragReleased(document.id));
 
-    let pin_button = button(centered_button_content(
-        image::Image::new(pin_icon(document.is_pinned))
-            .width(12)
-            .height(12)
-            .filter_method(image::FilterMethod::Linear),
-    ))
+    let pin_button = button(centered_button_content(shortcut::icon_with_color(
+        if document.is_pinned {
+            shortcut::ShortcutIcon::PinAngleFill
+        } else {
+            shortcut::ShortcutIcon::PinAngle
+        },
+        14,
+        styles::shortcut_text_color,
+    )))
     .width(19)
     .height(23)
     .padding(0)
@@ -492,17 +495,13 @@ impl TabFileState {
 
 fn tab_state_icon(state: TabFileState) -> image::Handle {
     match state {
-        TabFileState::Saved => tango::handle(TangoIcon::DocumentSaved),
-        TabFileState::Unsaved => tango::handle(TangoIcon::DocumentUnsaved),
+        TabFileState::Saved => colored::handle(ColoredIcon::DocumentSaved),
+        TabFileState::Unsaved => colored::handle(ColoredIcon::DocumentUnsaved),
     }
 }
 
 fn close_icon() -> image::Handle {
-    tango::handle(TangoIcon::TabClose)
-}
-
-fn pin_icon(is_pinned: bool) -> image::Handle {
-    shortcut::pin_handle(is_pinned)
+    colored::handle(ColoredIcon::TabClose)
 }
 
 #[cfg(test)]

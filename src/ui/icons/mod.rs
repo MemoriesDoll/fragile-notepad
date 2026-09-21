@@ -2,11 +2,11 @@
 
 pub const ICON_SIZE: u32 = 22;
 
+pub mod colored;
 pub mod hero;
 mod mask;
 pub mod shortcut;
-pub mod tango;
 
+pub use colored::ColoredIcon;
 pub use hero::{HeroIcon, IconTone};
 pub use shortcut::ShortcutIcon;
-pub use tango::TangoIcon;

@@ -1,0 +1,7 @@
+<!-- Copyright (c) 2026, Fragile Notepad authors. All rights reserved. See ../LICENSE. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M2.5 10 L5 3 L7.5 10 M3.5 7.5 H6.5" fill="none" stroke="#4284bd" stroke-width="1.6"/>
+  <path d="M11 5 H18 M15.5 2.5 L18 5 L15.5 7.5" fill="none" stroke="#438d68" stroke-width="1.5"/>
+  <path d="M4 16 H10 M6.5 13.5 L4 16 L6.5 18.5" fill="none" stroke="#438d68" stroke-width="1.5"/>
+  <path d="M14 12 V19 H17 Q20 19 20 17 Q20 15.5 17 15.5 H14 M14 12 H17 Q19.5 12 19.5 13.8 Q19.5 15.5 17 15.5" fill="none" stroke="#4284bd" stroke-width="1.6"/>
+</svg>

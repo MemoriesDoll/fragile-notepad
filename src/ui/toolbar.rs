@@ -8,8 +8,8 @@ use iced::{Center, Element, Fill, Length};
 use crate::core::{Document, EditorSettings, ShortcutCommand, TextEncoding};
 use crate::editor::EditorAction;
 use crate::message::{Menu, Message};
+use crate::ui::icons::colored::{self, ColoredIcon};
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
-use crate::ui::icons::tango::{self, TangoIcon};
 use crate::ui::styles;
 use crate::ui::{
     centered_button_content,
@@ -1117,26 +1117,26 @@ fn separator<'a>() -> Element<'a, Message> {
 }
 
 fn icon_handle(icon: Icon) -> image::Handle {
-    tango::handle(match icon {
-        Icon::New => TangoIcon::New,
-        Icon::Open => TangoIcon::Open,
-        Icon::Save => TangoIcon::Save,
-        Icon::SaveAll => TangoIcon::SaveAll,
-        Icon::Close => TangoIcon::Close,
-        Icon::CloseAll => TangoIcon::CloseAll,
-        Icon::Print => TangoIcon::Print,
-        Icon::Cut => TangoIcon::Cut,
-        Icon::Copy => TangoIcon::Copy,
-        Icon::Paste => TangoIcon::Paste,
-        Icon::Undo => TangoIcon::Undo,
-        Icon::Redo => TangoIcon::Redo,
-        Icon::Find => TangoIcon::Find,
-        Icon::Replace => TangoIcon::Replace,
-        Icon::ZoomIn => TangoIcon::ZoomIn,
-        Icon::ZoomOut => TangoIcon::ZoomOut,
-        Icon::Wrap => TangoIcon::WordWrap,
-        Icon::AllCharacters => TangoIcon::AllCharacters,
-        Icon::IndentGuide => TangoIcon::IndentGuide,
-        Icon::FunctionList => TangoIcon::FunctionList,
+    colored::handle(match icon {
+        Icon::New => ColoredIcon::New,
+        Icon::Open => ColoredIcon::Open,
+        Icon::Save => ColoredIcon::Save,
+        Icon::SaveAll => ColoredIcon::SaveAll,
+        Icon::Close => ColoredIcon::Close,
+        Icon::CloseAll => ColoredIcon::CloseAll,
+        Icon::Print => ColoredIcon::Print,
+        Icon::Cut => ColoredIcon::Cut,
+        Icon::Copy => ColoredIcon::Copy,
+        Icon::Paste => ColoredIcon::Paste,
+        Icon::Undo => ColoredIcon::Undo,
+        Icon::Redo => ColoredIcon::Redo,
+        Icon::Find => ColoredIcon::Find,
+        Icon::Replace => ColoredIcon::Replace,
+        Icon::ZoomIn => ColoredIcon::ZoomIn,
+        Icon::ZoomOut => ColoredIcon::ZoomOut,
+        Icon::Wrap => ColoredIcon::WordWrap,
+        Icon::AllCharacters => ColoredIcon::AllCharacters,
+        Icon::IndentGuide => ColoredIcon::IndentGuide,
+        Icon::FunctionList => ColoredIcon::FunctionList,
     })
 }

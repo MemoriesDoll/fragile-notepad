@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SVG_DIR = ROOT / "assets" / "icons" / "heroicons" / "svg"
 RGBA_DIR = ROOT / "assets" / "icons" / "heroicons" / "rgba"
 DEFAULT_SIZE = 22
-DEFAULT_SUPERSAMPLE = 4
+DEFAULT_SUPERSAMPLE = 8
 DEFAULT_COLOR = (100, 116, 139, 255)
 
 TOKEN_RE = re.compile(
@@ -349,7 +349,7 @@ def rasterize_svg(
     svg_path: Path,
     size: int,
     supersample: int,
-    color: tuple[int, int, int, int],
+    color: tuple[int, int, int, int] | None,
 ) -> Image.Image:
     tree = ElementTree.parse(svg_path)
     svg = tree.getroot()
@@ -371,16 +371,24 @@ def rasterize_svg(
         stroke_width = float(
             element.attrib.get("stroke-width", svg.attrib.get("stroke-width", "1.5"))
         )
-        width = max(1, int(math.ceil(stroke_width * scale)))
+        width = max(1, round(stroke_width * scale))
 
         fill = element.attrib.get("fill", svg.attrib.get("fill", "none"))
-        if fill != "none":
-            draw_filled_path(image, parse_path(d), view_box, scale, color)
-            continue
+        stroke = element.attrib.get("stroke", svg.attrib.get("stroke", "none"))
+        subpaths = parse_path(d)
 
-        for subpath in parse_path(d):
-            scaled = [scale_point(point, view_box, scale) for point in subpath]
-            draw_round_line(draw, scaled, width, color)
+        def paint(value: str) -> tuple[int, int, int, int]:
+            if color is not None:
+                return color
+            return DEFAULT_COLOR if value == "currentColor" else parse_color(value)
+
+        if fill != "none":
+            draw_filled_path(image, subpaths, view_box, scale, paint(fill))
+
+        if stroke != "none":
+            for subpath in subpaths:
+                scaled = [scale_point(point, view_box, scale) for point in subpath]
+                draw_round_line(draw, scaled, width, paint(stroke))
 
     return image.resize((size, size), Image.Resampling.LANCZOS)
 

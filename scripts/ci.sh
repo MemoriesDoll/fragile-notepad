@@ -6,6 +6,7 @@ cd "$repo_root"
 
 cargo fmt --package fragile-notepad --check
 bash scripts/generate_icon_assets.sh
+python3 scripts/test_icon_assets.py
 cargo check
 
 if [[ "$(uname -s)" == "Linux" ]] && command -v xvfb-run >/dev/null 2>&1; then

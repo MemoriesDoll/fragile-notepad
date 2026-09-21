@@ -35,7 +35,7 @@ bash scripts/setup-vendor.sh apply
 
 ## Generated Assets
 
-RGBA icon files are generated from the tracked SVG/PNG sources. Regenerate them
+RGBA icon files are generated from the tracked SVG sources. Regenerate them
 on a fresh checkout and after changing any icon source; the generated files are
 ignored by Git:
 
@@ -49,9 +49,15 @@ On Linux or macOS:
 bash scripts/generate_icon_assets.sh
 ```
 
-The application embeds generated icons through `src/assets.rs`. New embedded
-assets should be registered there instead of using `include_bytes!` from UI
-modules.
+UI icon embedding is owned by `src/ui/icons/`; non-UI assets are owned by
+`src/assets.rs`. See `assets/icons/README.md` for the source inventory and review
+gallery. Original colored artwork lives in `assets/icons/colored/`.
+
+Distribute the project `LICENSE` and `assets/icons/NOTICE.txt` (renamed to
+`ICON-NOTICES.txt`) beside the binary. The nightly archive jobs include both;
+manual packages must do the same to preserve the icon copyright notices.
+The colored artwork is all rights reserved and excluded from the project's
+BSD-3-Clause license; its full notice is included in `ICON-NOTICES.txt`.
 
 ## Local Validation
 
