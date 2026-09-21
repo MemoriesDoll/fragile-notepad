@@ -106,6 +106,108 @@ pub(super) fn replace_ranges_for_search(
     apply_concrete_replacements_with_policy(document, before, replacements, false, true)
 }
 
+pub(super) fn move_selection(
+    document: &mut crate::core::Document,
+    source: &SelectionSet,
+    target: EditorPosition,
+    tab_width: usize,
+) -> bool {
+    if !document.has_complete_text_index() || document.selection_set() != source {
+        return false;
+    }
+
+    let mut ranges = Vec::new();
+    for selection in source.ranges() {
+        if selection.is_rectangular() {
+            ranges.extend(
+                selection
+                    .projected_lines(&document.buffer, tab_width)
+                    .into_iter()
+                    .map(|line| line.range()),
+            );
+        } else {
+            ranges.push(selection.range());
+        }
+    }
+    ranges = ranges
+        .into_iter()
+        .map(|range| document.buffer.clamp_range(range))
+        .filter(|range| !range.is_empty())
+        .collect();
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged: Vec<EditorRange> = Vec::new();
+    for range in ranges {
+        if let Some(previous) = merged.last_mut()
+            && range.start < previous.end
+        {
+            previous.end = previous.end.max(range.end);
+        } else {
+            merged.push(range);
+        }
+    }
+    let (Some(first), Some(last)) = (merged.first(), merged.last()) else {
+        return false;
+    };
+    let target = document.buffer.clamp_position(target);
+    if merged
+        .iter()
+        .any(|range| range.start <= target && target <= range.end)
+    {
+        return false;
+    }
+
+    // Replace only the span between the source and destination. The move is one
+    // history transaction, including restoration of the original selection set.
+    let span = EditorRange::new(first.start.min(target), last.end.max(target));
+    let start_offset = document.buffer.byte_offset(span.start);
+    let target_offset = document.buffer.byte_offset(target) - start_offset;
+    let original = document.buffer.slice_text(span);
+    let mut remaining = String::with_capacity(original.len());
+    let mut moved = Vec::new();
+    let mut copied_until = 0;
+    let mut removed_before_target = 0;
+    for range in merged {
+        let start = document.buffer.byte_offset(range.start) - start_offset;
+        let end = document.buffer.byte_offset(range.end) - start_offset;
+        remaining.push_str(&original[copied_until..start]);
+        moved.push(&original[start..end]);
+        if end <= target_offset {
+            removed_before_target += end - start;
+        }
+        copied_until = end;
+    }
+    remaining.push_str(&original[copied_until..]);
+    let moved = moved.join(&document_line_ending(document));
+    let insertion = target_offset - removed_before_target;
+    remaining.insert_str(insertion, &moved);
+    if remaining == original {
+        return false;
+    }
+    let replacement = EditorBuffer::from_text(remaining.clone());
+    let (Some(anchor), Some(cursor)) = (
+        position_in_replacement_span(span.start, &replacement, insertion),
+        position_in_replacement_span(span.start, &replacement, insertion + moved.len()),
+    ) else {
+        return false;
+    };
+    let delta = document.buffer.replace_range(span, &remaining);
+    let last_changed_line = delta.before_range.end.line.max(delta.after_range.end.line);
+    document.set_main_selection(EditorSelection::new(anchor, cursor));
+    document.preferred_vertical_column = None;
+    document.clear_caret_row_affinity();
+    document.history.record_with_selection_sets(
+        EditTransaction {
+            delta,
+            before_selection: source.main(),
+            after_selection: document.main_selection(),
+        },
+        source.clone(),
+        document.selection_set().clone(),
+    );
+    document.refresh_text_lines(span.start.line, last_changed_line);
+    true
+}
+
 fn replace_document_range(
     document: &mut crate::core::Document,
     range: EditorRange,

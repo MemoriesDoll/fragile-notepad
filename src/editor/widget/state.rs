@@ -4,7 +4,8 @@ use iced::advanced::widget::{self};
 use iced::time::Instant;
 use std::cell::{Cell, RefCell};
 
-use crate::editor::position::EditorPosition;
+use crate::editor::EditorBuffer;
+use crate::editor::position::{EditorPosition, SelectionSet};
 
 use super::LineGeometryCache;
 use super::cache::RichParagraphCache;
@@ -19,6 +20,7 @@ pub struct AdvancedEditorState<Paragraph> {
     pub(super) caret_updated_at: Instant,
     pub(super) caret_now: Cell<Instant>,
     pub(super) drag_anchor: Option<EditorPosition>,
+    pub(super) text_drag: Option<TextDrag>,
     pub(super) drag_position: Option<Point>,
     pub(super) drag_scroll_at: Option<Instant>,
     pub(super) last_text_click: Option<TextClick>,
@@ -42,6 +44,7 @@ impl<Paragraph> Default for AdvancedEditorState<Paragraph> {
             caret_updated_at: now,
             caret_now: Cell::new(now),
             drag_anchor: None,
+            text_drag: None,
             drag_position: None,
             drag_scroll_at: None,
             last_text_click: None,
@@ -80,6 +83,7 @@ impl<Paragraph> AdvancedEditorState<Paragraph> {
 
     pub(super) fn cancel_pointer_drag(&mut self) {
         self.drag_anchor = None;
+        self.text_drag = None;
         self.drag_position = None;
         self.drag_scroll_at = None;
         self.scrollbar_grab_offset_y = None;
@@ -117,6 +121,17 @@ impl<Paragraph> widget::operation::Focusable for AdvancedEditorState<Paragraph> 
 pub(super) struct TextClick {
     position: EditorPosition,
     at: Instant,
+}
+
+#[derive(Debug)]
+pub(super) struct TextDrag {
+    pub source: SelectionSet,
+    pub buffer: EditorBuffer,
+    pub pressed_at: Point,
+    pub clicked_position: EditorPosition,
+    pub clicked_row: Option<usize>,
+    pub target: Option<(EditorPosition, Option<usize>)>,
+    pub started: bool,
 }
 
 fn is_double_click_time(previous: Instant, now: Instant) -> bool {

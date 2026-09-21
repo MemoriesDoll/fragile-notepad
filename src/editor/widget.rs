@@ -213,7 +213,7 @@ where
             .state
             .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>();
         let fast_text = is_scroll_fast_frame(state);
-        let caret_visible = state.is_caret_visible();
+        let caret_visible = state.is_caret_visible() && state.text_drag.is_none();
         // Drawing only consumes completed spans. Parser work is scheduled by
         // the app on a blocking worker, including during GPU warm-up.
         self.syntax_cache
@@ -315,6 +315,40 @@ where
                 bounds,
                 editor_style,
             );
+            if let Some(drag) = &state.text_drag
+                && let Some((target, row)) = drag.target
+            {
+                let point = line_cache::measured_position_point(
+                    self.buffer,
+                    self.viewport,
+                    self.decorations,
+                    editor_layout,
+                    target,
+                    row,
+                    renderer,
+                );
+                renderer.with_layer(
+                    crate::editor::layout::text_area_bounds(
+                        bounds,
+                        editor_layout,
+                        self.decorations,
+                    ),
+                    |renderer| {
+                        renderer.fill_quad(
+                            renderer::Quad {
+                                bounds: Rectangle {
+                                    x: bounds.x + point.x,
+                                    y: bounds.y + point.y,
+                                    width: 2.0,
+                                    height: self.metrics.line_height,
+                                },
+                                ..renderer::Quad::default()
+                            },
+                            Background::Color(editor_style.caret),
+                        )
+                    },
+                );
+            }
         });
         let record_us = record_started.map_or(0, |started| started.elapsed().as_micros());
         rich_paragraphs.prune(frame_id);
@@ -433,13 +467,22 @@ where
 
     fn mouse_interaction(
         &self,
-        _tree: &widget::Tree,
+        tree: &widget::Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
         let bounds = layout.bounds();
+        if tree
+            .state
+            .downcast_ref::<AdvancedEditorState<Renderer::Paragraph>>()
+            .text_drag
+            .as_ref()
+            .is_some_and(|drag| drag.started)
+        {
+            return mouse::Interaction::Grabbing;
+        }
         let editor_layout = self.editor_layout(bounds);
         let Some(position) = cursor.position_in(bounds) else {
             return mouse::Interaction::None;

@@ -379,6 +379,9 @@ impl App {
                 }
             }
             EditorAction::Focus => false,
+            EditorAction::MoveSelection { source, target } => {
+                super::editor_ops::move_selection(document, &source, target, tab_width)
+            }
             EditorAction::PlaceCaret(position) => {
                 document.preferred_vertical_column = None;
                 document.clear_caret_row_affinity();

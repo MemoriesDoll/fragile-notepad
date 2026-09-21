@@ -12,6 +12,130 @@ fn position(line: usize, column: usize) -> EditorPosition {
     EditorPosition::new(line, column)
 }
 
+#[test]
+fn drag_move_is_one_undo_step_and_restores_selections_in_both_directions() {
+    for (text, selected, target, expected, moved) in [
+        (
+            "one two three",
+            selection(0, 0, 0, 3),
+            position(0, 13),
+            " two threeone",
+            "one",
+        ),
+        (
+            "one two three",
+            selection(0, 13, 0, 8),
+            position(0, 0),
+            "threeone two ",
+            "three",
+        ),
+        (
+            "αβ\r\n猫🐈\r\nend",
+            selection(0, 0, 1, 3),
+            position(2, 3),
+            "🐈\r\nendαβ\r\n猫",
+            "αβ\r\n猫",
+        ),
+        (
+            "αβ\r\n猫🐈\r\nend",
+            selection(1, 3, 2, 3),
+            position(0, 0),
+            "🐈\r\nendαβ\r\n猫",
+            "🐈\r\nend",
+        ),
+    ] {
+        let mut document = document(text, selected);
+        let source = document.selection_set().clone();
+        assert!(crate::app::editor_ops::move_selection(
+            &mut document,
+            &source,
+            target,
+            4
+        ));
+        assert_eq!(document.buffer.text(), expected);
+        assert_eq!(
+            document
+                .buffer
+                .slice_text(document.main_selection().range()),
+            moved
+        );
+        let destination_selection = document.selection_set().clone();
+        assert!(document.is_dirty);
+        assert!(document.undo());
+        assert_eq!(document.buffer.text(), text);
+        assert_eq!(document.selection_set(), &source);
+        assert!(!document.is_dirty);
+        assert!(!document.undo());
+        assert!(document.redo());
+        assert_eq!(document.buffer.text(), expected);
+        assert_eq!(document.selection_set(), &destination_selection);
+    }
+}
+
+#[test]
+fn drag_move_rejects_source_drops_stale_selections_and_incomplete_loads() {
+    for column in 2..=5 {
+        let mut document = document("abcdefgh", selection(0, 2, 0, 5));
+        let source = document.selection_set().clone();
+        assert!(!crate::app::editor_ops::move_selection(
+            &mut document,
+            &source,
+            position(0, column),
+            4
+        ));
+        assert_eq!(document.buffer.text(), "abcdefgh");
+        assert_eq!(document.selection_set(), &source);
+        assert!(!document.undo());
+    }
+    let mut document = document("abcdefgh", selection(0, 2, 0, 5));
+    let source = document.selection_set().clone();
+    document.set_main_selection(caret(0, 0));
+    assert!(!crate::app::editor_ops::move_selection(
+        &mut document,
+        &source,
+        position(0, 8),
+        4
+    ));
+    document.set_selection_set(source.clone());
+    document.load_state = crate::core::DocumentLoadState::Failed {
+        generation: crate::core::DocumentLoadGeneration::next(),
+    };
+    assert!(!crate::app::editor_ops::move_selection(
+        &mut document,
+        &source,
+        position(0, 8),
+        4
+    ));
+    assert_eq!(document.buffer.text(), "abcdefgh");
+}
+
+#[test]
+fn drag_move_handles_multiple_and_rectangular_selections() {
+    for source in [
+        SelectionSet::from_ranges(vec![selection(0, 1, 0, 3), selection(1, 1, 1, 3)], 1),
+        SelectionSet::rectangular(position(0, 1), position(1, 3), 1, 3),
+    ] {
+        let mut document = document("abcd\nefgh\nend", caret(0, 0));
+        document.set_selection_set(source.clone());
+        assert!(crate::app::editor_ops::move_selection(
+            &mut document,
+            &source,
+            position(2, 3),
+            4
+        ));
+        assert_eq!(document.buffer.text(), "ad\neh\nendbc\nfg");
+        assert_eq!(
+            document
+                .buffer
+                .slice_text(document.main_selection().range()),
+            "bc\nfg"
+        );
+        assert!(document.undo());
+        assert_eq!(document.buffer.text(), "abcd\nefgh\nend");
+        assert_eq!(document.selection_set(), &source);
+    }
+}
+
 fn caret(line: usize, column: usize) -> EditorSelection {
     EditorSelection::new(position(line, column), position(line, column))
 }

@@ -2,7 +2,7 @@ use iced::keyboard::{self, key};
 
 use crate::core::{ShortcutCommand, ShortcutMap};
 use crate::editor::fold::FoldRange;
-use crate::editor::position::{EditorPosition, EditorSelection};
+use crate::editor::position::{EditorPosition, EditorSelection, SelectionSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorAction {
@@ -14,6 +14,10 @@ pub enum EditorAction {
     Select(CaretMotion),
     SelectAll,
     ReplaceSelection(String),
+    MoveSelection {
+        source: SelectionSet,
+        target: EditorPosition,
+    },
     Indent,
     Unindent,
     DuplicateLine,
@@ -80,6 +84,7 @@ impl EditorAction {
                 | Self::Backspace
                 | Self::Delete
                 | Self::ReplaceSelection(_)
+                | Self::MoveSelection { .. }
                 | Self::Indent
                 | Self::Unindent
                 | Self::DuplicateLine

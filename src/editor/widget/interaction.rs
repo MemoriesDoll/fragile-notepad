@@ -16,11 +16,12 @@ use super::line_cache::{
     LineGeometry, measured_position_point, measured_text_hit_target, measured_virtual_caret_x,
 };
 use super::scrollbar::{scrollbar_row_for_position, vertical_scrollbar_geometry};
-use super::state::{AdvancedEditorState, CARET_BLINK_INTERVAL_MS};
+use super::state::{AdvancedEditorState, CARET_BLINK_INTERVAL_MS, TextDrag};
 
 const FAST_SCROLL_SETTLE_MS: u64 = 120;
 const DRAG_SCROLL_INTERVAL_MS: u64 = 50;
 const MAX_DRAG_SCROLL_LINES: i32 = 8;
+const TEXT_DRAG_THRESHOLD: f32 = 4.0;
 
 pub(super) struct InteractionContext<'a, Message> {
     pub(super) buffer: &'a EditorBuffer,
@@ -66,6 +67,16 @@ where
     Renderer: iced::advanced::Renderer + text::Renderer<Font = Font>,
 {
     let mut outcome = UpdateOutcome::default();
+    if state
+        .viewport_geometry
+        .is_some_and(|geometry| geometry.0 != context.viewport_key)
+        || state
+            .text_drag
+            .as_ref()
+            .is_some_and(|drag| &drag.source != context.selections)
+    {
+        state.cancel_pointer_drag();
+    }
     // Rendering includes a partially visible bottom row; caret navigation must
     // count only complete rows so the insertion point cannot remain clipped.
     let visible_rows = editor_layout.complete_visible_row_capacity().max(1);
@@ -195,6 +206,32 @@ where
                     state.is_focused = true;
                     state.reset_caret_blink();
                     let is_double_click = state.record_text_click(position, state.caret_now.get());
+                    if !is_double_click
+                        && selection_contains_pointer(
+                            &context,
+                            position,
+                            cursor.position_in(bounds).unwrap(),
+                            editor_layout,
+                            renderer,
+                        )
+                    {
+                        state.text_drag = Some(TextDrag {
+                            source: context.selections.clone(),
+                            buffer: context.buffer.clone(),
+                            pressed_at: cursor.position().unwrap(),
+                            clicked_position: position,
+                            clicked_row,
+                            target: None,
+                            started: false,
+                        });
+                        state.preedit = None;
+                        shell.request_input_method(&InputMethod::<&str>::Disabled);
+                        shell.publish((context.on_action)(EditorAction::Focus));
+                        shell.request_redraw();
+                        outcome.should_capture = true;
+                        shell.capture_event();
+                        return outcome;
+                    }
                     state.drag_anchor = (!is_double_click).then_some(position);
                     shell.publish((context.on_action)(EditorAction::Focus));
                     shell.publish((context.on_action)(place_caret_action(
@@ -203,6 +240,7 @@ where
                         clicked_row,
                     )));
                     if is_double_click {
+                        state.clear_text_click();
                         let action = if position.column == clicked_row_start {
                             EditorAction::SelectRegion(whole_line_selection(
                                 context.buffer,
@@ -220,6 +258,9 @@ where
                     state.reset_caret_blink();
                     let position = EditorPosition::new(line, 0);
                     let is_double_click = state.record_text_click(position, state.caret_now.get());
+                    if is_double_click {
+                        state.clear_text_click();
+                    }
                     state.drag_anchor = (!is_double_click).then_some(position);
                     shell.publish((context.on_action)(EditorAction::Focus));
                     shell.publish((context.on_action)(if is_double_click {
@@ -304,11 +345,15 @@ where
                     shell.request_redraw();
                     outcome.should_capture = true;
                 }
-            } else if state.drag_anchor.is_some()
+            } else if (state.drag_anchor.is_some() || state.text_drag.is_some())
                 && let Some(screen_position) = cursor.position()
             {
                 outcome.perf_event = "editor_drag_select";
                 state.drag_position = Some(screen_position);
+                if let Some(drag) = state.text_drag.as_mut() {
+                    drag.started |=
+                        screen_position.distance(drag.pressed_at) >= TEXT_DRAG_THRESHOLD;
+                }
                 update_drag_selection(
                     &context,
                     state,
@@ -322,8 +367,46 @@ where
             }
         }
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-            outcome.should_capture =
-                state.drag_anchor.is_some() || state.scrollbar_grab_offset_y.is_some();
+            outcome.should_capture = state.drag_anchor.is_some()
+                || state.text_drag.is_some()
+                || state.scrollbar_grab_offset_y.is_some();
+            if state.text_drag.is_some() {
+                state.drag_position = cursor.position();
+                update_drag_selection(
+                    &context,
+                    state,
+                    bounds,
+                    editor_layout,
+                    renderer,
+                    shell,
+                    Instant::now(),
+                );
+                if let Some(drag) = state.text_drag.take()
+                    && drag.buffer == *context.buffer
+                {
+                    if !drag.started {
+                        shell.publish((context.on_action)(place_caret_action(
+                            context.viewport,
+                            drag.clicked_position,
+                            drag.clicked_row,
+                        )));
+                    } else if let Some(pointer) = cursor.position_in(bounds)
+                        && pointer.x >= context.metrics.text_origin_x(context.decorations)
+                        && !vertical_scrollbar_geometry(
+                            editor_layout,
+                            context.viewport.visible_row_count(),
+                        )
+                        .is_some_and(|bar| bar.track.contains(pointer))
+                        && let Some((target, _)) = drag.target
+                    {
+                        shell.publish((context.on_action)(EditorAction::MoveSelection {
+                            source: drag.source,
+                            target,
+                        }));
+                    }
+                }
+                shell.request_redraw();
+            }
             state.cancel_pointer_drag();
         }
         Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
@@ -364,6 +447,7 @@ where
             outcome.should_capture = true;
         }
         Event::InputMethod(input_method::Event::Commit(content)) if state.is_focused => {
+            state.cancel_pointer_drag();
             state.preedit = None;
             if !content.is_empty() {
                 state.reset_caret_blink();
@@ -381,6 +465,15 @@ where
             text,
             ..
         }) if state.is_focused => {
+            if state.text_drag.is_some() {
+                state.cancel_pointer_drag();
+                shell.request_redraw();
+                if matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape)) {
+                    shell.capture_event();
+                    outcome.should_capture = true;
+                    return outcome;
+                }
+            }
             if let Some(action) = key_action(
                 key,
                 modified_key,
@@ -477,9 +570,14 @@ fn update_drag_selection<Message, Renderer>(
 ) where
     Renderer: text::Renderer<Font = Font>,
 {
-    let (Some(anchor), Some(screen_position)) = (state.drag_anchor, state.drag_position) else {
+    let Some(screen_position) = state.drag_position else {
         return;
     };
+    if state.text_drag.as_ref().is_some_and(|drag| !drag.started)
+        || (state.drag_anchor.is_none() && state.text_drag.is_none())
+    {
+        return;
+    }
     if !state.is_focused || !state.is_window_focused {
         state.cancel_pointer_drag();
         return;
@@ -504,6 +602,18 @@ fn update_drag_selection<Message, Renderer>(
     // Hit-test the destination viewport, including its top padding. Otherwise an
     // upward drag becomes Outside and the selection stops at the previous row.
     let (cursor, row) = drag_selection_position(position, layout, context, renderer);
+    if let Some(drag) = state.text_drag.as_mut() {
+        let target = Some((cursor, row));
+        if drag.target != target {
+            drag.target = target;
+            shell.request_redraw();
+        }
+        state.clear_text_click();
+        return;
+    }
+    let Some(anchor) = state.drag_anchor else {
+        return;
+    };
     let selection = EditorSelection::new(anchor, cursor);
     if context.selections.main() != selection
         || context.viewport.wrap_columns().is_some() && row != context.caret_row
@@ -677,7 +787,7 @@ fn input_method<'a, Message, Renderer>(
 where
     Renderer: text::Renderer<Font = Font>,
 {
-    if !state.is_focused {
+    if !state.is_focused || state.text_drag.is_some() {
         return InputMethod::Disabled;
     }
 
@@ -864,6 +974,172 @@ mod tests {
             last_line_end_position(&buffer),
             EditorPosition::new(1, "beta".len())
         );
+    }
+
+    fn selected_editor() -> TestEditor {
+        let mut editor = TestEditor::new("abcdefgh\nijklmnop");
+        editor.selections = SelectionSet::new(EditorSelection::new(
+            EditorPosition::new(0, 1),
+            EditorPosition::new(0, 4),
+        ));
+        editor
+    }
+
+    #[test]
+    fn text_drag_preserves_highlight_and_moves_only_on_release() {
+        let mut editor = selected_editor();
+        let source = editor.selections.clone();
+        editor.press(mouse::Button::Left, editor.text_point(0, 2));
+        assert_eq!(editor.selections, source);
+        let target = editor.text_point(1, 6);
+        let messages = editor.drag_to(target);
+        assert_eq!(editor.selections, source);
+        assert!(!messages.iter().any(|action| action.mutates_document()));
+        assert_eq!(
+            editor.state.text_drag.as_ref().unwrap().target,
+            Some((EditorPosition::new(1, 6), Some(1)))
+        );
+        // A stationary drag inside the editor must not request frames forever.
+        editor.dispatch(
+            Event::Window(window::Event::RedrawRequested(Instant::now())),
+            mouse::Cursor::Available(target),
+        );
+        assert_ne!(editor.last_redraw, window::RedrawRequest::NextFrame);
+        let messages = editor.dispatch(
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            mouse::Cursor::Available(target),
+        );
+        assert!(messages.contains(&EditorAction::MoveSelection {
+            source,
+            target: EditorPosition::new(1, 6),
+        }));
+        assert!(editor.state.text_drag.is_none());
+    }
+
+    #[test]
+    fn text_drag_can_start_immediately_after_double_click_selection() {
+        let mut editor = TestEditor::new("abcdefgh\nijklmnop");
+        let start = editor.text_point(0, 0);
+        for _ in 0..2 {
+            editor.press(mouse::Button::Left, start);
+            editor.dispatch(
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                mouse::Cursor::Available(start),
+            );
+        }
+        assert!(!editor.selections.main().is_caret());
+        let source = editor.selections.clone();
+        editor.press(mouse::Button::Left, start);
+        editor.drag_to(editor.text_point(1, 5));
+        assert!(editor.state.text_drag.as_ref().unwrap().started);
+        assert_eq!(editor.selections, source);
+    }
+
+    #[test]
+    fn clicking_highlight_with_small_pointer_jitter_places_caret() {
+        let mut editor = selected_editor();
+        let start = editor.text_point(0, 2);
+        editor.press(mouse::Button::Left, start);
+        let end = Point::new(start.x + 1.0, start.y + 1.0);
+        editor.drag_to(end);
+        let messages = editor.dispatch(
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            mouse::Cursor::Available(end),
+        );
+        assert!(messages.contains(&EditorAction::PlaceCaret(EditorPosition::new(0, 2))));
+        assert!(!messages.iter().any(|action| action.mutates_document()));
+    }
+
+    #[test]
+    fn text_drag_cancels_on_escape_focus_loss_outside_drop_and_changed_buffer() {
+        for ending in 0..5 {
+            let mut editor = selected_editor();
+            let source = editor.selections.clone();
+            editor.press(mouse::Button::Left, editor.text_point(0, 2));
+            let end = editor.text_point(1, 6);
+            editor.drag_to(end);
+            let cursor = match ending {
+                0 => {
+                    editor.dispatch(
+                        Event::Keyboard(keyboard::Event::KeyPressed {
+                            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                            modified_key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                            physical_key: keyboard::key::Physical::Code(
+                                keyboard::key::Code::Escape,
+                            ),
+                            location: keyboard::Location::Standard,
+                            modifiers: keyboard::Modifiers::default(),
+                            text: None,
+                            repeat: false,
+                        }),
+                        mouse::Cursor::Available(end),
+                    );
+                    mouse::Cursor::Available(end)
+                }
+                1 => {
+                    editor.dispatch(
+                        Event::Window(window::Event::Unfocused),
+                        mouse::Cursor::Available(end),
+                    );
+                    mouse::Cursor::Available(end)
+                }
+                2 => mouse::Cursor::Available(Point::new(editor.bounds.x - 5.0, end.y)),
+                3 => {
+                    editor.buffer = EditorBuffer::from_text("ABCDEFGH\nIJKLMNOP");
+                    mouse::Cursor::Available(end)
+                }
+                _ => mouse::Cursor::Unavailable,
+            };
+            let messages = editor.dispatch(
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                cursor,
+            );
+            assert!(
+                !messages.iter().any(|action| action.mutates_document()),
+                "ending {ending}"
+            );
+            assert_eq!(editor.selections, source);
+            assert!(editor.state.text_drag.is_none());
+            assert!(editor.state.drag_scroll_at.is_none());
+        }
+    }
+
+    #[test]
+    fn text_drag_tracks_wrapped_destinations_and_scrolls_without_reselecting() {
+        let mut editor = selected_editor();
+        editor.viewport = ViewportModel::new_wrapped(&editor.buffer, &FoldModel::default(), 4, 4);
+        let source = editor.selections.clone();
+        editor.press(mouse::Button::Left, editor.text_point(0, 2));
+        editor.drag_to(editor.text_point(1, 2));
+        assert_eq!(
+            editor.state.text_drag.as_ref().unwrap().target,
+            Some((EditorPosition::new(0, 6), Some(1)))
+        );
+        assert_eq!(editor.selections, source);
+
+        let mut editor = TestEditor::new(&"abcdefgh\n".repeat(30));
+        editor.layout.scroll.first_visible_row = 10;
+        editor.selections = SelectionSet::new(EditorSelection::new(
+            EditorPosition::new(11, 1),
+            EditorPosition::new(11, 4),
+        ));
+        let source = editor.selections.clone();
+        editor.press(mouse::Button::Left, editor.text_point(1, 2));
+        let outside = Point::new(editor.text_point(1, 2).x, editor.bounds.y - 5.0);
+        let messages = editor.drag_to(outside);
+        assert!(
+            messages
+                .iter()
+                .any(|action| matches!(action, EditorAction::ScrollToRow(_)))
+        );
+        let due = editor.state.drag_scroll_at.unwrap();
+        let row = editor.layout.scroll.first_visible_row;
+        editor.dispatch(
+            Event::Window(window::Event::RedrawRequested(due)),
+            mouse::Cursor::Unavailable,
+        );
+        assert!(editor.layout.scroll.first_visible_row < row);
+        assert_eq!(editor.selections, source);
     }
 
     #[test]

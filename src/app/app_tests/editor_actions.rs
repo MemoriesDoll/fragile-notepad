@@ -1,6 +1,41 @@
 use super::test_support::*;
 
 #[test]
+fn drag_move_updates_search_and_undo_through_app_messages() {
+    let (mut app, _) = App::new();
+    let id = app.workspace.active_document_id;
+    set_active_document_text(
+        &mut app,
+        "one two three",
+        EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 3)),
+    );
+    let _ = app.update(Message::FindQueryChanged("one".into()));
+    let source = app
+        .workspace
+        .active_document()
+        .unwrap()
+        .selection_set()
+        .clone();
+    let _ = app.update(Message::EditorAction(
+        id,
+        EditorAction::MoveSelection {
+            source: source.clone(),
+            target: EditorPosition::new(0, 13),
+        },
+    ));
+    assert_eq!(
+        app.workspace.active_document().unwrap().buffer.text(),
+        " two threeone"
+    );
+    assert_eq!(app.find.matches, vec![crate::core::TextMatch::new(10, 13)]);
+    let _ = app.update(Message::Undo);
+    let document = app.workspace.active_document().unwrap();
+    assert_eq!(document.buffer.text(), "one two three");
+    assert_eq!(document.selection_set(), &source);
+    assert!(!document.is_dirty);
+}
+
+#[test]
 fn navigation_keeps_caret_visible_without_scrolling_visible_moves() {
     let (mut app, _) = App::new();
     let id = app.workspace.active_document_id;

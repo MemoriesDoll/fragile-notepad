@@ -27,6 +27,13 @@ clipboard, and selection behavior.
 - Drag a selection beyond either vertical edge to scroll continuously. Scrolling
   speeds up with distance from the edge and stops on release, focus loss, or the
   document boundary.
+- Drag inside highlighted text to move it to another position in the same
+  document. The highlight stays in place until release, and a drop caret marks
+  the destination. The moved text remains selected and the entire move is one
+  undo step. Multiple selections and rectangular blocks insert their selected
+  text together, separated by the document's line ending. A click without a
+  drag places the caret normally. Escape, focus loss, or releasing outside the
+  editor cancels the move; dropping onto the source leaves it unchanged.
 - Collapsed code blocks show a boxed ellipsis after the header. Click the box to
   expand the represented block. The indicator follows text measurement, zoom,
   horizontal scrolling, and EOL marker spacing.
