@@ -69,10 +69,10 @@ impl EditorBuffer {
         if self.is_inside_paired_line_ending(byte_offset) {
             return None;
         }
-        let line = match self.line_starts.binary_search(&byte_offset) {
-            Ok(line) => line,
-            Err(next_line) => next_line.saturating_sub(1),
-        };
+        let line = self
+            .line_starts
+            .binary_search(&byte_offset)
+            .unwrap_or_else(|next_line| next_line.saturating_sub(1));
         let line_start = *self.line_starts.get(line)?;
         let column = byte_offset.saturating_sub(line_start);
 
