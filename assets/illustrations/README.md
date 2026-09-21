@@ -1,5 +1,9 @@
 # Info artwork
 
+Copyright (c) 2026, Fragile Notepad authors. **All rights reserved.** Original
+illustrations, generated rasters, and reproductions are excluded from the
+project's BSD-3-Clause license. See [LICENSE](LICENSE) for the terms.
+
 `macaw-quill.svg` is an original flat-color illustration for the Info panel.
 The curved, asymmetric vanes and swept splits were drawn using these photos as
 anatomical references; no pixels or paths from them are included in the artwork:

@@ -95,10 +95,10 @@ const LICENSES: &[LicenseEntry] = &[
         notes: "Locally refined shortcuts and pins; assets/icons/bootstrap/LICENSE.",
     },
     LicenseEntry {
-        name: "Fragile Notepad icons",
-        version: "22px colored vectors",
+        name: "Fragile Notepad artwork",
+        version: "Original icons and illustrations",
         license: "All rights reserved",
-        notes: "Original toolbar and document artwork; assets/icons/colored/LICENSE.",
+        notes: "See assets/icons/colored/LICENSE and assets/illustrations/LICENSE.",
     },
 ];
 

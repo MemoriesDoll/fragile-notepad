@@ -55,9 +55,10 @@ gallery. Original colored artwork lives in `assets/icons/colored/`.
 
 Distribute the project `LICENSE` and `assets/icons/NOTICE.txt` (renamed to
 `ICON-NOTICES.txt`) beside the binary. The nightly archive jobs include both;
-manual packages must do the same to preserve the icon copyright notices.
-The colored artwork is all rights reserved and excluded from the project's
-BSD-3-Clause license; its full notice is included in `ICON-NOTICES.txt`.
+manual packages must do the same to preserve the artwork copyright notices.
+The original colored icons and illustrations are all rights reserved and excluded
+from the project's BSD-3-Clause license; their full notices are included in
+`ICON-NOTICES.txt`.
 
 ## Local Validation
 

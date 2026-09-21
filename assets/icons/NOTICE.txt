@@ -1,5 +1,5 @@
-Fragile Notepad icon notices
-===========================
+Fragile Notepad artwork notices
+==============================
 
 Fragile Notepad colored icon artwork
 
@@ -7,6 +7,18 @@ Copyright (c) 2026, Fragile Notepad authors. All rights reserved.
 
 This notice applies to the artwork in assets/icons/colored/, including the SVG
 sources, generated raster assets, and reproductions of that artwork.
+
+This artwork is excluded from the project's BSD-3-Clause license. No license to
+use, copy, modify, or redistribute this artwork is granted by its inclusion in
+this repository. Prior written permission from the copyright holder is required,
+except as permitted by applicable law.
+
+Fragile Notepad original illustrations
+
+Copyright (c) 2026, Fragile Notepad authors. All rights reserved.
+
+This notice applies to the original artwork in assets/illustrations/, including
+the SVG sources, generated raster assets, and reproductions of that artwork.
 
 This artwork is excluded from the project's BSD-3-Clause license. No license to
 use, copy, modify, or redistribute this artwork is granted by its inclusion in
