@@ -26,6 +26,8 @@ mod test_support {
     }
 }
 
+#[path = "app_tests/dirty_close.rs"]
+mod dirty_close;
 #[path = "app_tests/documents.rs"]
 mod documents;
 #[path = "app_tests/editor_actions.rs"]

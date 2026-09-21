@@ -44,6 +44,8 @@ pub struct ChromeAnimationInfo {
     pub about_rendered_visible: bool,
     pub about_progress: f32,
     pub about_interactive: bool,
+    pub dirty_close_progress: f32,
+    pub dirty_close_interactive: bool,
 }
 
 pub fn centered_button_content<'a>(
@@ -175,7 +177,15 @@ pub fn view<'a>(
     };
 
     let with_dialogs = if let Some(document) = dirty_close_document {
-        stack![with_menu, dirty_close_dialog::view(document)].into()
+        stack![
+            motion::fade(with_menu, 1.0, styles::editor_background, false),
+            dirty_close_dialog::view(
+                document,
+                chrome_animation.dirty_close_progress,
+                chrome_animation.dirty_close_interactive,
+            )
+        ]
+        .into()
     } else {
         with_menu
     };

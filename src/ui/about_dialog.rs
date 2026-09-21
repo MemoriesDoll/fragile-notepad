@@ -2,29 +2,12 @@ use iced::widget::{button, column, container, opaque, row, rule, scrollable, spa
 use iced::{Center, Element, Fill, Length};
 
 use crate::message::{AboutTab, Message};
+use crate::ui::motion::{fade_button, fade_container};
 use crate::ui::{centered_button_label, centered_fill_button_label, info_vfx, motion, styles};
 
 const APP_NAME: &str = "Fragile Notepad";
 const AUTHOR: &str = "Rachel Fragile";
 const AUTHOR_EMAIL: &str = "rabbit0w0@outlook.com";
-
-// Fade the actual paint colors so the editor remains visible behind the modal.
-// A solid veil (used by docked panels) would hide that backdrop instead.
-fn fade_container(mut style: container::Style, opacity: f32) -> container::Style {
-    style.background = style.background.map(|color| color.scale_alpha(opacity));
-    style.text_color = style.text_color.map(|color| color.scale_alpha(opacity));
-    style.border.color = style.border.color.scale_alpha(opacity);
-    style.shadow.color = style.shadow.color.scale_alpha(opacity);
-    style
-}
-
-fn fade_button(mut style: button::Style, opacity: f32) -> button::Style {
-    style.background = style.background.map(|color| color.scale_alpha(opacity));
-    style.text_color = style.text_color.scale_alpha(opacity);
-    style.border.color = style.border.color.scale_alpha(opacity);
-    style.shadow.color = style.shadow.color.scale_alpha(opacity);
-    style
-}
 
 fn fade_scrollable(mut style: scrollable::Style, opacity: f32) -> scrollable::Style {
     style.container = fade_container(style.container, opacity);

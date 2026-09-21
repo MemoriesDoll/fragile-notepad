@@ -49,6 +49,7 @@ pub struct App {
     pending_close_after_save: Option<crate::core::DocumentId>,
     pending_close_documents: VecDeque<crate::core::DocumentId>,
     pending_dirty_close: Option<crate::core::DocumentId>,
+    pending_dirty_close_decision: Option<crate::message::DirtyCloseDecision>,
     close_goal: CloseGoal,
     file_status: Option<String>,
     is_find_visible: bool,
@@ -98,6 +99,7 @@ struct ChromeAnimation {
     inline_replace: RevealAnimation,
     function_list: RevealAnimation,
     about: RevealAnimation,
+    dirty_close: RevealAnimation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -146,6 +148,7 @@ impl App {
             pending_close_after_save: None,
             pending_close_documents: VecDeque::new(),
             pending_dirty_close: None,
+            pending_dirty_close_decision: None,
             close_goal: CloseGoal::KeepOpen,
             file_status: None,
             is_find_visible: false,
@@ -452,7 +455,8 @@ impl App {
             | Message::CloseAllToLeft
             | Message::CloseAllToRight
             | Message::CloseAllUnchanged
-            | Message::DirtyCloseResolved(_, _)) => self.update_file(message),
+            | Message::DirtyCloseResolved(_, _)
+            | Message::DirtyCloseFadeFinished(_)) => self.update_file(message),
             message @ (Message::FindQueryChanged(_)
             | Message::FindReplacementChanged(_)
             | Message::FindCaseSensitiveToggled(_)
@@ -784,6 +788,13 @@ impl App {
     fn update_chrome_animation_frame(&mut self, at: Instant) -> Task<Message> {
         self.chrome_animation.update_frame(at);
 
+        if !self.chrome_animation.dirty_close.rendered_visible
+            && self.pending_dirty_close_decision.is_some()
+            && let Some(document_id) = self.pending_dirty_close
+        {
+            return Task::done(Message::DirtyCloseFadeFinished(document_id));
+        }
+
         Task::none()
     }
 
@@ -814,6 +825,7 @@ impl ChromeAnimation {
             inline_replace: RevealAnimation::hidden(),
             function_list: RevealAnimation::hidden(),
             about: RevealAnimation::hidden(),
+            dirty_close: RevealAnimation::hidden(),
         }
     }
 
@@ -822,6 +834,7 @@ impl ChromeAnimation {
             || self.inline_replace.needs_frames()
             || self.function_list.needs_frames()
             || self.about.needs_frames()
+            || self.dirty_close.needs_frames()
     }
 
     fn update_frame(&mut self, at: Instant) {
@@ -829,6 +842,7 @@ impl ChromeAnimation {
         self.inline_replace.update_frame(at);
         self.function_list.update_frame(at);
         self.about.update_frame(at);
+        self.dirty_close.update_frame(at);
     }
 }
 
@@ -925,6 +939,8 @@ impl From<ChromeAnimation> for ui::ChromeAnimationInfo {
             about_rendered_visible: about.rendered_visible,
             about_progress: about.progress,
             about_interactive: animation.about.target_visible,
+            dirty_close_progress: animation.dirty_close.progress.clamp(0.0, 1.0),
+            dirty_close_interactive: animation.dirty_close.target_visible,
         }
     }
 }

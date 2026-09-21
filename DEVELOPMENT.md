@@ -126,6 +126,10 @@ By default, quitting preserves all tabs, including unsaved and untitled text, in
 `session.json` next to `settings.xml`. Sessions retain tab order, the selected tab,
 pins, encoding/line endings for recovery text, language, selection, scrolling, and
 collapsed folds. Individual dirty-tab closes still use Save/Discard/Cancel.
+The confirmation panel and backdrop fade in and out over 140 ms. The panel slides
+up on entry and down on exit, following the same progress as its fade. Choosing an
+action disables the controls and retains the modal until its fade finishes;
+saving, discarding, advancing to the next prompt, and exiting wait for that fade.
 Automatic language detection remains automatic after restoration. Older sessions
 without this metadata infer automatic detection when the saved language matches
 the file extension; explicit overrides are preserved in newly saved sessions.

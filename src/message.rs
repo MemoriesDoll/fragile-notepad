@@ -199,6 +199,7 @@ pub enum Message {
     CloseAllToRight,
     CloseAllUnchanged,
     DirtyCloseResolved(DocumentId, DirtyCloseDecision),
+    DirtyCloseFadeFinished(DocumentId),
     FindQueryChanged(String),
     FindReplacementChanged(String),
     FindCaseSensitiveToggled(bool),

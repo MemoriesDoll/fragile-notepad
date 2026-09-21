@@ -42,6 +42,13 @@ impl App {
             return self.refresh_window_state(window_id);
         }
 
+        if self.main_window_id == Some(window_id)
+            && self.pending_dirty_close.is_some()
+            && !matches!(event, Event::Keyboard(keyboard::Event::ModifiersChanged(_)))
+        {
+            return Task::none();
+        }
+
         if let Some(command) = self.shortcut_capture_for_event(&event) {
             return self.update_settings(Message::ShortcutCaptured(command.0, command.1));
         }

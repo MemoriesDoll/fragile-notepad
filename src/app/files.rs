@@ -188,7 +188,32 @@ impl App {
                 self.close_documents(self.workspace.document_ids_clean())
             }
             Message::DirtyCloseResolved(document_id, decision) => {
+                if self.pending_dirty_close_decision.is_some()
+                    || self
+                        .pending_dirty_close
+                        .is_some_and(|pending| pending != document_id)
+                {
+                    return Task::none();
+                }
+                if self.pending_dirty_close == Some(document_id) {
+                    self.chrome_animation.dirty_close.set_visible(false);
+                    if self.chrome_animation.dirty_close.rendered_visible {
+                        self.pending_dirty_close_decision = Some(decision);
+                        return Task::none();
+                    }
+                }
                 self.resolve_close(document_id, decision)
+            }
+            Message::DirtyCloseFadeFinished(document_id) => {
+                if self.pending_dirty_close != Some(document_id)
+                    || self.chrome_animation.dirty_close.rendered_visible
+                {
+                    return Task::none();
+                }
+                match self.pending_dirty_close_decision.take() {
+                    Some(decision) => self.resolve_close(document_id, decision),
+                    None => Task::none(),
+                }
             }
             _ => unreachable!("file handler received non-file message"),
         }
@@ -731,6 +756,9 @@ impl App {
     }
 
     fn close_request(&mut self, document_id: DocumentId) -> Task<Message> {
+        if self.pending_dirty_close_decision.is_some() {
+            return Task::none();
+        }
         if self.workspace.document(document_id).is_some_and(|doc| {
             matches!(doc.load_state, DocumentLoadState::Deferred { .. }) && doc.is_dirty
         }) {
@@ -747,6 +775,7 @@ impl App {
         }
 
         self.pending_dirty_close = Some(document_id);
+        self.chrome_animation.dirty_close.set_visible(true);
         Task::none()
     }
 
@@ -757,6 +786,7 @@ impl App {
     ) -> Task<Message> {
         if self.pending_dirty_close == Some(document_id) {
             self.pending_dirty_close = None;
+            self.chrome_animation.dirty_close = super::RevealAnimation::hidden();
         }
 
         match decision {
@@ -805,6 +835,8 @@ impl App {
         }
         if self.pending_dirty_close == Some(document_id) {
             self.pending_dirty_close = None;
+            self.pending_dirty_close_decision = None;
+            self.chrome_animation.dirty_close = super::RevealAnimation::hidden();
         }
 
         self.workspace.close(document_id);
@@ -852,6 +884,9 @@ impl App {
     }
 
     pub(super) fn exit_request(&mut self) -> Task<Message> {
+        if self.pending_dirty_close_decision.is_some() {
+            return Task::none();
+        }
         self.active_menu = None;
         self.active_menu_path.clear();
 

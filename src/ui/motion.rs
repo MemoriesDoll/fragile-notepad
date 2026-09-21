@@ -10,9 +10,42 @@ use crate::message::Message;
 
 const ENTRANCE_DURATION: Duration = Duration::from_millis(150);
 
+// Fade paint colors instead of covering the editor behind a translucent modal.
+pub(super) fn fade_container(
+    mut style: iced::widget::container::Style,
+    opacity: f32,
+) -> iced::widget::container::Style {
+    style.background = style.background.map(|color| color.scale_alpha(opacity));
+    style.text_color = style.text_color.map(|color| color.scale_alpha(opacity));
+    style.border.color = style.border.color.scale_alpha(opacity);
+    style.shadow.color = style.shadow.color.scale_alpha(opacity);
+    style
+}
+
+pub(super) fn fade_button(
+    mut style: iced::widget::button::Style,
+    opacity: f32,
+) -> iced::widget::button::Style {
+    style.background = style.background.map(|color| color.scale_alpha(opacity));
+    style.text_color = style.text_color.scale_alpha(opacity);
+    style.border.color = style.border.color.scale_alpha(opacity);
+    style.shadow.color = style.shadow.color.scale_alpha(opacity);
+    style
+}
+
 /// Lift a newly mounted dialog into place without moving surrounding widgets.
 pub fn popup<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     Element::new(Motion::entrance(content.into(), 8.0, String::new()))
+}
+
+/// Follow an already-eased reveal progress: rise on entry and descend on exit.
+pub fn popup_with_progress<'a>(
+    content: impl Into<Element<'a, Message>>,
+    progress: f32,
+) -> Element<'a, Message> {
+    let mut motion = Motion::entrance(content.into(), 8.0, String::new());
+    motion.external_progress = Some(progress.clamp(0.0, 1.0));
+    Element::new(motion)
 }
 
 /// Drop a newly mounted menu into place.
@@ -44,6 +77,7 @@ pub fn fade<'a>(
         distance: 0.0,
         key: String::new(),
         fade: Some((progress.clamp(0.0, 1.0), background)),
+        external_progress: None,
         interactive,
     })
 }
@@ -53,6 +87,7 @@ struct Motion<'a> {
     distance: f32,
     key: String,
     fade: Option<(f32, fn(&Theme) -> Color)>,
+    external_progress: Option<f32>,
     interactive: bool,
 }
 
@@ -63,6 +98,7 @@ impl<'a> Motion<'a> {
             distance,
             key,
             fade: None,
+            external_progress: None,
             interactive: true,
         }
     }
@@ -107,8 +143,11 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let progress = tree.state.downcast_ref::<State>().progress;
-        let offset = self.distance * (1.0 - progress).powi(3);
+        let remaining = self.external_progress.map_or_else(
+            || (1.0 - tree.state.downcast_ref::<State>().progress).powi(3),
+            |progress| 1.0 - progress,
+        );
+        let offset = self.distance * remaining;
         let content = self
             .content
             .as_widget_mut()
@@ -131,7 +170,7 @@ impl Widget<Message, Theme, Renderer> for Motion<'_> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if self.fade.is_none() {
+        if self.fade.is_none() && self.external_progress.is_none() {
             let state = tree.state.downcast_mut::<State>();
             if state.progress < 1.0 {
                 if let Event::Window(window::Event::RedrawRequested(now)) = event {
