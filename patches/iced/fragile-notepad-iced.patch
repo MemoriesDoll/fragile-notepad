@@ -182,6 +182,78 @@ index 24ffe5b8..b611454c 100644
  /// An error that occurred while creating an application's graphical context.
  #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
  pub enum Error {
+diff --git a/vendor/iced/core/src/overlay/nested.rs b/vendor/iced/core/src/overlay/nested.rs
+index 0c1b61ab..5a6f4768 100644
+--- a/vendor/iced/core/src/overlay/nested.rs
++++ b/vendor/iced/core/src/overlay/nested.rs
+@@ -237,6 +237,7 @@ where
+ 
+             let layout = layouts.next()?;
+             let overlay = element.as_overlay_mut();
++            let interaction = overlay.mouse_interaction(layout, cursor, renderer);
+ 
+             Some(
+                 overlay
+@@ -245,10 +246,58 @@ where
+                     .and_then(|(mut overlay, layout)| {
+                         recurse(&mut overlay, layout, cursor, renderer)
+                     })
+-                    .unwrap_or_else(|| overlay.mouse_interaction(layout, cursor, renderer)),
++                    .unwrap_or_default()
++                    .max(interaction),
+             )
+         }
+ 
+         recurse(&mut self.overlay, layout, cursor, renderer).unwrap_or_default()
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    struct CursorOverlay {
++        interaction: mouse::Interaction,
++        child: Option<mouse::Interaction>,
++    }
++
++    impl overlay::Overlay<(), (), ()> for CursorOverlay {
++        fn layout(&mut self, _: &(), bounds: Size) -> layout::Node {
++            layout::Node::new(bounds)
++        }
++
++        fn draw(&self, _: &mut (), _: &(), _: &renderer::Style, _: Layout<'_>, _: mouse::Cursor) {}
++
++        fn mouse_interaction(&self, _: Layout<'_>, _: mouse::Cursor, _: &()) -> mouse::Interaction {
++            self.interaction
++        }
++
++        fn overlay<'a>(&'a mut self, _: Layout<'a>, _: &()) -> Option<overlay::Element<'a, (), (), ()>> {
++            self.child.map(|interaction| overlay::Element::new(Box::new(Self {
++                interaction,
++                child: None,
++            })))
++        }
++    }
++
++    #[test]
++    fn nested_cursor_preserves_interaction_with_an_inactive_overlay() {
++        for (parent, child) in [
++            (mouse::Interaction::Pointer, mouse::Interaction::None),
++            (mouse::Interaction::None, mouse::Interaction::Pointer),
++        ] {
++            let mut nested = Nested::new(overlay::Element::new(Box::new(CursorOverlay {
++                interaction: parent,
++                child: Some(child),
++            })));
++            let layout = nested.layout(&(), Size::new(100.0, 100.0));
++            assert_eq!(
++                nested.mouse_interaction(Layout::new(&layout), mouse::Cursor::Unavailable, &()),
++                mouse::Interaction::Pointer,
++            );
++        }
++    }
++}
 diff --git a/vendor/iced/graphics/src/compositor.rs b/vendor/iced/graphics/src/compositor.rs
 index af8b8d73..a8494ce1 100644
 --- a/vendor/iced/graphics/src/compositor.rs

@@ -32,6 +32,10 @@ The vendor patch also backports recent fixes without the intervening API migrati
   swallowing subsequent releases or keystrokes. The adapted upstream regression
   test passes with this fix and fails against the original runtime.
 
+- `7c6ce8789`: preserve the stronger mouse interaction across nested overlays.
+  An inactive child no longer masks the parent menu cursor. A nested-overlay
+  regression test fails before the fix and passes after it.
+
 `BASE_REVISION` and `fragile-notepad-iced.patch` are the reproducible source of the
 vendor checkout. Run `scripts/setup-vendor.ps1 apply` (Windows) or
 `scripts/setup-vendor.sh apply` (Linux) to reconstruct it in a fresh checkout.
