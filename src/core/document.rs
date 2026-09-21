@@ -257,11 +257,18 @@ impl Document {
     }
 
     pub fn title(&self) -> String {
-        self.path
+        let title = self
+            .path
             .as_deref()
             .and_then(title_for_path)
             .map(str::to_owned)
-            .unwrap_or_else(|| format!("Untitled {}", self.id))
+            .unwrap_or_else(|| format!("Untitled {}", self.id));
+
+        if self.is_dirty {
+            format!("*{title}")
+        } else {
+            title
+        }
     }
 
     pub fn set_path(&mut self, path: impl Into<PathBuf>) {

@@ -446,13 +446,7 @@ fn drag_visual_style(drag_visual: DragVisual) -> styles::TabDragVisual {
 }
 
 fn tab_title(document: &Document) -> String {
-    let title = document.title();
-
-    if document.is_dirty {
-        format!("*{title}")
-    } else {
-        title
-    }
+    document.title()
 }
 
 fn compact_tab_title(title: &str) -> String {
@@ -536,14 +530,14 @@ mod tests {
     }
 
     #[test]
-    fn dirty_tab_title_is_prefixed_without_changing_document_title() {
+    fn tab_title_uses_document_dirty_marker() {
         let mut document = Document::untitled(DocumentId::new(7));
 
         assert_eq!(tab_title(&document), "Untitled 7");
 
         document.mark_dirty();
 
-        assert_eq!(document.title(), "Untitled 7");
+        assert_eq!(document.title(), "*Untitled 7");
         assert_eq!(tab_title(&document), "*Untitled 7");
     }
 
