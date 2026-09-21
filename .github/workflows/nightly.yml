@@ -96,7 +96,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install Python asset tooling
-        run: python -m pip install Pillow
+        run: python -m pip install -r scripts/requirements-assets.txt
 
       - name: Cache Cargo
         uses: actions/cache@v4

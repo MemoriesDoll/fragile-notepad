@@ -11,3 +11,5 @@ python .\scripts\rasterize_svg_icons.py --svg-dir .\assets\icons\bootstrap\svg -
 if ($LASTEXITCODE -ne 0) { throw "Shortcut icon generation failed" }
 python .\scripts\rasterize_illustrations.py
 if ($LASTEXITCODE -ne 0) { throw "Illustration generation failed" }
+python .\scripts\generate_app_icons.py
+if ($LASTEXITCODE -ne 0) { throw "Application icon generation failed" }

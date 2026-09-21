@@ -10,6 +10,41 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class IconAssetsTest(unittest.TestCase):
+    def test_blink_changes_only_the_eyes(self):
+        from PIL import Image, ImageChops
+
+        art = ROOT / "assets/illustrations/bunny"
+        def load(name):
+            return Image.frombytes("RGBA", (256, 256), (art / f"{name}.rgba").read_bytes())
+        opened = load("app")
+        for name in ("app-half", "app-closed"):
+            frame = load(name)
+            self.assertEqual(frame.getchannel("A").tobytes(), opened.getchannel("A").tobytes())
+            diff = ImageChops.difference(opened, frame).convert("RGB")
+            bounds = diff.getbbox()
+            self.assertIsNotNone(bounds)
+            self.assertTrue(98 <= bounds[0] < bounds[2] <= 155)
+            self.assertTrue(82 <= bounds[1] < bounds[3] <= 112)
+            self.assertIsNotNone(diff.crop((98, 82, 120, 112)).getbbox())
+            self.assertIsNotNone(diff.crop((135, 82, 155, 112)).getbbox())
+
+    def test_bunny_rasters_preserve_background_and_transparent_title_icon(self):
+        from PIL import Image
+
+        art = ROOT / "assets/illustrations/bunny"
+        app = Image.frombytes("RGBA", (256, 256), (art / "app.rgba").read_bytes())
+        title = Image.frombytes("RGBA", (64, 64), (art / "title-bar.rgba").read_bytes())
+        self.assertEqual(app.getpixel((0, 0))[3], 0)
+        self.assertEqual(title.getpixel((0, 0))[3], 0)
+        # Beside the rabbit: solid blue in the app tile, clear in the title bar.
+        self.assertGreater(app.getpixel((16, 128))[3], 250)
+        self.assertEqual(title.getpixel((4, 32))[3], 0)
+        self.assertGreater(title.getchannel("A").getextrema()[1], 250)
+        for icon in (app, title):
+            for edge in (icon.crop((0, 0, icon.width, 1)),
+                         icon.crop((0, icon.height - 1, icon.width, icon.height))):
+                self.assertEqual(edge.getchannel("A").getextrema()[1], 0)
+
     def render(self, paths, color=None):
         with TemporaryDirectory() as directory:
             source = Path(directory) / "icon.svg"
