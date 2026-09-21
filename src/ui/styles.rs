@@ -5,6 +5,67 @@ pub const RADIUS: f32 = 6.0;
 const CONTROL_RADIUS: f32 = 5.0;
 const TAB_RADIUS: f32 = 4.0;
 
+pub fn title_bar(theme: &Theme, focused: bool) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(palette.chrome.into()),
+        text_color: Some(if focused {
+            palette.text
+        } else {
+            palette.muted_text
+        }),
+        ..Default::default()
+    }
+}
+
+pub fn window_frame(theme: &Theme, focused: bool) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(palette.chrome.into()),
+        border: Border {
+            width: 1.0,
+            color: if focused {
+                palette.border
+            } else {
+                palette.border_soft
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+pub fn caption_button(
+    theme: &Theme,
+    status: button::Status,
+    mac: bool,
+    close: bool,
+    focused: bool,
+) -> button::Style {
+    let palette = VisualPalette::from_theme(theme);
+    let active = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let background = if mac {
+        None
+    } else if active && close {
+        Some(Color::from_rgb8(196, 43, 28).into())
+    } else if active {
+        Some(palette.surface_high.into())
+    } else {
+        None
+    };
+    button::Style {
+        background,
+        text_color: if active && close && !mac {
+            Color::WHITE
+        } else if focused {
+            palette.text
+        } else {
+            palette.muted_text
+        },
+        ..Default::default()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabDragVisual {
     Idle,
@@ -166,9 +227,8 @@ pub fn menu_bar(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 
     container::Style {
-        background: Some(Background::Color(palette.chrome_high)),
+        background: Some(Background::Color(palette.chrome)),
         text_color: Some(palette.text),
-        border: hairline(palette.border_soft),
         ..container::Style::default()
     }
 }

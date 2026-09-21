@@ -11,10 +11,48 @@ mod platform_activation;
 
 pub(super) use managed::{AdvancedSearchWindow, ManagedWindow, SettingsWindow};
 
+pub(super) fn custom_chrome(mut settings: window::Settings) -> window::Settings {
+    settings.decorations = !crate::ui::title_bar::SUPPORTED;
+    #[cfg(windows)]
+    {
+        settings.platform_specific.undecorated_shadow = true;
+    }
+    settings
+}
+
 impl App {
     pub(super) fn update_window(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::WindowOpened(_id) => Task::none(),
+            Message::WindowOpened(id) => {
+                // All app windows open restored. Native focus/resize events
+                // reconcile subsequent window-manager changes.
+                if self.owns_window(id) {
+                    self.maximized_windows.entry(id).or_insert(false);
+                }
+                Task::none()
+            }
+            Message::WindowMaximized(id, maximized) => {
+                if self.owns_window(id) {
+                    self.maximized_windows.insert(id, maximized);
+                }
+                Task::none()
+            }
+            Message::WindowChrome(id, action) => {
+                use crate::ui::title_bar::Action;
+                if !self.owns_window(id) {
+                    return Task::none();
+                }
+                match action {
+                    Action::Drag => window::drag(id),
+                    Action::Resize(direction) => window::drag_resize(id, direction),
+                    Action::Minimize => window::minimize(id, true),
+                    Action::ToggleMaximize => {
+                        window::toggle_maximize(id).chain(self.refresh_window_state(id))
+                    }
+                    Action::Close => self.update_window(Message::WindowCloseRequested(id)),
+                    Action::SystemMenu => window::show_system_menu(id),
+                }
+            }
             Message::WindowCloseRequested(id) => {
                 if let Some(settings_window) = &self.settings_window
                     && settings_window.is(id)
@@ -31,6 +69,10 @@ impl App {
                 }
             }
             Message::WindowClosed(id) => {
+                self.maximized_windows.remove(&id);
+                if self.focused_window_id == Some(id) {
+                    self.focused_window_id = None;
+                }
                 if self
                     .settings_window
                     .as_ref()
@@ -54,6 +96,22 @@ impl App {
                 }
             }
             _ => unreachable!("window handler received non-window message"),
+        }
+    }
+
+    fn owns_window(&self, id: window::Id) -> bool {
+        self.main_window_id == Some(id)
+            || self.settings_window.is_some_and(|window| window.is(id))
+            || self
+                .advanced_search_window
+                .is_some_and(|window| window.is(id))
+    }
+
+    pub(super) fn refresh_window_state(&self, id: window::Id) -> Task<Message> {
+        if self.owns_window(id) {
+            window::is_maximized(id).map(move |maximized| Message::WindowMaximized(id, maximized))
+        } else {
+            Task::none()
         }
     }
 

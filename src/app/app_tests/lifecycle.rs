@@ -3,6 +3,76 @@ use iced::backend;
 use iced::event::{Event, Status};
 use iced::mouse;
 
+#[test]
+fn custom_caption_close_preserves_dirty_document_and_settings_cancel_behavior() {
+    use crate::ui::title_bar::Action;
+    let (mut app, _) = App::new();
+    let main = app.main_window_id.unwrap();
+    let document = app.workspace.active_document_id;
+    app.workspace.active_document_mut().unwrap().mark_dirty();
+    let _ = app.update(Message::WindowChrome(main, Action::Close));
+    assert_eq!(app.pending_dirty_close, Some(document));
+    assert!(app.workspace.document(document).is_some());
+    let _ = app.update(Message::DirtyCloseResolved(
+        document,
+        DirtyCloseDecision::Cancel,
+    ));
+    assert_eq!(app.close_goal, CloseGoal::KeepOpen);
+
+    let _ = app.update(Message::ToggleSettingsPanel);
+    let settings = app.settings_window.unwrap().id();
+    let saved_wrap = app.settings.word_wrap;
+    let _ = app.update(Message::DraftWordWrapToggled(!saved_wrap));
+    let _ = app.update(Message::WindowChrome(settings, Action::Close));
+    assert_eq!(app.settings_dialog.draft.word_wrap, saved_wrap);
+    assert_eq!(app.close_goal, CloseGoal::KeepOpen);
+    assert!(app.workspace.document(document).is_some());
+}
+
+#[test]
+fn caption_state_follows_native_focus_and_rejects_closed_window_results() {
+    let (mut app, _) = App::new();
+    let main = app.main_window_id.unwrap();
+    let _ = app.update(Message::ToggleSettingsPanel);
+    let settings = app.settings_window.unwrap().id();
+    let _ = app.update(Message::RuntimeEvent(
+        Event::Window(iced::window::Event::Focused),
+        Status::Captured,
+        settings,
+    ));
+    let _ = app.update(Message::RuntimeEvent(
+        Event::Window(iced::window::Event::Unfocused),
+        Status::Captured,
+        main,
+    ));
+    assert_eq!(app.focused_window_id, Some(settings));
+    let _ = app.update(Message::WindowMaximized(settings, true));
+    assert_eq!(app.maximized_windows.get(&settings), Some(&true));
+    let _ = app.update(Message::WindowClosed(settings));
+    let _ = app.update(Message::WindowMaximized(settings, true));
+    assert!(!app.maximized_windows.contains_key(&settings));
+    assert_eq!(app.focused_window_id, None);
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn caption_preview_toggle_does_not_modify_settings_or_recovery() {
+    let (mut app, _) = App::new();
+    let settings = app.settings.clone();
+    let style = app.title_bar_style;
+    app.session.enabled = true;
+    assert!(!app.session_should_track(&Message::ToggleTitleBarStyle));
+    assert!(
+        !app.session_should_track(&Message::WindowMaximized(app.main_window_id.unwrap(), true))
+    );
+    let _ = app.update(Message::ToggleTitleBarStyle);
+    assert_ne!(app.title_bar_style, style);
+    assert_eq!(app.settings, settings);
+    assert!(!app.session.dirty);
+    let _ = app.update(Message::ToggleTitleBarStyle);
+    assert_eq!(app.title_bar_style, style);
+}
+
 fn strict_handoff_result(
     completed_phase: backend::StrictHandoffPhase,
     rollback: backend::StrictRollbackStatus,

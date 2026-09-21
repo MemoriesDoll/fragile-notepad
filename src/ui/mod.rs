@@ -17,6 +17,7 @@ pub mod settings_panel;
 pub mod status_bar;
 pub mod styles;
 pub mod tabs;
+pub mod title_bar;
 pub mod toolbar;
 pub mod window_list_dialog;
 

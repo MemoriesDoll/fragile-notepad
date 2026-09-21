@@ -68,6 +68,8 @@ pub struct App {
     hovered_drop_tab: Option<crate::core::DocumentId>,
     keyboard_modifiers: keyboard::Modifiers,
     focused_window_id: Option<window::Id>,
+    maximized_windows: HashMap<window::Id, bool>,
+    title_bar_style: ui::title_bar::ControlStyle,
     rendering: rendering::RenderingState,
     chrome_animation: ChromeAnimation,
     main_window_opened: bool,
@@ -122,10 +124,11 @@ impl App {
     }
 
     pub fn new_with_options(options: crate::startup::StartupOptions) -> (Self, Task<Message>) {
-        let (main_window_id, open) = window::open(window::Settings {
+        let (main_window_id, open) = window::open(windowing::custom_chrome(window::Settings {
+            min_size: Some(iced::Size::new(640.0, 400.0)),
             exit_on_close_request: false,
             ..window::Settings::default()
-        });
+        }));
 
         let outline_registry_hash = outline_registry_hash();
         let mut app = Self {
@@ -162,6 +165,8 @@ impl App {
             hovered_drop_tab: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
             focused_window_id: Some(main_window_id),
+            maximized_windows: HashMap::new(),
+            title_bar_style: ui::title_bar::ControlStyle::startup(),
             rendering: rendering::RenderingState::Software,
             chrome_animation: ChromeAnimation::new(),
             main_window_opened: false,
@@ -250,6 +255,14 @@ impl App {
             self.initial_settings_edits |= session::settings_edit_mask(&message);
         }
         match message {
+            #[cfg(debug_assertions)]
+            Message::ToggleTitleBarStyle => {
+                self.title_bar_style = self.title_bar_style.toggled();
+                Task::none()
+            }
+            message @ (Message::WindowChrome(..) | Message::WindowMaximized(..)) => {
+                self.update_window(message)
+            }
             Message::SyntaxParsed(id, result) => self.complete_syntax_parse(id, result),
             Message::ForwardedFiles(paths, request, receipt) => {
                 if !receipt.try_accept() {
@@ -552,6 +565,7 @@ impl App {
                     .rendered_visible
                     .then_some(self.about_tab),
                 ui::about_dialog::RenderingDebugInfo {
+                    title_bar_style: self.title_bar_style,
                     current_renderer: self.rendering.label(),
                     rendering_policy: rendering::current_policy_label(&self.settings),
                 },
@@ -565,7 +579,21 @@ impl App {
             span.end_with("");
         }
 
-        element
+        if ui::title_bar::SUPPORTED {
+            ui::title_bar::frame(
+                element,
+                window_id,
+                self.title(window_id),
+                self.title_bar_style,
+                self.focused_window_id == Some(window_id),
+                self.maximized_windows
+                    .get(&window_id)
+                    .copied()
+                    .unwrap_or(false),
+            )
+        } else {
+            element
+        }
     }
 
     pub fn title(&self, window_id: window::Id) -> String {

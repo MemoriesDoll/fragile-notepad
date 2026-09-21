@@ -270,6 +270,10 @@ impl App {
     }
 
     pub(super) fn session_should_track(&self, message: &Message) -> bool {
+        #[cfg(debug_assertions)]
+        if matches!(message, Message::ToggleTitleBarStyle) {
+            return false;
+        }
         if let Message::RuntimeEvent(event, _, _) = message {
             return self.session.enabled
                 && matches!(
@@ -281,6 +285,8 @@ impl App {
             && !matches!(
                 message,
                 Message::None
+                    | Message::WindowChrome(..)
+                    | Message::WindowMaximized(..)
                     | Message::SyntaxParsed(..)
                     | Message::SessionFlush
                     | Message::SessionPersisted(_)

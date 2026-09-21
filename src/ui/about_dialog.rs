@@ -46,6 +46,7 @@ fn fade_scrollable(mut style: scrollable::Style, opacity: f32) -> scrollable::St
 pub struct RenderingDebugInfo {
     pub current_renderer: String,
     pub rendering_policy: String,
+    pub title_bar_style: crate::ui::title_bar::ControlStyle,
 }
 
 struct LicenseEntry {
@@ -321,75 +322,107 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
         "disabled"
     };
 
-    scrollable(
-        column![
-            debug_section(
-                progress,
-                "Application",
-                &[
-                    ("Name", env!("CARGO_PKG_NAME").to_owned()),
-                    ("Version", env!("CARGO_PKG_VERSION").to_owned()),
-                    ("Authors", env!("CARGO_PKG_AUTHORS").to_owned()),
-                    ("Build profile", build_profile.to_owned()),
-                    ("Panic strategy", panic_strategy.to_owned()),
-                ],
-            ),
-            debug_section(
-                progress,
-                "Runtime",
-                &[
-                    ("Operating system", std::env::consts::OS.to_owned()),
-                    ("Architecture", std::env::consts::ARCH.to_owned()),
-                    ("Platform family", std::env::consts::FAMILY.to_owned()),
-                    (
-                        "Startup probe",
-                        format!("{startup_probe} ({})", crate::startup::STARTUP_PROBE_ENV),
-                    ),
-                    (
-                        "First-view budget",
-                        format!("{} ms", crate::startup::UI_READY_BUDGET.as_millis()),
-                    ),
-                ],
-            ),
-            debug_section(
-                progress,
-                "Rendering",
-                &[
-                    ("Current renderer", rendering.current_renderer),
-                    ("Rendering policy", rendering.rendering_policy),
-                    ("Iced startup backend", "software".to_owned()),
-                    ("Startup renderer", "tiny-skia".to_owned()),
-                    ("Antialiasing", "disabled at startup".to_owned()),
-                    ("VSync", "disabled at startup".to_owned()),
-                ],
-            ),
-            debug_section(
-                progress,
-                "Bundled Data",
-                &[
-                    (
-                        "Outline parsers",
-                        "assets/syntax/outline-parsers.xml".to_owned()
-                    ),
-                    (
-                        "Folding hints",
-                        "assets/syntax/folding-hints.xml".to_owned()
-                    ),
-                    ("Toolbar icons", "assets/icons/tango".to_owned()),
-                    ("Shortcut icons", "assets/icons/bootstrap".to_owned()),
-                    ("Dialog icons", "assets/icons/heroicons".to_owned()),
-                ],
-            ),
-        ]
-        .spacing(12)
-        .padding(iced::Padding::new(0.0).right(10))
-        .width(Fill),
-    )
-    .smooth_scroll(true)
-    .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
-    .height(Fill)
-    .width(Fill)
-    .into()
+    let sections = column![
+        title_bar_preview(&rendering, progress),
+        debug_section(
+            progress,
+            "Application",
+            &[
+                ("Name", env!("CARGO_PKG_NAME").to_owned()),
+                ("Version", env!("CARGO_PKG_VERSION").to_owned()),
+                ("Authors", env!("CARGO_PKG_AUTHORS").to_owned()),
+                ("Build profile", build_profile.to_owned()),
+                ("Panic strategy", panic_strategy.to_owned()),
+            ],
+        ),
+        debug_section(
+            progress,
+            "Runtime",
+            &[
+                ("Operating system", std::env::consts::OS.to_owned()),
+                ("Architecture", std::env::consts::ARCH.to_owned()),
+                ("Platform family", std::env::consts::FAMILY.to_owned()),
+                (
+                    "Startup probe",
+                    format!("{startup_probe} ({})", crate::startup::STARTUP_PROBE_ENV),
+                ),
+                (
+                    "First-view budget",
+                    format!("{} ms", crate::startup::UI_READY_BUDGET.as_millis()),
+                ),
+            ],
+        ),
+        debug_section(
+            progress,
+            "Rendering",
+            &[
+                ("Current renderer", rendering.current_renderer),
+                ("Rendering policy", rendering.rendering_policy),
+                ("Iced startup backend", "software".to_owned()),
+                ("Startup renderer", "tiny-skia".to_owned()),
+                ("Antialiasing", "disabled at startup".to_owned()),
+                ("VSync", "disabled at startup".to_owned()),
+            ],
+        ),
+        debug_section(
+            progress,
+            "Bundled Data",
+            &[
+                (
+                    "Outline parsers",
+                    "assets/syntax/outline-parsers.xml".to_owned()
+                ),
+                (
+                    "Folding hints",
+                    "assets/syntax/folding-hints.xml".to_owned()
+                ),
+                ("Toolbar icons", "assets/icons/tango".to_owned()),
+                ("Shortcut icons", "assets/icons/bootstrap".to_owned()),
+                ("Dialog icons", "assets/icons/heroicons".to_owned()),
+            ],
+        ),
+    ]
+    .spacing(12)
+    .padding(iced::Padding::new(0.0).right(10))
+    .width(Fill);
+    scrollable(sections)
+        .smooth_scroll(true)
+        .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
+        .height(Fill)
+        .width(Fill)
+        .into()
+}
+
+fn title_bar_preview(rendering: &RenderingDebugInfo, progress: f32) -> Element<'static, Message> {
+    #[cfg(debug_assertions)]
+    {
+        let label = match rendering.title_bar_style {
+            crate::ui::title_bar::ControlStyle::Windows => "Switch to macOS traffic lights",
+            crate::ui::title_bar::ControlStyle::MacOS => "Switch to Windows controls",
+        };
+        container(
+            row![
+                muted(text("Window controls").size(12), progress),
+                space::horizontal(),
+                button(text(label).size(12))
+                    .padding([6, 12])
+                    .style(move |theme, status| fade_button(
+                        styles::command_button(theme, status),
+                        progress
+                    ))
+                    .on_press(Message::ToggleTitleBarStyle),
+            ]
+            .align_y(Center),
+        )
+        .padding(12)
+        .style(move |theme| fade_container(styles::utility_bar(theme), progress))
+        .into()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (rendering, progress);
+        space::vertical().height(0).into()
+    }
 }
 
 fn debug_section(
@@ -498,6 +531,42 @@ mod tests {
         RenderingDebugInfo {
             current_renderer: String::from("Software"),
             rendering_policy: String::from("Software only"),
+            title_bar_style: crate::ui::title_bar::ControlStyle::Windows,
+        }
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn debug_window_control_switch_emits_the_preview_action_for_both_styles() {
+        let renderer = renderer();
+        for style in [
+            crate::ui::title_bar::ControlStyle::Windows,
+            crate::ui::title_bar::ControlStyle::MacOS,
+        ] {
+            let mut info = rendering_info();
+            info.title_bar_style = style;
+            let mut content = title_bar_preview(&info, 1.0);
+            let (mut tree, node) = mount_in(&mut content, &renderer, Size::new(540.0, 100.0));
+            let mut messages = Vec::new();
+            for event in [
+                mouse::Event::ButtonPressed(mouse::Button::Left),
+                mouse::Event::ButtonReleased(mouse::Button::Left),
+            ] {
+                let mut shell = Shell::new(&window::Headless, Waker::noop(), &mut messages);
+                content.as_widget_mut().update(
+                    &mut tree,
+                    &Event::Mouse(event),
+                    Layout::new(&node),
+                    mouse::Cursor::Available(Point::new(480.0, 24.0)),
+                    &renderer,
+                    &mut shell,
+                    &VIEWPORT,
+                );
+            }
+            assert!(matches!(
+                messages.as_slice(),
+                [Message::ToggleTitleBarStyle]
+            ));
         }
     }
 

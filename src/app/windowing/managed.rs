@@ -29,13 +29,13 @@ impl SettingsWindow {
     }
 
     pub(crate) fn settings() -> window::Settings {
-        window::Settings {
+        super::custom_chrome(window::Settings {
             size: Size::new(820.0, 560.0),
             min_size: Some(Size::new(720.0, 460.0)),
             resizable: true,
             exit_on_close_request: false,
             ..window::Settings::default()
-        }
+        })
     }
 }
 
@@ -80,13 +80,13 @@ impl AdvancedSearchWindow {
     }
 
     pub(crate) fn settings() -> window::Settings {
-        window::Settings {
+        super::custom_chrome(window::Settings {
             size: Size::new(760.0, 560.0),
             min_size: Some(Size::new(680.0, 500.0)),
             resizable: true,
             exit_on_close_request: false,
             ..window::Settings::default()
-        }
+        })
     }
 
     pub(crate) fn view<'a>(&self, search_dialog: &'a SearchDialogState) -> Element<'a, Message> {

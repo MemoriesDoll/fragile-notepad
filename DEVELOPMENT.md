@@ -1,5 +1,35 @@
 # Development
 
+## Window title bars
+
+The main, Settings, and Find and Replace windows use application-drawn title bars
+on Windows, Linux, and macOS. Other targets retain system decorations. The bar
+follows the light/dark theme and dims when unfocused. Long titles truncate before
+the controls. Drag the caption to move a window; double-click to maximize/restore.
+Windows also supports right-clicking the caption for the system window menu.
+Close uses the normal session/unsaved-document flow; Settings close cancels its draft.
+
+Windows/Linux use controls on the right. macOS uses traffic lights on the left
+and a centered caption. The green control maximizes/restores (zooms), rather than
+entering macOS fullscreen. Windows/Linux have custom edge and corner resize grips;
+macOS retains AppKit's native resizing because winit does not support `drag_resize`
+there. Native file pickers retain their system chrome.
+
+Debug builds provide a **Window controls** switch under **About → Debug**. Clicking
+it switches all application windows immediately, including windows opened later.
+The switch changes appearance only; it does not emulate the other operating
+system's window manager or change saved settings. Set the initial preview with:
+
+```powershell
+$env:FRAGILE_NOTEPAD_TITLE_BAR = 'macos' # or 'windows'
+cargo run -- --no-session
+```
+
+Release builds omit the toggle and ignore this environment variable. Native macOS
+window behavior still requires testing on a Mac; either visual style can be tested
+on Windows. Title-bar widget tests exercise both styles, controls, caption dragging,
+double-clicking, resize isolation, long titles, and light/dark/inactive rendering.
+
 ## Editor interactions
 
 Whole mouse-wheel steps in settings, search results, function lists,

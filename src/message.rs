@@ -236,6 +236,10 @@ pub enum Message {
     WindowFocusNext,
     WindowFocusPrevious,
     WindowOpened(window::Id),
+    WindowChrome(window::Id, crate::ui::title_bar::Action),
+    WindowMaximized(window::Id, bool),
+    #[cfg(debug_assertions)]
+    ToggleTitleBarStyle,
     WindowCloseRequested(window::Id),
     WindowClosed(window::Id),
     SingleInstanceShowRequested(ActivationRequest),

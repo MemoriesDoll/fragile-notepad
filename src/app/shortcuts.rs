@@ -30,6 +30,16 @@ impl App {
 
         if matches!(event, Event::Window(window::Event::Focused)) {
             self.focused_window_id = Some(window_id);
+            return self.refresh_window_state(window_id);
+        }
+        if matches!(event, Event::Window(window::Event::Unfocused)) {
+            if self.focused_window_id == Some(window_id) {
+                self.focused_window_id = None;
+            }
+            return Task::none();
+        }
+        if matches!(event, Event::Window(window::Event::Resized(_))) {
+            return self.refresh_window_state(window_id);
         }
 
         if let Some(command) = self.shortcut_capture_for_event(&event) {
@@ -152,6 +162,9 @@ fn should_forward_runtime_event(event: &Event, status: Status) -> bool {
             Event::Keyboard(keyboard::Event::ModifiersChanged(_))
                 | Event::Mouse(mouse::Event::WheelScrolled { .. })
                 | Event::Window(window::Event::FileDropped(_))
+                | Event::Window(
+                    window::Event::Focused | window::Event::Unfocused | window::Event::Resized(_)
+                )
         )
 }
 
