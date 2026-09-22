@@ -121,3 +121,43 @@ fn exit_and_session_changes_wait_for_dirty_prompt_fade() {
     assert!(app.session_should_track(&Message::DirtyCloseFadeFinished(document)));
     assert!(!app.session_should_track(&Message::ChromeAnimationFrame(start)));
 }
+
+#[test]
+fn rounded_fade_endpoint_does_not_leave_an_invisible_prompt_blocking_the_app() {
+    let (mut app, _) = App::new();
+    let document = app.workspace.active_document_id;
+    app.workspace.active_document_mut().unwrap().mark_dirty();
+
+    // Repeated open/cancel cycles with the last pre-deadline frame landing
+    // inside the floating-point rounding region of the easing curve.
+    for last_frame_us in [139_400, 139_500, 139_900, 139_999] {
+        let _ = app.update_inner(Message::CloseFile);
+        let start = settle_prompt(&mut app);
+        let _ = app.update_inner(Message::DirtyCloseResolved(
+            document,
+            DirtyCloseDecision::Cancel,
+        ));
+        let _ = app.update_inner(Message::ChromeAnimationFrame(start));
+        let _ = app.update_inner(Message::ChromeAnimationFrame(
+            start + Duration::from_micros(last_frame_us),
+        ));
+
+        assert!(app.close_prompt.progress() <= f32::EPSILON);
+        assert!(app.close_prompt.is_closing());
+        assert!(
+            app.needs_animation_frames(),
+            "completion must remain scheduled after the fade rounds to zero at {last_frame_us} us"
+        );
+        let _ = app.update_inner(Message::ChromeAnimationFrame(
+            start + Duration::from_millis(150),
+        ));
+        let _ = app.update_inner(Message::DirtyCloseFadeFinished(document));
+        assert_eq!(
+            app.close_prompt.document(),
+            None,
+            "remove the input barrier"
+        );
+        assert!(!app.needs_animation_frames());
+        assert!(app.workspace.document(document).unwrap().is_dirty);
+    }
+}

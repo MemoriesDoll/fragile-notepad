@@ -81,7 +81,11 @@ impl RevealAnimation {
     pub(super) fn needs_frames(self) -> bool {
         let target = if self.target_visible { 1.0 } else { 0.0 };
 
-        self.rendered_visible && (self.progress - target).abs() > f32::EPSILON
+        // Easing can round to the target before the duration has elapsed.
+        // Keep an active transition scheduled until update_frame finalizes its
+        // visibility; otherwise an invisible modal can keep blocking input.
+        self.rendered_visible
+            && (self.started_at.is_some() || (self.progress - target).abs() > f32::EPSILON)
     }
 
     pub(super) fn update_frame(&mut self, at: Instant) {
@@ -129,4 +133,41 @@ fn ease_out_cubic(progress: f32) -> f32 {
     let inverse = 1.0 - progress.clamp(0.0, 1.0);
 
     1.0 - (inverse * inverse * inverse)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rounded_endpoints_still_complete_opening_closing_and_reversed_transitions() {
+        let start = Instant::now();
+        for reverse_at in [Duration::from_millis(35), CHROME_REVEAL_ANIMATION_DURATION] {
+            let mut animation = RevealAnimation::hidden();
+            animation.set_visible(true);
+            animation.update_frame(start);
+            animation.update_frame(start + reverse_at);
+            animation.set_visible(false);
+            let close_start = start + reverse_at;
+            animation.update_frame(close_start);
+            animation.update_frame(close_start + Duration::from_micros(139_900));
+            assert!(animation.progress() <= f32::EPSILON);
+            animation.update_frame(close_start + CHROME_REVEAL_ANIMATION_DURATION);
+            assert!(
+                !animation.rendered_visible(),
+                "closing must remove the surface"
+            );
+            assert!(!animation.needs_frames());
+
+            let reopen = close_start + Duration::from_secs(1);
+            animation.set_visible(true);
+            animation.update_frame(reopen);
+            animation.update_frame(reopen + Duration::from_micros(139_900));
+            assert_eq!(animation.progress(), 1.0);
+            assert!(animation.needs_frames(), "finish the opening lifecycle too");
+            animation.update_frame(reopen + CHROME_REVEAL_ANIMATION_DURATION);
+            assert!(animation.rendered_visible());
+            assert!(!animation.needs_frames());
+        }
+    }
 }
