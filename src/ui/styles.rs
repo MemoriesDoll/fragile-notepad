@@ -390,6 +390,48 @@ pub fn settings_panel(theme: &Theme) -> container::Style {
     }
 }
 
+/// Shared surfaces for the window picker, search workspace, and preferences.
+pub fn utility_dialog(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(palette.overlay.into()),
+        text_color: Some(palette.text),
+        border: border(1.0, palette.border_soft, 12.0),
+        shadow: elevation(palette, 10.0, 32.0),
+        ..Default::default()
+    }
+}
+
+pub fn utility_selection(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let palette = VisualPalette::from_theme(theme);
+        let highlighted = selected || matches!(status, button::Status::Pressed);
+        button::Style {
+            background: Some(
+                if highlighted {
+                    palette.accent_soft
+                } else if matches!(status, button::Status::Hovered) {
+                    palette.surface_high
+                } else {
+                    palette.surface
+                }
+                .into(),
+            ),
+            text_color: palette.text,
+            border: border(
+                1.0,
+                if highlighted {
+                    palette.accent
+                } else {
+                    palette.border_soft
+                },
+                8.0,
+            ),
+            ..Default::default()
+        }
+    }
+}
+
 pub fn settings_category_list(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 

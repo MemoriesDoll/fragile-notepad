@@ -1,8 +1,9 @@
-use iced::widget::{button, column, container, opaque, row, space, stack, text};
-use iced::{Alignment, Center, Element, Fill, Length};
+use iced::widget::{button, column, container, opaque, row, scrollable, space, stack, text};
+use iced::{Center, Element, Fill, Font};
 
 use crate::message::{Message, WindowTarget};
-use crate::ui::{centered_button_label, motion, styles};
+use crate::ui::icons::hero::{self, HeroIcon, IconTone};
+use crate::ui::{motion, styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowListEntry {
@@ -20,59 +21,117 @@ pub fn view(entries: Vec<WindowListEntry>) -> Element<'static, Message> {
                 .style(styles::modal_scrim)
         ),
         container(motion::popup(dialog(entries)))
-            .width(Fill)
-            .height(Fill)
-            .center_x(Fill)
-            .center_y(Fill),
+            .padding(24)
+            .center(Fill),
     ]
     .into()
 }
 
 fn dialog(entries: Vec<WindowListEntry>) -> Element<'static, Message> {
+    let count = entries.len();
     let rows = entries
         .into_iter()
-        .fold(column![].spacing(6), |column, entry| {
-            column.push(window_row(entry))
+        .fold(column![].spacing(8), |rows, entry| {
+            rows.push(window_row(entry))
         });
 
     container(
         column![
-            text("Windows").size(20),
-            rows.width(Fill),
             row![
-                space::horizontal(),
-                button(centered_button_label("Close", 13))
-                    .padding([7, 18])
-                    .style(styles::primary_command_button)
+                column![
+                    text("Windows").size(24).font(Font {
+                        weight: iced::font::Weight::Semibold,
+                        ..Font::DEFAULT
+                    }),
+                    container(text("Pick a window to bring it to the front.").size(13))
+                        .style(styles::info_muted),
+                ]
+                .spacing(5)
+                .width(Fill),
+                container(text(format!("{count} open")).size(12))
+                    .padding([5, 9])
+                    .style(styles::info_badge),
+            ]
+            .spacing(16)
+            .align_y(Center),
+            container(scrollable(rows).smooth_scroll(true).spacing(8).height(Fill))
+                .max_height(250)
+                .width(Fill),
+            row![
+                container(text("Your open documents stay in the editor.").size(12))
+                    .style(styles::info_muted)
+                    .width(Fill),
+                button(text("Done").size(13))
+                    .padding([9, 22])
+                    .style(styles::command_button)
                     .on_press(Message::WindowListClosed),
             ]
-            .align_y(Center)
-            .width(Fill),
+            .spacing(16)
+            .align_y(Center),
         ]
-        .spacing(16)
-        .align_x(Alignment::Start),
+        .spacing(20),
     )
-    .width(Length::Fixed(500.0))
-    .padding(20)
-    .style(styles::modal_dialog)
+    .width(Fill)
+    .max_width(560)
+    .height(Fill)
+    .max_height((count as f32 * 72.0 + 180.0).min(400.0))
+    .padding(24)
+    .style(styles::utility_dialog)
     .into()
 }
 
 fn window_row(entry: WindowListEntry) -> Element<'static, Message> {
-    let status = if entry.is_focused { "Active" } else { "" };
-    let button_label = if entry.is_focused { "Focus" } else { "Switch" };
+    let (label, symbol) = match entry.target {
+        WindowTarget::Main => ("Editor", "Aa"),
+        WindowTarget::AdvancedSearch => ("Find & Replace", ".*"),
+        WindowTarget::Settings => ("Preferences", "≡"),
+    };
+    let title = match entry.target {
+        WindowTarget::Main => entry
+            .title
+            .trim_end_matches(" - Fragile Notepad")
+            .to_owned(),
+        WindowTarget::AdvancedSearch => "Search and edit across documents".into(),
+        WindowTarget::Settings => "Personalize your workspace".into(),
+    };
+    let mut trailing = row![].spacing(12).align_y(Center);
+    if entry.is_focused {
+        trailing = trailing.push(
+            container(text("Active").size(11))
+                .padding([4, 8])
+                .style(styles::info_badge),
+        );
+    }
+    trailing = trailing.push(hero::icon(HeroIcon::ChevronRight, 16, IconTone::Muted));
 
-    row![
-        column![text(entry.title).size(13), text(status).size(12),]
-            .spacing(2)
-            .width(Fill),
-        button(centered_button_label(button_label, 13))
-            .padding([6, 14])
-            .style(styles::command_button)
-            .on_press(Message::WindowFocusRequested(entry.target)),
-    ]
-    .align_y(Center)
-    .spacing(12)
+    button(
+        row![
+            container(text(symbol).size(18).font(Font::MONOSPACE))
+                .center(40)
+                .style(styles::info_card),
+            column![
+                text(label).size(14).font(Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..Font::DEFAULT
+                }),
+                container(
+                    text(title)
+                        .size(12)
+                        .wrapping(iced::widget::text::Wrapping::None)
+                )
+                .style(styles::info_muted),
+            ]
+            .spacing(4)
+            .width(Fill)
+            .clip(true),
+            trailing,
+        ]
+        .spacing(14)
+        .align_y(Center),
+    )
+    .padding(12)
     .width(Fill)
+    .style(styles::utility_selection(entry.is_focused))
+    .on_press(Message::WindowFocusRequested(entry.target))
     .into()
 }
