@@ -1,5 +1,6 @@
 //! Render the real About/title-bar widgets for local artwork review.
 //! Run `cargo run --example preview_branding`; outputs stay under target/.
+//! Add `-- --vulkan` to render the same animation through Vulkan.
 
 use fragile_notepad::{
     core::AppearanceMode,
@@ -14,13 +15,23 @@ use iced::{Element, Event, Rectangle, Renderer, Size, window};
 use std::time::{Duration, Instant};
 
 fn main() {
-    let output = std::path::Path::new("target/bunny-review");
+    let vulkan = std::env::args().any(|argument| argument == "--vulkan");
+    if vulkan {
+        // No renderer or worker threads exist yet. Restrict the headless wgpu
+        // adapter to Vulkan so this preview cannot silently use another API.
+        unsafe { std::env::set_var("WGPU_BACKEND", "vulkan") };
+    }
+    let output = std::path::Path::new(if vulkan {
+        "target/bunny-review-vulkan"
+    } else {
+        "target/bunny-review"
+    });
     std::fs::create_dir_all(output).expect("create review directory");
     let mut renderer = futures::executor::block_on(<Renderer as Headless>::new(
         renderer::Settings::default(),
-        Some("tiny-skia"),
+        Some(if vulkan { "wgpu" } else { "tiny-skia" }),
     ))
-    .expect("software renderer");
+    .expect("requested preview renderer must be available (Vulkan requires hybrid-rendering)");
     let size = Size::new(900.0, 640.0);
     let viewport = Rectangle::with_size(size);
 

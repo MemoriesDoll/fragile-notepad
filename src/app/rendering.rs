@@ -67,6 +67,19 @@ pub(super) fn startup_gpu_boost_requested(settings: &EditorSettings) -> bool {
 }
 
 impl App {
+    pub(super) fn request_about_gpu_boost(&mut self) -> Task<Message> {
+        // Automatic animation requests should stay quiet in software-only
+        // mode and leave existing file/failure status messages intact.
+        if cfg!(feature = "hybrid-rendering")
+            && self.rendering == RenderingState::Software
+            && startup_gpu_boost_requested(&self.settings)
+        {
+            self.request_gpu_boost()
+        } else {
+            Task::none()
+        }
+    }
+
     pub(super) fn request_gpu_boost(&mut self) -> Task<Message> {
         match start_gpu_boost(
             &mut self.rendering,
@@ -307,7 +320,7 @@ fn configure_hardware_backend() -> Task<Message> {
     use iced::backend::Api;
 
     backend::prepare_warm_and_commit(backend::Settings {
-        backend: Backend::Hardware(Api::Best),
+        backend: Backend::Hardware(Api::Vulkan),
         power_preference: backend::PowerPreference::HighPerformance,
         antialiasing: false,
         vsync: true,

@@ -21,8 +21,13 @@ there. Native file pickers retain their system chrome.
 Both styles use the transparent bunny at 24 logical pixels. Windows places it
 before the caption; macOS places it in the right side slot to preserve the
 centered caption and the traffic lights. The About logo keeps the rounded blue
-background, gently floats, and blinks once every four seconds on the existing
-header animation clock. See
+background, with the bunny floating slightly beyond the tile and blinking once
+every four seconds on a shared 24fps clock. The left paper drifts independently,
+and curved, softly fading light trails lead into the decorative quill.
+Opening About requests the Vulkan renderer when hardware acceleration is enabled,
+using the existing prepare/warm/commit handoff and software fallback.
+Late redraws retain the clock's
+cadence instead of shifting each subsequent deadline. See
 [Bunny artwork](assets/illustrations/bunny/README.md) for sources and regeneration.
 
 Debug builds provide a **Window controls** switch under **About → Debug**. Clicking
@@ -479,7 +484,7 @@ include the same fixes.
 
 The backend switch probe verifies the runtime path for starting with the
 software renderer, requesting the prepare/warm/commit backend handoff to
-`Backend::Hardware(Api::Best)`, running real wgpu offscreen warm-up, observing
+`Backend::Hardware(Api::Vulkan)`, running real wgpu offscreen warm-up, observing
 strict frame-order evidence, and exiting. Use trace collection for strict
 validation; without it, the probe may report `indeterminate` because strict
 success requires warm-up and present-order evidence:

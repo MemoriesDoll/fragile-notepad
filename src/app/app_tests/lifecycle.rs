@@ -649,8 +649,9 @@ fn about_dialog_opens_switches_tabs_and_closes() {
 }
 
 #[test]
-fn about_fades_without_backend_work_and_stops_requesting_frames_when_settled() {
+fn about_requests_hardware_once_and_preserves_fade_lifecycle() {
     use crate::app::rendering::{RenderFailureCategory, RenderingState};
+    let _guard = RenderBackendEnvGuard::new(None);
 
     for rendering in [
         RenderingState::Software,
@@ -663,14 +664,22 @@ fn about_fades_without_backend_work_and_stops_requesting_frames_when_settled() {
         app.settings.hardware_acceleration = HardwareAccelerationMode::Lazy;
 
         let task = app.update_inner(Message::AboutOpened);
+        let requests_hardware =
+            cfg!(feature = "hybrid-rendering") && rendering == RenderingState::Software;
+        let expected = if requests_hardware {
+            RenderingState::PreparingHardware
+        } else {
+            rendering
+        };
 
         assert!(app.is_about_visible);
-        assert_eq!(app.rendering, rendering);
+        assert_eq!(app.rendering, expected);
         assert!(app.needs_animation_frames());
         assert!(app.chrome_animation_info().about_rendered_visible);
         assert!(app.chrome_animation_info().about_interactive);
         assert_eq!(app.chrome_animation_info().about_progress, 0.0);
-        assert_eq!(task.units(), 0);
+        assert_eq!(task.units() > 0, requests_hardware);
+        assert_eq!(app.update_inner(Message::AboutOpened).units(), 0);
 
         let first = std::time::Instant::now();
         let settled = first + std::time::Duration::from_millis(140);
@@ -691,7 +700,28 @@ fn about_fades_without_backend_work_and_stops_requesting_frames_when_settled() {
         assert_eq!(app.chrome_animation_info().about_progress, 0.0);
         assert!(!app.chrome_animation_info().about_rendered_visible);
         assert!(!app.needs_animation_frames());
-        assert_eq!(app.rendering, rendering);
+        assert_eq!(app.rendering, expected);
+    }
+}
+
+#[test]
+fn about_respects_software_setting_and_environment_override() {
+    for (mode, override_value) in [
+        (HardwareAccelerationMode::Off, None),
+        (HardwareAccelerationMode::Lazy, Some("software")),
+    ] {
+        let _guard = RenderBackendEnvGuard::new(override_value);
+        let (mut app, _) = App::new();
+        app.settings.hardware_acceleration = mode;
+        app.file_status = Some(String::from("Saved notes.txt"));
+        let task = app.update_inner(Message::AboutOpened);
+        assert!(app.is_about_visible);
+        assert_eq!(
+            app.rendering,
+            crate::app::rendering::RenderingState::Software
+        );
+        assert_eq!(task.units(), 0);
+        assert_eq!(app.file_status.as_deref(), Some("Saved notes.txt"));
     }
 }
 

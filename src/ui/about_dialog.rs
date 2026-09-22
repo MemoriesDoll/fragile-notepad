@@ -150,8 +150,8 @@ fn dialog(
             container(
                 column![header(progress, interactive), tabs(active_tab, progress)].spacing(12)
             )
-            .padding([22, 24]),
-            container(content).padding([0, 24]).height(Fill).width(Fill),
+            .padding([20, 28]),
+            container(content).padding([0, 28]).height(Fill).width(Fill),
             container(
                 column![
                     divider(progress),
@@ -175,7 +175,7 @@ fn dialog(
                 ]
                 .spacing(14)
             )
-            .padding([16, 24]),
+            .padding([16, 28]),
         ]
         .height(Fill)
         .width(Fill),
@@ -197,20 +197,23 @@ fn header(progress: f32, effects_running: bool) -> Element<'static, Message> {
                     .width(info_vfx::LOGO_SIZE)
                     .height(info_vfx::LOGO_SIZE),
                 column![
-                    text(APP_NAME).size(22),
+                    text(APP_NAME).size(23).font(iced::Font {
+                        weight: iced::font::Weight::Semibold,
+                        ..iced::Font::DEFAULT
+                    }),
                     muted(
                         text("A lightweight editor for everyday text.").size(13),
                         progress
                     ),
                 ]
-                .spacing(4)
+                .spacing(6)
                 .width(Fill),
             ]
-            .spacing(16)
+            .spacing(14)
             .align_y(Center)
         )
         .width(Fill)
-        .height(84)
+        .height(info_vfx::HEADER_HEIGHT)
         .center_y(Fill),
     ]
     .into()
@@ -251,14 +254,28 @@ fn tab_button(
 fn about_content(progress: f32) -> Element<'static, Message> {
     scrollable(column![
         column![
-            text("A little space for your words.").size(24),
-            muted(text("Quick notes, source code, and everything in between.\nSimple tools for working with local text files.").size(14), progress),
+            text("A little space for your words.").size(25).font(iced::Font {
+                weight: iced::font::Weight::Medium,
+                ..iced::Font::DEFAULT
+            }),
+            muted(text("Quick notes, source code, and everything in between.\nSimple tools for working with local text files.")
+                .size(14).line_height(1.55), progress),
         ].spacing(10),
-        container(column![
+        container(row![
+            container(space().width(3).height(56))
+                .style(move |theme: &iced::Theme| fade_container(container::Style {
+                    background: Some(theme.palette().primary.base.color.scale_alpha(0.4).into()),
+                    border: iced::Border::default().rounded(2),
+                    ..container::Style::default()
+                }, progress)),
+            column![
             muted(text("CREATED BY").size(11), progress),
-            text(AUTHOR).size(16),
+            text(AUTHOR).size(16).font(iced::Font {
+                weight: iced::font::Weight::Medium,
+                ..iced::Font::DEFAULT
+            }),
             muted(text(AUTHOR_EMAIL).size(13), progress),
-        ].spacing(6)).padding(18).width(Fill)
+        ].spacing(6)].spacing(16).align_y(Center)).padding(20).width(Fill)
             .style(move |theme| fade_container(styles::info_card(theme), progress)),
     ].spacing(22).padding([2, 0]).width(Fill)).smooth_scroll(true)
         .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))

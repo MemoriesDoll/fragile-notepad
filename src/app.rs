@@ -596,7 +596,7 @@ impl App {
         }
         self.chrome_animation.about.set_visible(true);
 
-        Task::none()
+        self.request_about_gpu_boost()
     }
 
     fn needs_animation_frames(&self) -> bool {

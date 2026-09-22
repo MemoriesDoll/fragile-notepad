@@ -54,6 +54,43 @@ pub fn quill_handle() -> iced::advanced::image::Handle {
     QUILL.clone()
 }
 
+pub fn about_background_handle() -> iced::advanced::image::Handle {
+    static BACKGROUND: std::sync::LazyLock<iced::advanced::image::Handle> =
+        std::sync::LazyLock::new(|| {
+            iced::advanced::image::Handle::from_rgba(
+                384,
+                384,
+                include_bytes!("../assets/illustrations/bunny/about-background.rgba").as_slice(),
+            )
+        });
+    BACKGROUND.clone()
+}
+
+pub fn about_bunny_handle(frame: u8) -> iced::advanced::image::Handle {
+    static FRAMES: std::sync::LazyLock<[iced::advanced::image::Handle; 3]> =
+        std::sync::LazyLock::new(|| {
+            [
+                include_bytes!("../assets/illustrations/bunny/about-bunny.rgba").as_slice(),
+                include_bytes!("../assets/illustrations/bunny/about-bunny-half.rgba").as_slice(),
+                include_bytes!("../assets/illustrations/bunny/about-bunny-closed.rgba").as_slice(),
+            ]
+            .map(|pixels| iced::advanced::image::Handle::from_rgba(384, 384, pixels))
+        });
+    FRAMES[usize::from(frame).min(2)].clone()
+}
+
+pub fn about_paper_handle() -> iced::advanced::image::Handle {
+    static PAPER: std::sync::LazyLock<iced::advanced::image::Handle> =
+        std::sync::LazyLock::new(|| {
+            iced::advanced::image::Handle::from_rgba(
+                384,
+                384,
+                include_bytes!("../assets/illustrations/bunny/about-paper.rgba").as_slice(),
+            )
+        });
+    PAPER.clone()
+}
+
 pub mod syntax {
     pub fn folding_hints_xml() -> &'static str {
         include_str!("../assets/syntax/folding-hints.xml")

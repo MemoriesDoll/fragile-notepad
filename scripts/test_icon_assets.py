@@ -14,19 +14,22 @@ class IconAssetsTest(unittest.TestCase):
         from PIL import Image, ImageChops
 
         art = ROOT / "assets/illustrations/bunny"
-        def load(name):
-            return Image.frombytes("RGBA", (256, 256), (art / f"{name}.rgba").read_bytes())
-        opened = load("app")
-        for name in ("app-half", "app-closed"):
-            frame = load(name)
-            self.assertEqual(frame.getchannel("A").tobytes(), opened.getchannel("A").tobytes())
-            diff = ImageChops.difference(opened, frame).convert("RGB")
-            bounds = diff.getbbox()
-            self.assertIsNotNone(bounds)
-            self.assertTrue(98 <= bounds[0] < bounds[2] <= 155)
-            self.assertTrue(82 <= bounds[1] < bounds[3] <= 112)
-            self.assertIsNotNone(diff.crop((98, 82, 120, 112)).getbbox())
-            self.assertIsNotNone(diff.crop((135, 82, 155, 112)).getbbox())
+        for family, size in (("app", 256), ("about-bunny", 384)):
+            def load(name):
+                return Image.frombytes("RGBA", (size, size), (art / f"{name}.rgba").read_bytes())
+            opened = load(family)
+            scale = size / 256
+            for name in (f"{family}-half", f"{family}-closed"):
+                with self.subTest(frame=name):
+                    frame = load(name)
+                    self.assertEqual(frame.getchannel("A").tobytes(), opened.getchannel("A").tobytes())
+                    diff = ImageChops.difference(opened, frame).convert("RGB")
+                    bounds = diff.getbbox()
+                    self.assertIsNotNone(bounds)
+                    self.assertTrue(98 * scale <= bounds[0] < bounds[2] <= 155 * scale)
+                    self.assertTrue(82 * scale <= bounds[1] < bounds[3] <= 112 * scale)
+                    for eye in ((98, 82, 120, 112), (135, 82, 155, 112)):
+                        self.assertIsNotNone(diff.crop(tuple(int(v * scale) for v in eye)).getbbox())
 
     def test_bunny_rasters_preserve_background_and_transparent_title_icon(self):
         from PIL import Image

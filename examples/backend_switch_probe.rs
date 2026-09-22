@@ -353,7 +353,7 @@ mod probe {
                     );
 
                     let switch = self.switch_backend(backend::Settings {
-                        backend: Backend::Hardware(Api::Best),
+                        backend: Backend::Hardware(Api::Vulkan),
                         power_preference: backend::PowerPreference::HighPerformance,
                         antialiasing: false,
                         vsync: true,

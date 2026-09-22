@@ -27,15 +27,23 @@ GPU renderer back to tiny-skia.
 
 When saved settings load, a lazy/diagnostic policy requests a boost once the main
 window is open. With no saved settings, that load-time branch does not request a
-boost. Opening About does not request a backend change.
+boost. Opening About requests a Vulkan handoff under lazy/diagnostic policy;
+software-only policy and prior failure suppression still apply. All hardware
+handoffs explicitly select `Api::Vulkan`, including startup and settings requests,
+so an earlier boost uses the same renderer as the About animation. The renderer
+is shared across application windows and stays active after About closes.
+Unavailable Vulkan support retains the existing software fallback.
+The low-level `WGPU_BACKEND` diagnostic environment override still takes
+precedence inside wgpu; leave it unset or use `vulkan` for Vulkan rendering.
 Find, inline replace, and function-list visibility use short reveal/fade transitions;
 menus, custom settings dropdowns, and confirmation/window-list popups have brief
 entrance motion. These run on both renderers and request frames only while
 transitioning. The About panel and its backdrop fade in and out. Its header has
-soft color bloom and slowly drifting light rays behind a macaw quill, capped
-at 24 animation updates per second. The effect automatically stops scheduling
-frames while unfocused, clipped out, or closing, and never requests a renderer
-handoff.
+independently floating bunny and paper layers, with soft curved light trails
+flowing toward a macaw quill, on a shared 24fps clock. The effect stops scheduling
+frames while unfocused, clipped out, or closing. Animation ticks never request
+additional handoffs. The small trail texture is generated on the CPU; Vulkan
+handles image sampling, blending, compositing, and presentation after handoff.
 
 The app states are `Software`, `PreparingHardware`, `Hardware`, and
 `Failed(RenderFailureCategory)`. Duplicate requests are suppressed while preparing

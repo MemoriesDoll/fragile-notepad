@@ -1,4 +1,4 @@
-//! Floating application logo, diffuse color and slow light rays for the Info header.
+//! Layered floating artwork and a soft, flowing quill trail for the About header.
 
 use std::cell::RefCell;
 use std::sync::LazyLock;
@@ -12,12 +12,14 @@ use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, window};
 use crate::message::Message;
 
 const FRAME_INTERVAL: Duration = Duration::from_nanos(41_666_667);
-const HEADER_HEIGHT: f32 = 84.0;
-pub(super) const LOGO_SIZE: f32 = 64.0;
+pub(super) const HEADER_HEIGHT: f32 = 96.0;
+pub(super) const LOGO_SIZE: f32 = 80.0;
+const TILE_SIZE: f32 = 64.0;
+const BUNNY_SIZE: f32 = 96.0;
 const QUIET_WIDTH: f32 = 260.0;
 const ART_WIDTH: f32 = 280.0;
-const QUILL_WIDTH: f32 = 100.0;
-const QUILL_HEIGHT: f32 = 110.0;
+const QUILL_WIDTH: f32 = 72.0;
+const QUILL_HEIGHT: f32 = 79.2;
 const QUILL_RIGHT_INSET: f32 = 12.0;
 const QUILL_PIXELS: &[u8] = include_bytes!("../../assets/illustrations/macaw-quill.rgba");
 static QUILL: LazyLock<image::Handle> =
@@ -94,24 +96,42 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
         }
         let bounds = layout.bounds();
         let state = tree.state.downcast_ref::<State>();
-        let logo = Rectangle {
-            x: bounds.x,
-            y: bounds.y
-                + (HEADER_HEIGHT - LOGO_SIZE) * 0.5
-                + 2.0 * (state.elapsed as f32 * std::f32::consts::TAU / 4.0).sin(),
-            width: LOGO_SIZE,
-            height: LOGO_SIZE,
+        let phase = state.elapsed as f32 * std::f32::consts::TAU / 4.0;
+        let tile = Rectangle {
+            x: bounds.x + (LOGO_SIZE - TILE_SIZE) * 0.5,
+            y: bounds.y + (HEADER_HEIGHT - TILE_SIZE) * 0.5 + 0.5 * phase.sin(),
+            width: TILE_SIZE,
+            height: TILE_SIZE,
         };
-        if let Some(clip) = logo.intersection(viewport) {
+        let bunny = Rectangle {
+            x: bounds.x + (LOGO_SIZE - BUNNY_SIZE) * 0.5 + 0.6 * phase.cos(),
+            y: bounds.y + (HEADER_HEIGHT - BUNNY_SIZE) * 0.5 - 3.0 + 2.5 * phase.sin(),
+            width: BUNNY_SIZE,
+            height: BUNNY_SIZE,
+        };
+        let paper_phase = state.elapsed as f32 * std::f32::consts::TAU / 5.5 + 1.1;
+        let paper = Rectangle {
+            x: bounds.x + (LOGO_SIZE - BUNNY_SIZE) * 0.5 - 7.0 + 1.5 * paper_phase.cos(),
+            y: bounds.y + (HEADER_HEIGHT - BUNNY_SIZE) * 0.5 - 6.0 + 3.5 * paper_phase.sin(),
+            width: BUNNY_SIZE,
+            height: BUNNY_SIZE,
+        };
+        for (handle, area) in [
+            (crate::assets::about_background_handle(), tile),
+            (crate::assets::about_paper_handle(), paper),
+            (
+                crate::assets::about_bunny_handle(blink_frame(state.elapsed)),
+                bunny,
+            ),
+        ] {
+            let Some(clip) = area.intersection(viewport) else {
+                continue;
+            };
             renderer.draw_image(
-                image::Image::new(match blink_frame(state.elapsed) {
-                    1 => crate::assets::app_blink_handle(false),
-                    2 => crate::assets::app_blink_handle(true),
-                    _ => crate::assets::app_icon_handle(),
-                })
-                .filter_method(image::FilterMethod::Linear)
-                .opacity(self.progress),
-                logo,
+                image::Image::new(handle)
+                    .filter_method(image::FilterMethod::Linear)
+                    .opacity(self.progress),
+                area,
                 clip,
             );
         }
@@ -152,9 +172,8 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
             width: QUILL_WIDTH,
             height: QUILL_HEIGHT,
         };
-        // Let the feather overlap the header's padding above and below the
-        // glow. The original 4× artwork stays sharp across desktop scales and
-        // shares one image handle across themes, phases, and dialog instances.
+        // Keep the feather secondary to the bunny. The original artwork stays
+        // sharp across desktop scales and shares one handle across instances.
         // The width guard keeps it entirely clear of the title.
         if let Some(clip) = quill_bounds.intersection(viewport) {
             renderer.draw_image(
@@ -249,7 +268,13 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
                         .as_secs_f64();
                 }
                 state.last_tick = Some(now);
-                state.next_tick = Some(now + FRAME_INTERVAL);
+                // Keep the 24 Hz cadence anchored when a display presents late
+                // (e.g. alternating 2/3 refreshes at 60 Hz), without catch-up bursts.
+                let deadline = state.next_tick.unwrap_or(now);
+                let remainder =
+                    now.saturating_duration_since(deadline).as_nanos() % FRAME_INTERVAL.as_nanos();
+                state.next_tick =
+                    Some(now + FRAME_INTERVAL - Duration::from_nanos(remainder as u64));
             }
         }
         let deadline = *state.next_tick.get_or_insert(now + FRAME_INTERVAL);
@@ -295,93 +320,52 @@ fn smooth(value: f32) -> f32 {
     value * value * (3.0 - 2.0 * value)
 }
 
-/// Analytic Gaussian blooms and feathered rays, encoded as straight RGBA.
+/// Curved ribbons with a diffuse halo, encoded as straight RGBA.
 /// Only one small image is retained; opacity is applied later by the renderer.
 fn render_field(key: FieldKey) -> Vec<u8> {
-    let time = f64::from_bits(key.phase);
-    let wave =
-        |period: f64, offset: f64| ((time / period * std::f64::consts::TAU + offset).sin()) as f32;
-    let centers = [
-        (
-            0.36 + 0.055 * wave(34.0, 0.0),
-            0.48 + 0.10 * wave(29.0, 1.2),
-            0.25,
-            0.42,
-        ),
-        (
-            0.67 + 0.065 * wave(41.0, 2.1),
-            0.32 + 0.11 * wave(37.0, 0.6),
-            0.23,
-            0.41,
-        ),
-        (
-            0.79 + 0.035 * wave(31.0, 4.0),
-            0.71 + 0.09 * wave(43.0, 2.8),
-            0.28,
-            0.38,
-        ),
-    ];
+    let time = f64::from_bits(key.phase) as f32;
     let colors = if key.dark {
         [
-            [244.0, 177.0, 150.0],
-            [177.0, 154.0, 237.0],
-            [135.0, 211.0, 220.0],
+            [133.0, 195.0, 241.0],
+            [185.0, 163.0, 235.0],
+            [238.0, 181.0, 172.0],
         ]
     } else {
         [
-            [238.0, 153.0, 126.0],
-            [166.0, 142.0, 222.0],
-            [109.0, 185.0, 199.0],
+            [66.0, 145.0, 203.0],
+            [145.0, 116.0, 205.0],
+            [219.0, 146.0, 139.0],
         ]
     };
-    let ray_centers = [
-        0.48 + 0.035 * wave(32.0, 0.3),
-        0.72 + 0.035 * wave(39.0, 1.8),
-        0.93 + 0.030 * wave(46.0, 3.1),
-    ];
-    let slope = 0.28 + 0.025 * wave(38.0, 0.0);
     let mut pixels = vec![0; key.width as usize * key.height as usize * 4];
-    for y in 0..key.height {
-        let v = y as f32 / (key.height - 1) as f32;
-        for x in 0..key.width {
-            let u = x as f32 / (key.width - 1) as f32;
-            let envelope = smooth(u / 0.38)
-                * smooth((1.0 - u) / 0.16)
-                * smooth(v / 0.28)
-                * smooth((1.0 - v) / 0.28);
+    for x in 0..key.width {
+        let u = x as f32 / (key.width - 1) as f32;
+        // Each wisp tapers into the quill's nib. Motion is strongest in the
+        // trailing end, leaving a quiet, stable attachment near the feather.
+        let t = (u / 0.80).clamp(0.0, 1.0);
+        let arch = (t * std::f32::consts::PI).sin();
+        let flow = (t * 7.0 - time * 0.65).sin();
+        let center = 0.64 - 0.23 * arch + 0.16 * t + 0.035 * flow * arch;
+        let taper = smooth(u / 0.30) * smooth((0.94 - u) / 0.18);
+        for y in 0..key.height {
+            let v = y as f32 / (key.height - 1) as f32;
+            let envelope = taper * smooth(v / 0.20) * smooth((1.0 - v) / 0.22);
             let mut weight = 0.0;
             let mut rgb = [0.0; 3];
-            for ((cx, cy, sx, sy), color) in centers.into_iter().zip(colors) {
-                let dx = (u - cx) / sx;
-                let dy = (v - cy) / sy;
-                let bloom = (-0.5 * (dx * dx + dy * dy)).exp() * 0.58;
-                weight += bloom;
+            for (strand, color) in colors.into_iter().enumerate() {
+                let offset = (strand as f32 - 1.0) * 0.105 * arch;
+                let drift = 0.025 * (time * 0.5 + t * 5.0 + strand as f32 * 1.8).sin() * arch;
+                let distance = v - center - offset - drift;
+                let halo = (-0.5 * (distance / 0.13).powi(2)).exp() * 0.20;
+                let ribbon = (-0.5 * (distance / 0.055).powi(2)).exp() * 0.30;
+                let pulse = 0.88 + 0.12 * (t * 9.0 - time * 0.8 + strand as f32).cos();
+                let light = (halo + ribbon) * pulse;
+                weight += light;
                 for channel in 0..3 {
-                    rgb[channel] += color[channel] * bloom;
+                    rgb[channel] += color[channel] * light;
                 }
             }
-            for (index, center) in ray_centers.into_iter().enumerate() {
-                let distance = (u + (v - 0.5) * slope - center) / (0.022 + index as f32 * 0.008);
-                let ray = (-0.5 * distance * distance).exp() * 0.64;
-                weight += ray;
-                for channel in 0..3 {
-                    // Colored light remains visible on a white dialog, while
-                    // gently lifting each hue toward white keeps it luminous.
-                    let light = if key.dark {
-                        colors[index][channel] * 0.72 + 255.0 * 0.28
-                    } else {
-                        // A white surface needs more chroma to reveal the
-                        // diagonal rays without darkening the diffuse band.
-                        [
-                            [238.0, 115.0, 80.0],
-                            [139.0, 92.0, 223.0],
-                            [46.0, 164.0, 193.0],
-                        ][index][channel]
-                    };
-                    rgb[channel] += light * ray;
-                }
-            }
-            let alpha = (1.0 - (-weight).exp()) * envelope * if key.dark { 0.66 } else { 0.56 };
+            let alpha = (1.0 - (-weight).exp()) * envelope * if key.dark { 0.50 } else { 0.44 };
             let index = ((y * key.width + x) * 4) as usize;
             for channel in 0..3 {
                 pixels[index + channel] = (rgb[channel] / weight.max(0.0001))
@@ -563,6 +547,32 @@ mod tests {
         );
         assert_eq!(tree.state.downcast_ref::<State>().elapsed, elapsed);
         assert_eq!(node.bounds(), BOUNDS);
+    }
+
+    #[test]
+    fn late_display_frames_preserve_twenty_four_updates_per_second() {
+        let renderer = renderer();
+        let (mut widget, mut tree, node) = mount(&renderer);
+        let start = Instant::now();
+        let mut changes = 0;
+        for frame in 0..=120 {
+            let before = tree.state.downcast_ref::<State>().elapsed;
+            update(
+                &mut widget,
+                &mut tree,
+                &node,
+                &renderer,
+                Event::Window(window::Event::RedrawRequested(
+                    start + Duration::from_nanos(16_666_667) * frame,
+                )),
+                BOUNDS,
+            );
+            changes += usize::from(tree.state.downcast_ref::<State>().elapsed != before);
+        }
+        assert_eq!(
+            changes, 48,
+            "24 animation updates per second on a 60 Hz display"
+        );
     }
 
     #[test]
