@@ -9,6 +9,8 @@ A desktop text editor for notes and source files. Written in Rust with
 &nbsp;·&nbsp; [Development](DEVELOPMENT.md)
 &nbsp;·&nbsp; [Architecture](ARCHITECTURE.md)
 
+> **Generative AI Notice:** Generative AI was used throughout the development of this project.
+
 ## Application icons and About
 
 - The README and application icon use the bunny artwork with its rounded blue
