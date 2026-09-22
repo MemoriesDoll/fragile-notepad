@@ -1,38 +1,24 @@
 # Packaging
 
-Fragile Notepad is packaged from a source tree that includes patched vendored
-dependencies and generated embedded icon assets. A release build is not just
-`cargo build --release`; the vendor and asset preparation steps are part of the
-package contract.
+Fragile Notepad is packaged from checked-in local dependencies and generated
+embedded icon assets. Generate the assets before building a release; vendor
+sources are already included in a fresh clone.
 
 ## Source Layout
 
 - `src/` contains the application.
 - `assets/` contains source assets and generated RGBA icon files consumed at
   compile time through `src/assets.rs`.
-- `vendor/iced` and `vendor/encoding_rs` are script-managed vendor checkouts
-  pinned by `patches/*/BASE_REVISION`.
-- `patches/` contains project-owned changes applied on top of vendor bases.
+- `vendor/iced` and `vendor/encoding_rs` are repository-owned source directories.
+  Upstream provenance and licenses are recorded in `vendor/README.md`.
 - `scripts/` contains repeatable setup, asset generation, and CI entry points.
 
 ## Preparing a Checkout
-
-Run the vendor setup before building from a fresh clone:
 
 Use the Rust stable toolchain and Python with
 `python -m pip install -r scripts/requirements-assets.txt` (the same asset
 tooling used by `.github/workflows/ci.yml`). Platform windowing dependencies must
 also be available; the Linux CI job lists the required X11/Wayland packages.
-
-```powershell
-.\scripts\setup-vendor.ps1 apply
-```
-
-On Linux or macOS:
-
-```bash
-bash scripts/setup-vendor.sh apply
-```
 
 ## Generated Assets
 
@@ -58,8 +44,8 @@ The bunny sources live in `assets/illustrations/bunny/`. Standard asset generati
 also exports `target/app-icons/app.ico`, `app.icns`, and `app.png` for packaging.
 Large icons retain the rounded blue tile; the in-app title icon is transparent.
 Windows builds embed the generated ICO in the executable through `build.rs`.
-The existing macOS release remains a standalone binary, not an `.app` bundle;
-`app.icns` is available for a future bundle's `CFBundleIconFile`.
+The macOS release uses a launcher and bundled Vulkan runtime, not an `.app`
+bundle; `app.icns` is available for a future bundle's `CFBundleIconFile`.
 
 Distribute the project `LICENSE` and `assets/icons/NOTICE.txt` (renamed to
 `ICON-NOTICES.txt`) beside the binary. The nightly archive jobs include both;
@@ -103,9 +89,30 @@ GPU drivers. The icon parity test requires an available wgpu adapter in CI unles
 `FRAGILE_ALLOW_WGPU_PARITY_SKIP=1` explicitly opts out; skipped GPU checks are not
 GPU-validation evidence.
 
+Hardware rendering now compiles only Vulkan, including Vulkan portability on
+macOS. Windows CI selects the Vulkan loader and SwiftShader ICD shipped with
+the runner's Chrome installation via `scripts/setup-ci-vulkan.ps1`. This is also
+software Vulkan, and is used only for CI. Windows distribution continues to use
+the user's graphics-driver Vulkan runtime.
+
+For local macOS validation, install `molten-vk`, `vulkan-loader`, and
+`vulkan-tools` with Homebrew, then run in the same shell:
+
+```bash
+source scripts/setup-macos-vulkan.sh
+vulkaninfo --summary
+source scripts/ci.sh
+```
+
+Source the CI script here: launching another system shell can cause macOS SIP
+to remove `DYLD_LIBRARY_PATH`. CI additionally runs all nine animated handoff
+scenarios and preserves their JSON results and traces. macOS CI execution is
+still required to establish native validation; preparing the workflow is not
+that evidence.
+
 ## Release Build
 
-After vendor setup, asset generation, and validation:
+After asset generation and validation:
 
 ```powershell
 cargo build --release --locked
@@ -121,6 +128,27 @@ Icons and syntax resources are embedded. Do not distribute `vendor/`, generated
 profiling fixtures, or personal settings/session files with the binary. The nightly
 workflow packages the executable in a Windows ZIP or Unix tarball; consult
 `.github/workflows/nightly.yml` for current artifact names and target platforms.
+
+On macOS, after the release build and Homebrew runtime installation:
+
+```bash
+mkdir -p dist
+bash scripts/package-macos.sh dist/package
+tar -C dist/package -czf dist/fragile-notepad-macos.tar.gz .
+```
+
+The package directory must be new. Distribute the entire directory: the
+`fragile-notepad` launcher, `libexec/fragile-notepad`, the loader and MoltenVK
+dylibs in `lib/`, the relative ICD manifest in `share/vulkan/icd.d/`, and
+licenses. The launcher configures discovery and then executes the application;
+Vulkan still loads lazily after software startup. Packaging rewrites library
+identities, rejects unresolved non-system dependencies, and ad-hoc signs the
+modified dylibs. This does not provide Developer ID signing or notarization.
+Pinned source notices (including MoltenVK's static dependencies), source
+checksums, runtime checksums, and Homebrew build metadata accompany the package.
+Collecting these notices requires network access to the pinned upstream sources.
+Nightly gates test handoff against the packaged runtime before creating the
+archive. Native macOS packaging and launch results remain unverified locally.
 
 Runtime settings and recovery snapshots use `settings.xml` and `session.json`
 under the platform config directory. Compiled outline cache data uses the platform

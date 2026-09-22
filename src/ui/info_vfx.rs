@@ -11,6 +11,9 @@ use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, window};
 
 use crate::message::Message;
 
+#[cfg(feature = "hybrid-rendering")]
+mod gpu;
+
 const FRAME_INTERVAL: Duration = Duration::from_nanos(41_666_667);
 pub(super) const HEADER_HEIGHT: f32 = 96.0;
 pub(super) const LOGO_SIZE: f32 = 80.0;
@@ -38,6 +41,8 @@ struct InfoVfx {
 }
 
 struct State {
+    #[cfg(feature = "hybrid-rendering")]
+    gpu_instance: gpu::Instance,
     enabled: bool,
     focused: bool,
     zero_sized: bool,
@@ -147,21 +152,45 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
             height: (art.height * 0.5).ceil().clamp(8.0, 48.0) as u32,
             dark: theme.palette().is_dark,
         };
-        let mut cached = state.image.borrow_mut();
-        if cached.as_ref().is_none_or(|field| field.key != key) {
-            *cached = Some(CachedField {
-                key,
-                handle: image::Handle::from_rgba(key.width, key.height, render_field(key)),
+        #[cfg(feature = "hybrid-rendering")]
+        let gpu_drawn = if matches!(renderer, Renderer::Primary(_)) {
+            use iced::advanced::Renderer as _;
+            use iced_wgpu::primitive::Renderer as _;
+            renderer.with_layer(clip, |renderer| {
+                renderer.draw_primitive(
+                    art,
+                    gpu::Trail {
+                        instance: state.gpu_instance.clone(),
+                        time: state.elapsed as f32,
+                        opacity: self.progress,
+                        dark: key.dark,
+                    },
+                );
             });
-        }
-        if let Some(field) = cached.as_ref() {
-            renderer.draw_image(
-                image::Image::new(&field.handle)
-                    .filter_method(image::FilterMethod::Linear)
-                    .opacity(self.progress),
-                art,
-                clip,
-            );
+            state.image.borrow_mut().take();
+            true
+        } else {
+            false
+        };
+        #[cfg(not(feature = "hybrid-rendering"))]
+        let gpu_drawn = false;
+        if !gpu_drawn {
+            let mut cached = state.image.borrow_mut();
+            if cached.as_ref().is_none_or(|field| field.key != key) {
+                *cached = Some(CachedField {
+                    key,
+                    handle: image::Handle::from_rgba(key.width, key.height, render_field(key)),
+                });
+            }
+            if let Some(field) = cached.as_ref() {
+                renderer.draw_image(
+                    image::Image::new(&field.handle)
+                        .filter_method(image::FilterMethod::Linear)
+                        .opacity(self.progress),
+                    art,
+                    clip,
+                );
+            }
         }
         if bounds.width < QUIET_WIDTH + QUILL_WIDTH + QUILL_RIGHT_INSET {
             return;
@@ -192,6 +221,8 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
 
     fn state(&self) -> tree::State {
         tree::State::new(State {
+            #[cfg(feature = "hybrid-rendering")]
+            gpu_instance: gpu::Instance::default(),
             enabled: self.running && self.progress > 0.0,
             focused: true,
             zero_sized: false,
@@ -896,6 +927,171 @@ mod tests {
                     .chunks_exact(4)
                     .any(|pixel| pixel[3] > 0 && pixel[3] < 20 && pixel[0] > 100)
             );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "hybrid-rendering")]
+    fn vulkan_handoff_releases_cpu_field_and_rollback_restores_the_same_phase() {
+        let mut software = renderer();
+        let mut hardware = futures::executor::block_on(<Renderer as Headless>::new(
+            renderer::Settings::default(),
+            Some("wgpu"),
+        ))
+        .expect("Vulkan renderer required for handoff validation");
+        let (widget, mut tree, node) = mount(&software);
+        tree.state.downcast_mut::<State>().elapsed = 2.9;
+        let draw = |renderer: &mut Renderer| {
+            renderer.reset(BOUNDS);
+            widget.as_widget().draw(
+                &tree,
+                renderer,
+                &Theme::Light,
+                &renderer::Style::default(),
+                Layout::new(&node),
+                mouse::Cursor::Unavailable,
+                &BOUNDS,
+            );
+            renderer.screenshot(
+                Size::new(BOUNDS.width as u32, BOUNDS.height as u32),
+                1.0,
+                Color::TRANSPARENT,
+            )
+        };
+        let before = draw(&mut software);
+        assert!(tree.state.downcast_ref::<State>().image.borrow().is_some());
+        let gpu_pixels = draw(&mut hardware);
+        assert!(gpu_pixels.chunks_exact(4).any(|pixel| pixel[3] > 0));
+        assert!(tree.state.downcast_ref::<State>().image.borrow().is_none());
+        let after = draw(&mut software);
+        assert_eq!(before, after);
+        assert!(tree.state.downcast_ref::<State>().image.borrow().is_some());
+        assert_eq!(tree.state.downcast_ref::<State>().elapsed, 2.9);
+    }
+
+    #[test]
+    #[cfg(feature = "hybrid-rendering")]
+    fn vulkan_trail_matches_fallback_and_keeps_instances_and_clipping_independent() {
+        let renderer = futures::executor::block_on(<Renderer as Headless>::new(
+            renderer::Settings::default(),
+            Some("wgpu"),
+        ))
+        .expect("Vulkan renderer required for shader parity");
+        assert_trail_parity(renderer);
+
+        // Also render the uniform-buffer path on a device without immediates.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter =
+            futures::executor::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&Default::default())).unwrap();
+        let engine = iced_wgpu::Engine::new(
+            &adapter,
+            device,
+            queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+            None,
+            iced_wgpu::graphics::Shell::headless(),
+        );
+        assert_trail_parity(Renderer::Primary(iced_wgpu::Renderer::new(
+            engine,
+            renderer::Settings::default(),
+        )));
+    }
+
+    #[cfg(feature = "hybrid-rendering")]
+    fn assert_trail_parity(mut renderer: Renderer) {
+        use iced_wgpu::primitive::Renderer as _;
+        let instances = [gpu::Instance::default(), gpu::Instance::default()];
+        let surface = Rectangle::with_size(Size::new(640.0, 128.0));
+        for scale in [1.0, 1.5, 2.0] {
+            renderer.hint(scale);
+            for time in [0.0, 2.9, 7.25] {
+                let mut screenshots = Vec::new();
+                for shader in [false, true] {
+                    renderer.reset(surface);
+                    for (id, x, dark, opacity) in [(1, 16.0, false, 1.0), (2, 336.0, true, 0.4)] {
+                        let area = Rectangle {
+                            x,
+                            y: 16.0,
+                            width: 280.0,
+                            height: 96.0,
+                        };
+                        let clip = Rectangle {
+                            x: x + 20.0,
+                            y: 28.0,
+                            width: 240.0,
+                            height: 72.0,
+                        };
+                        let phase = time + id as f64;
+                        if shader {
+                            renderer.with_layer(clip, |renderer| {
+                                renderer.draw_primitive(
+                                    area,
+                                    gpu::Trail {
+                                        instance: instances[id as usize - 1].clone(),
+                                        time: phase as f32,
+                                        opacity,
+                                        dark,
+                                    },
+                                );
+                            });
+                        } else {
+                            let key = FieldKey {
+                                phase: phase.to_bits(),
+                                width: 140,
+                                height: 48,
+                                dark,
+                            };
+                            renderer.draw_image(
+                                image::Image::new(image::Handle::from_rgba(
+                                    140,
+                                    48,
+                                    render_field(key),
+                                ))
+                                .filter_method(image::FilterMethod::Linear)
+                                .opacity(opacity),
+                                area,
+                                clip,
+                            );
+                        }
+                    }
+                    screenshots.push(renderer.screenshot(
+                        Size::new((640.0 * scale) as u32, (128.0 * scale) as u32),
+                        scale,
+                        Color::TRANSPARENT,
+                    ));
+                }
+                let reference = &screenshots[0];
+                let gpu = &screenshots[1];
+                let differences: Vec<_> = reference
+                    .iter()
+                    .zip(gpu)
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .collect();
+                let max = differences.iter().copied().max().unwrap();
+                let mean =
+                    differences.iter().map(|d| *d as f64).sum::<f64>() / differences.len() as f64;
+                // The CPU path interpolates a half-resolution, 8-bit texture;
+                // the shader evaluates the same smooth field at native resolution.
+                assert!(
+                    max <= 12 && mean < 1.0,
+                    "scale={scale} time={time} max={max} mean={mean}"
+                );
+                let width = (640.0 * scale) as usize;
+                for (index, pixel) in gpu.chunks_exact(4).enumerate() {
+                    let x = (index % width) as f32 / scale;
+                    let y = (index / width) as f32 / scale;
+                    if !(28.0..100.0).contains(&y)
+                        || !((36.0..276.0).contains(&x) || (356.0..596.0).contains(&x))
+                    {
+                        assert_eq!(pixel, &[0, 0, 0, 0], "GPU trail escaped its clip");
+                    }
+                }
+            }
         }
     }
 

@@ -7,6 +7,8 @@ cd "$repo_root"
 cargo fmt --package fragile-notepad --check
 bash scripts/generate_icon_assets.sh
 python3 scripts/test_icon_assets.py
+python3 scripts/test_profile_vulkan_live.py
+python3 scripts/test_vulkan_handoff_evidence.py
 cargo check
 
 if [[ "$(uname -s)" == "Linux" ]] && command -v xvfb-run >/dev/null 2>&1; then

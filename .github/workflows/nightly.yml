@@ -105,7 +105,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'patches/**') }}
+          key: ${{ runner.os }}-release-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**') }}
           restore-keys: |
             ${{ runner.os }}-release-
             ${{ runner.os }}-cargo-
@@ -127,6 +127,7 @@ jobs:
             libvulkan1 \
             mesa-vulkan-drivers \
             vulkan-tools \
+            weston \
             pkg-config \
             xvfb \
             xauth
@@ -136,15 +137,18 @@ jobs:
         shell: bash
         run: bash scripts/setup-ci-vulkan.sh
 
-      - name: Apply vendor patches
+      - name: Install macOS Vulkan runtime
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install molten-vk vulkan-loader vulkan-tools
+          source scripts/setup-macos-vulkan.sh
+          vulkaninfo --summary
+
+      - name: Configure Windows software Vulkan adapter
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\scripts\setup-vendor.ps1 apply
-
-      - name: Apply vendor patches
-        if: runner.os != 'Windows'
-        shell: bash
-        run: bash scripts/setup-vendor.sh apply
+        run: .\scripts\setup-ci-vulkan.ps1
 
       - name: Generate embedded icon assets
         if: runner.os == 'Windows'
@@ -157,8 +161,18 @@ jobs:
         run: bash scripts/generate_icon_assets.sh
 
       - name: Validate release gates
-        if: runner.os != 'Linux'
+        if: runner.os == 'Windows'
         run: |
+          cargo check
+          cargo test
+          cargo check --no-default-features
+          cargo check --examples
+
+      - name: Validate macOS release gates
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          source scripts/setup-macos-vulkan.sh
           cargo check
           cargo test
           cargo check --no-default-features
@@ -176,6 +190,21 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+      - name: Validate Wayland Vulkan release
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo build --locked --release --example backend_switch_probe
+          python scripts/check-wayland-vulkan.py --binary target/release/examples/backend_switch_probe
+
+      - name: Upload Wayland Vulkan evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-wayland-linux
+          path: target/vulkan-wayland/
+          if-no-files-found: warn
+
       - name: Package Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
@@ -187,7 +216,7 @@ jobs:
           Compress-Archive -Path dist\package\* -DestinationPath dist\${{ matrix.archive }} -Force
 
       - name: Package Unix artifact
-        if: runner.os != 'Windows'
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           mkdir -p dist/package
@@ -195,6 +224,20 @@ jobs:
           cp LICENSE dist/package/
           cp assets/icons/NOTICE.txt dist/package/ICON-NOTICES.txt
           tar -C dist/package -czf "dist/${{ matrix.archive }}" fragile-notepad LICENSE ICON-NOTICES.txt
+
+      - name: Package and validate macOS Vulkan runtime
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p dist
+          bash scripts/package-macos.sh dist/package
+          # Test the packaged loader/ICD, independently of the Homebrew setup.
+          cargo build --example backend_switch_probe
+          export DYLD_LIBRARY_PATH="$PWD/dist/package/lib"
+          export VK_DRIVER_FILES="$PWD/dist/package/share/vulkan/icd.d/MoltenVK_icd.json"
+          export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
+          python scripts/check-vulkan-handoff.py --binary target/debug/examples/backend_switch_probe
+          tar -C dist/package -czf "dist/${{ matrix.archive }}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

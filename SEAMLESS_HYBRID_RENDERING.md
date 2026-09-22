@@ -57,10 +57,10 @@ The app calls `backend::prepare_warm_and_commit` and receives
 The older `backend::configure` task remains available for diagnostics, but is not
 the production strict-handoff path.
 
-The implementation lives in the exported
-[iced patch](patches/iced/fragile-notepad-iced.patch), primarily
+The implementation lives in the
+[local Iced source](vendor/iced/), primarily
 `winit/src/lib.rs`, `wgpu/src/lib.rs`, `graphics/src/compositor.rs`, and
-`renderer/src/fallback.rs` inside the vendor checkout.
+`renderer/src/fallback.rs` inside the local dependency.
 
 1. **Prepare:** create the pending GPU compositor asynchronously while the window
    manager retains the software compositor, renderers, and surfaces. Completion
@@ -115,7 +115,7 @@ not a universal no-flash guarantee.
 
 ## Software rendering optimizations
 
-The patch retains the existing filtering, clipping, and blending rules while
+The implementation retains the existing filtering, clipping, and blending rules while
 reducing repeated work:
 
 | Path | Current behavior |
@@ -163,9 +163,9 @@ cargo check --locked
 cargo test --locked
 cargo check --locked --examples
 cargo check --locked --no-default-features
-cargo test --manifest-path vendor/iced/Cargo.toml -p iced_graphics --lib
-cargo test --manifest-path vendor/iced/Cargo.toml -p iced_tiny_skia --lib --features image
-cargo test --manifest-path vendor/iced/Cargo.toml -p iced_winit -p iced_wgpu --lib
+cargo test --locked -p iced_graphics --lib
+cargo test --locked -p iced_tiny_skia --lib --features iced_tiny_skia/image
+cargo test --locked -p iced_winit -p iced_wgpu --lib
 $env:FRAGILE_PERF_TRACE='1'
 cargo run --example backend_switch_probe -- --scenario=single-window
 cargo run --example backend_switch_probe -- --scenario=multi-window
@@ -194,10 +194,9 @@ recorded WSL/Linux strict runs were blocked by GPU adapter creation; native macO
 strict handoff remains unverified. Full IME interaction and manual no-flash checks
 across supported drivers/platforms remain separate validation work.
 
-## Reproducing the vendor changes
+## Maintaining the vendor changes
 
-Export changes from `vendor/iced` using the patch workflow in
-[DEVELOPMENT.md](DEVELOPMENT.md#patch-workflow). Commit the patch and base revision
-together. A dirty vendor checkout is expected after application of the patch.
-Do not infer reproducibility from source timestamps alone: review vendor status,
-validate patch application, and run the relevant package tests.
+The customized source is tracked directly under `vendor/iced`. A normal clone
+includes it. Edit and commit these files with the application; see
+[DEVELOPMENT.md](DEVELOPMENT.md#vendored-dependencies) for the update process.
+Run the relevant package tests with the application lockfile before committing.

@@ -99,7 +99,13 @@ fn trace() -> Option<&'static Mutex<PerfTrace>> {
 impl PerfTrace {
     fn new() -> Option<Self> {
         let path = trace_path()?;
-        let _ = std::fs::remove_file(&path);
+        Self::open(path)
+    }
+
+    fn open(path: PathBuf) -> Option<Self> {
+        // Iced may already be writing to this shared trace. Unlinking it here
+        // strands those handles on a different file and loses handoff evidence.
+        // Profiling runners choose a fresh directory or reset before startup.
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -119,6 +125,36 @@ impl PerfTrace {
             writer,
             rows_since_flush: 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_application_trace_preserves_an_existing_renderer_writer() {
+        let path = std::env::temp_dir().join(format!(
+            "fragile-trace-{}-{}.csv",
+            std::process::id(),
+            timestamp_us()
+        ));
+        let mut renderer = OpenOptions::new()
+            .create_new(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(renderer, "renderer_before").unwrap();
+        let mut application = PerfTrace::open(path.clone()).unwrap();
+        application.writer.flush().unwrap();
+        writeln!(renderer, "renderer_after").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        drop(application);
+        drop(renderer);
+        std::fs::remove_file(path).unwrap();
+        assert!(content.contains("renderer_before"));
+        assert!(content.contains("trace_start"));
+        assert!(content.contains("renderer_after"));
     }
 }
 

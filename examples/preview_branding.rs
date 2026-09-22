@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 fn main() {
     let vulkan = std::env::args().any(|argument| argument == "--vulkan");
+    let profile = std::env::args().any(|argument| argument == "--profile");
     if vulkan {
         // No renderer or worker threads exist yet. Restrict the headless wgpu
         // adapter to Vulkan so this preview cannot silently use another API.
@@ -47,8 +48,8 @@ fn main() {
             let about = about_dialog::view(
                 AboutTab::About,
                 about_dialog::RenderingDebugInfo {
-                    current_renderer: "Software".into(),
-                    rendering_policy: "Software only".into(),
+                    current_renderer: if vulkan { "Vulkan" } else { "Software" }.into(),
+                    rendering_policy: if vulkan { "Hardware" } else { "Software only" }.into(),
                     title_bar_style: style,
                 },
                 1.0,
@@ -77,6 +78,8 @@ fn main() {
             } else {
                 1
             };
+            let mut recording = Vec::new();
+            let mut readback = Vec::new();
             for frame in 0..frames {
                 let mut messages = Vec::new();
                 let mut shell = Shell::new(&window::Headless, Waker::noop(), &mut messages);
@@ -92,6 +95,7 @@ fn main() {
                     &viewport,
                 );
                 renderer.reset(viewport);
+                let record_start = Instant::now();
                 content.as_widget().draw(
                     &tree,
                     &mut renderer,
@@ -101,7 +105,16 @@ fn main() {
                     mouse::Cursor::Unavailable,
                     &viewport,
                 );
+                let record_time = record_start.elapsed();
+                let render_start = Instant::now();
                 let pixels = renderer.screenshot(Size::new(900, 640), 1.0, iced::Color::WHITE);
+                if frame >= 5 {
+                    recording.push(record_time.as_secs_f64() * 1e6);
+                    readback.push(render_start.elapsed().as_secs_f64() * 1e6);
+                }
+                if profile {
+                    continue;
+                }
                 // This screenshot has an opaque background, so its straight
                 // RGBA bytes are also valid premultiplied pixels for PNG output.
                 let image = tiny_skia::Pixmap::from_vec(
@@ -116,7 +129,24 @@ fn main() {
                 };
                 image.save_png(output.join(filename)).unwrap();
             }
+            if !recording.is_empty() {
+                recording.sort_by(f64::total_cmp);
+                readback.sort_by(f64::total_cmp);
+                let median = recording.len() / 2;
+                let p95 = recording.len() * 95 / 100;
+                println!(
+                    "ANIMATION_PROFILE renderer={} samples={} record_median_us={:.2} record_p95_us={:.2} render_with_readback_median_us={:.2} render_with_readback_p95_us={:.2}",
+                    if vulkan { "vulkan" } else { "software" },
+                    recording.len(),
+                    recording[median],
+                    recording[p95],
+                    readback[median],
+                    readback[p95]
+                );
+            }
         }
     }
-    println!("Review screenshots: {}", output.display());
+    if !profile {
+        println!("Review screenshots: {}", output.display());
+    }
 }

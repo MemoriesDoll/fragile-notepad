@@ -1,0 +1,36 @@
+
+[package]
+name = "encoding_rs-fuzz"
+version = "0.0.1"
+authors = ["Automatically generated"]
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies.encoding_rs]
+path = ".."
+[dependencies.safe_encoding_rs_mem]
+path = "../../safe_encoding_rs_mem"
+[dependencies.libfuzzer-sys]
+git = "https://github.com/rust-fuzz/libfuzzer-sys.git"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[features]
+simd-accel = ["encoding_rs/simd-accel"]
+fast-legacy-encode = ["encoding_rs/fast-legacy-encode"]
+
+[[bin]]
+name = "fuzz_encodings"
+path = "fuzzers/fuzz_encodings.rs"
+
+[[bin]]
+name = "fuzz_labels"
+path = "fuzzers/fuzz_labels.rs"
+
+[[bin]]
+name = "fuzz_mem"
+path = "fuzzers/fuzz_mem.rs"

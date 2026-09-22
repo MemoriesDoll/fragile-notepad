@@ -254,141 +254,22 @@ a five-second timeout, and test diagnostics report both timings and the budget.
 
 ## Vendored Dependencies
 
-Fragile Notepad builds against Git checkouts under `vendor/`. Each vendor
-directory is managed by the setup scripts and ignored by Git. Project-owned
-changes are stored as patch files under `patches/`, with the upstream base
-recorded in `BASE_REVISION`. A patched vendor checkout is expected to be dirty;
-the root repository tracks its patch, not the checkout itself.
+`vendor/iced` and `vendor/encoding_rs` are ordinary source directories tracked by
+this repository. Cargo uses their local paths; a fresh clone includes the
+customized sources without a separate vendor setup step.
 
-Current vendors:
+See [vendor/README.md](vendor/README.md) for upstream URLs, original revisions,
+licenses, and customization records. Edit vendor files directly and review them
+with the application's normal `git diff`. Include vendor changes in the same
+commit as application changes that depend on them.
 
-- `vendor/iced`
-  - remote: `https://github.com/iced-rs/iced.git`
-  - base: `patches/iced/BASE_REVISION`
-  - patch: `patches/iced/fragile-notepad-iced.patch`
-  - extra apply config: `core.autocrlf=true`
-- `vendor/encoding_rs`
-  - remote: `https://github.com/hsivonen/encoding_rs.git`
-  - base: `patches/encoding_rs/BASE_REVISION`
-  - patch: `patches/encoding_rs/oem-code-pages.patch`
-
-## Clone Setup
-
-After cloning, bootstrap and patch the vendor checkouts:
-
-```powershell
-.\scripts\setup-vendor.ps1 apply
-```
-
-On Linux or macOS:
-
-```bash
-bash scripts/setup-vendor.sh apply
-```
-
-## Patch Workflow
-
-Run the setup wrapper from the Fragile Notepad repo root for routine patch
-application and status checks:
-
-```powershell
-.\scripts\setup-vendor.ps1 status
-.\scripts\setup-vendor.ps1 apply
-.\scripts\setup-vendor.ps1 update
-```
-
-```bash
-bash scripts/setup-vendor.sh status
-bash scripts/setup-vendor.sh apply
-bash scripts/setup-vendor.sh update
-```
-
-Use `update` to move both vendor checkouts to the latest configured upstream
-branches and refresh their patches:
-
-- `vendor/iced`: `https://github.com/iced-rs/iced.git`, branch `master`
-- `vendor/encoding_rs`: `https://github.com/hsivonen/encoding_rs.git`, branch
-  `main`
-
-The lower-level patch helper is still used when exporting local vendor changes
-or refreshing a vendor base revision.
-
-PowerShell:
-
-```powershell
-.\scripts\vendor-patch.ps1 status -VendorDir vendor/iced -Patch patches/iced/fragile-notepad-iced.patch -BaseRevisionFile patches/iced/BASE_REVISION -GitVendor -GitConfig core.autocrlf=true
-.\scripts\vendor-patch.ps1 apply -VendorDir vendor/iced -Patch patches/iced/fragile-notepad-iced.patch -BaseRevisionFile patches/iced/BASE_REVISION -GitVendor -GitConfig core.autocrlf=true
-.\scripts\vendor-patch.ps1 export -VendorDir vendor/iced -Patch patches/iced/fragile-notepad-iced.patch -BaseRevisionFile patches/iced/BASE_REVISION -GitVendor -GitConfig core.autocrlf=true
-.\scripts\vendor-patch.ps1 refresh -VendorDir vendor/iced -Patch patches/iced/fragile-notepad-iced.patch -BaseRevisionFile patches/iced/BASE_REVISION -GitVendor -GitConfig core.autocrlf=true -Remote https://github.com/iced-rs/iced.git -Revision <upstream-iced-commit>
-
-.\scripts\vendor-patch.ps1 status -VendorDir vendor/encoding_rs -Patch patches/encoding_rs/oem-code-pages.patch -BaseRevisionFile patches/encoding_rs/BASE_REVISION -GitVendor
-.\scripts\vendor-patch.ps1 apply -VendorDir vendor/encoding_rs -Patch patches/encoding_rs/oem-code-pages.patch -BaseRevisionFile patches/encoding_rs/BASE_REVISION -GitVendor
-.\scripts\vendor-patch.ps1 export -VendorDir vendor/encoding_rs -Patch patches/encoding_rs/oem-code-pages.patch -BaseRevisionFile patches/encoding_rs/BASE_REVISION -GitVendor
-.\scripts\vendor-patch.ps1 refresh -VendorDir vendor/encoding_rs -Patch patches/encoding_rs/oem-code-pages.patch -BaseRevisionFile patches/encoding_rs/BASE_REVISION -GitVendor -Remote https://github.com/hsivonen/encoding_rs.git -Revision <upstream-encoding-rs-commit>
-```
-
-Bash:
-
-```bash
-bash scripts/vendor-patch.sh status --vendor-dir vendor/iced --patch patches/iced/fragile-notepad-iced.patch --base-revision-file patches/iced/BASE_REVISION --git-vendor --git-config core.autocrlf=true
-bash scripts/vendor-patch.sh apply --vendor-dir vendor/iced --patch patches/iced/fragile-notepad-iced.patch --base-revision-file patches/iced/BASE_REVISION --git-vendor --git-config core.autocrlf=true
-bash scripts/vendor-patch.sh export --vendor-dir vendor/iced --patch patches/iced/fragile-notepad-iced.patch --base-revision-file patches/iced/BASE_REVISION --git-vendor --git-config core.autocrlf=true
-bash scripts/vendor-patch.sh refresh --vendor-dir vendor/iced --patch patches/iced/fragile-notepad-iced.patch --base-revision-file patches/iced/BASE_REVISION --git-vendor --git-config core.autocrlf=true --remote https://github.com/iced-rs/iced.git --revision <upstream-iced-commit>
-
-bash scripts/vendor-patch.sh status --vendor-dir vendor/encoding_rs --patch patches/encoding_rs/oem-code-pages.patch --base-revision-file patches/encoding_rs/BASE_REVISION --git-vendor
-bash scripts/vendor-patch.sh apply --vendor-dir vendor/encoding_rs --patch patches/encoding_rs/oem-code-pages.patch --base-revision-file patches/encoding_rs/BASE_REVISION --git-vendor
-bash scripts/vendor-patch.sh export --vendor-dir vendor/encoding_rs --patch patches/encoding_rs/oem-code-pages.patch --base-revision-file patches/encoding_rs/BASE_REVISION --git-vendor
-bash scripts/vendor-patch.sh refresh --vendor-dir vendor/encoding_rs --patch patches/encoding_rs/oem-code-pages.patch --base-revision-file patches/encoding_rs/BASE_REVISION --git-vendor --remote https://github.com/hsivonen/encoding_rs.git --revision <upstream-encoding-rs-commit>
-```
-
-Command behavior:
-
-- `status` prints the recorded base revision, patch path, vendor HEAD, and
-  current vendor changes. It reports whether the recorded base revision matches
-  the vendor HEAD. The setup wrapper keeps `status` read-only; missing vendor
-  directories are reported without cloning.
-- `apply` clones missing vendor checkouts, checks out the recorded base
-  revision, and applies the patch to a clean vendor checkout.
-- `export` refreshes the patch from the current vendor working tree and updates
-  `BASE_REVISION` to the vendor HEAD. Untracked vendor files are included as
-  new-file patch hunks automatically. Existing non-empty patch files are backed
-  up under `patches/**/.backups/` before replacement, and empty exports refuse
-  to overwrite non-empty patches unless `-Force` / `--force` is used. After an
-  export, stage the patch artifacts so fresh clones can reproduce the same
-  vendor base:
-
-```powershell
-git add patches/iced/BASE_REVISION patches/iced/fragile-notepad-iced.patch
-git add patches/encoding_rs/BASE_REVISION patches/encoding_rs/oem-code-pages.patch
-```
-
-```bash
-git add patches/iced/BASE_REVISION patches/iced/fragile-notepad-iced.patch
-git add patches/encoding_rs/BASE_REVISION patches/encoding_rs/oem-code-pages.patch
-```
-
-  Re-run `.\scripts\setup-vendor.ps1 status` or `bash scripts/setup-vendor.sh
-  status` before committing; each vendor should report `pin status: ok`.
-  Check that the exported iced patch matches the applied hunks without changing
-  the checkout:
-
-```powershell
-git -C vendor/iced apply --reverse --check -p3 ../../patches/iced/fragile-notepad-iced.patch
-```
-
-  A reverse check validates the patch's hunks, not unrelated vendor edits; review
-  the vendor status and include new source files in the export as well.
-- `refresh` optionally fetches a remote, checks out the requested upstream
-  revision, records it as the new base, and reapplies the project patch.
-- `update` exports the current patch, reverses it to return to a clean upstream
-  base, fetches a configured upstream branch, applies the project patch on top,
-  then exports the refreshed patch and `BASE_REVISION`. On a fresh clone, the
-  setup wrapper bootstraps missing vendor checkouts before running `update`; it
-  does not reset already-present vendor directories.
-
-The script refuses to apply over dirty vendor changes unless `-Force` /
-`--force` is passed. Review vendor status before exporting so unrelated local
-experiments do not enter project patches.
+For an upstream update, compare a separate upstream checkout at the recorded
+revision with the desired revision, port the relevant changes into `vendor/`,
+and review conflicts with the local customizations. Update the provenance and
+customization notes, then run the application checks and affected vendor tests
+using the application's lockfile (for example,
+`cargo test --locked -p iced_wgpu --lib`). Upstream updates are deliberate source
+changes; builds do not fetch or replace vendor source.
 
 ## Validation
 
@@ -432,7 +313,7 @@ The parity test remains mandatory; this uses the wgpu pipeline with a software
 Vulkan adapter rather than opting out. A local Linux run needs an available
 Vulkan driver too; Xvfb supplies an X11 display, not a Vulkan adapter.
 
-Before handing off changes that touch editor rendering or a vendored patch, run:
+Before handing off changes that touch editor rendering or vendored source, run:
 
 ```powershell
 cargo check
@@ -444,7 +325,7 @@ cargo check --no-default-features
 ## Packaging
 
 Release packaging expectations are documented in `PACKAGING.md`. In short:
-apply vendor patches, regenerate icon assets when sources change, run the CI
+use the checked-in vendor sources, regenerate icon assets when sources change, run the CI
 entry point, and then build the release binary.
 
 For renderer performance changes, also run:
@@ -468,16 +349,15 @@ the optimization preserves the original linear-filter output. Pixel-equivalence
 regressions live in the vendored graphics and tiny-skia crates:
 
 ```powershell
-cargo test --manifest-path vendor/iced/Cargo.toml -p iced_graphics --lib
-cargo test --manifest-path vendor/iced/Cargo.toml -p iced_tiny_skia --lib --features image
-cargo test --manifest-path vendor/iced/Cargo.toml -p iced_winit -p iced_wgpu --lib
+cargo test --locked -p iced_graphics --lib
+cargo test --locked -p iced_tiny_skia --lib --features iced_tiny_skia/image
+cargo test --locked -p iced_winit -p iced_wgpu --lib
 ```
 
 The application icon parity test also checks cached-frame equality at 100%,
 150%, and 200% scale. Its top-edge check allows a one-level alpha rounding
 difference at the same pixel; extra rows with greater coverage differences still
-fail. Pixel-difference limits remain separate from that edge check. Re-export the
-iced patch after changing vendor tests or implementation files so fresh checkouts
+fail. Pixel-difference limits remain separate from that edge check. Commit vendor tests and implementation files directly so fresh checkouts
 include the same fixes.
 
 ## Backend Switch Probe
@@ -505,12 +385,57 @@ cache boundaries, and remaining platform-validation limits.
 On Windows, keep the generated result JSON and trace CSV from the run. Current
 Windows strict validation records `result=ok`, strict outcome success,
 Wgpu/Vulkan presented evidence, and non-null warm evidence for both
-single-window and multi-window scenarios. For WSL/Linux, compile checks and
-targeted startup/lifecycle tests pass outside the sandbox and GUI prerequisites
-are present, but strict hardware proof is currently blocked by GPU adapter
-creation (`GraphicsAdapterNotFound` / no suitable adapter). Treat that as an
-environment blocker, not source pass evidence. Native macOS is prototype-only
-for this branch and has not been locally validated.
+single-window and multi-window scenarios. For WSL/Linux, all nine strict
+scenarios pass using Mesa Lavapipe under WSLg, including the actual About
+animation. This proves software Vulkan correctness; physical-GPU Linux
+presentation is still unverified. Native macOS has not been locally validated;
+CI configures MoltenVK and the Vulkan loader as described in
+[PACKAGING.md](PACKAGING.md).
+
+To measure sustained redraw cadence and CPU frame costs after a successful
+strict handoff, build the release probe once, then run workloads sequentially:
+
+```text
+cargo build --locked --release --example backend_switch_probe
+python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe
+python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe --workload editor
+python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe --workload editor --windows 2
+python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe --workload plain-text
+python scripts/test_profile_vulkan_live.py
+```
+
+Omit `.exe` on Linux/macOS and configure the platform Vulkan runtime first.
+Keep the probe visible and focused: About intentionally pauses when unfocused,
+so its sustained workload uses one window. Editor workloads advance three rows
+per 24 Hz timer tick. The probe removes its frame subscription and changing
+status labels during measurement; About retains its own animation scheduler.
+Each run defaults to 12 seconds after handoff, discards the first two seconds,
+and saves its trace, log, strict result, and summary under `target/vulkan-live/`.
+Use `--seconds` and `--warmup-seconds` to change the interval. The runner rejects
+missing presentation evidence, software fallback, and insufficient samples.
+These instrumented redraw wall times include interaction, drawing, tracing,
+and presentation waits, but exclude separate application updates/UI rebuilding;
+they do not measure GPU execution or display scanout latency. Initial prepare
+and commit delays belong to the handoff scenario and are outside this interval.
+
+Linux CI also runs the release probe on an isolated Weston Wayland compositor
+with a private socket and runtime directory:
+
+```text
+cargo build --locked --release --example backend_switch_probe
+python scripts/check-wayland-vulkan.py --binary target/release/examples/backend_switch_probe
+```
+
+Install Weston and configure Vulkan first (CI uses Lavapipe). The runner defaults
+to a headless Pixman compositor, checks all handoff scenarios plus sustained
+About/editor workloads, and saves logs/traces under `target/vulkan-wayland/`.
+Use `--backend=x11` for a visible nested compositor. `--weston-root` supports
+locally extracted Debian amd64 Weston packages without system installation.
+The runner terminates its compositor and removes its private runtime directory
+afterward. Headless or nested software Vulkan does not prove physical-GPU Linux
+presentation. Local WSLg's older Weston crashes with signal 11 in some release
+captures; Weston 14.0.2 passes the strengthened checks. See `VULKAN_RENDERING.md`
+for the retained crash logs and limits of that comparison.
 
 For diagnostics against the older basic configure task, run the probe in
 configure mode:
@@ -624,6 +549,9 @@ Set `FRAGILE_PERF_TRACE=1` to write the renderer trace CSV, and optionally set
 `FRAGILE_PERF_TRACE_DIR` to choose the output directory. When trace collection
 is enabled and no explicit trace directory is provided, `backend_switch_probe`
 uses `CARGO_TARGET_DIR/perf/<scenario>/<mode>-<failure>/fragile-perf.csv`.
+Application and renderer loggers append to the shared trace; use a fresh
+directory or remove the old trace before launching a new capture. The probe
+resets its trace before starting Iced, and profiling runners use fresh directories.
 The CSV should include the Phase 1 trace markers `fallback_present_start`,
 `fallback_present`, and the existing `winit_redraw_frame` event. In this repo's
 fallback ordering, `Primary` maps to wgpu and `Secondary` maps to tiny-skia, so

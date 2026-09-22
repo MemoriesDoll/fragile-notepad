@@ -257,8 +257,9 @@ fn iced_dependency_does_not_enable_slow_startup_defaults() {
         "hybrid rendering should be the default build feature"
     );
     assert!(
-        manifest.contains("hybrid-rendering = [\"iced/wgpu\"]"),
-        "hybrid-rendering feature should enable iced/wgpu"
+        manifest
+            .contains("hybrid-rendering = [\"iced/wgpu-bare\", \"dep:iced_wgpu\", \"dep:wgpu\"]"),
+        "hybrid rendering should use the explicit Vulkan feature graph"
     );
     assert!(
         !iced_line.contains("\"debug\""),

@@ -37,11 +37,24 @@ mod probe {
     const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
     const PREPARE_DELAY_MS: &str = "250";
     const COMMIT_PENDING_DELAY_MS: &str = "250";
+    const REQUESTED_RESIZE: Size = Size::new(700.0, 440.0);
 
     pub fn run() -> iced::Result {
         let mode = ProbeMode::from_env_and_args();
         let failure = ProbeFailureMode::from_env_and_args();
         let scenario = ProbeScenario::from_env_and_args();
+        let sustained = Sustained::from_args();
+        if sustained.seconds > 0 {
+            assert!(
+                mode == ProbeMode::PrepareWarmCommit
+                    && failure == ProbeFailureMode::None
+                    && matches!(
+                        scenario,
+                        ProbeScenario::SingleWindow | ProbeScenario::MultiWindow
+                    ),
+                "sustained profiling requires strict, successful single/multi-window handoff"
+            );
+        }
         scenario.install_runtime_env();
         failure.install_runtime_env();
         let trace_path = TraceValidation::install_for_probe(mode, scenario, failure);
@@ -71,6 +84,7 @@ mod probe {
                     failure,
                     trace_path.clone(),
                     result_path.clone(),
+                    sustained,
                 )
             },
             Probe::update,
@@ -106,6 +120,7 @@ mod probe {
         windows_closed: u64,
         resizes_seen: u64,
         resize_requested: bool,
+        requested_resize_observed: bool,
         close_requested: bool,
         switch_started: bool,
         result: ProbeResult,
@@ -114,6 +129,42 @@ mod probe {
         trace_path: Option<TraceValidation>,
         result_path: PathBuf,
         result_written: bool,
+        sustained: Sustained,
+        document: Option<fragile_notepad::core::Document>,
+        editor_settings: fragile_notepad::core::EditorSettings,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    struct Sustained {
+        seconds: u64,
+        editor: bool,
+        plain_text: bool,
+    }
+
+    impl Sustained {
+        fn from_args() -> Self {
+            let arguments: Vec<_> = std::env::args().collect();
+            let seconds = arguments
+                .iter()
+                .find_map(|arg| arg.strip_prefix("--sustain-seconds="))
+                .map(|value| value.parse().expect("--sustain-seconds must be an integer"))
+                .unwrap_or(0);
+            assert!(
+                seconds == 0 || (5..=300).contains(&seconds),
+                "sustained profiling requires 5 to 300 seconds"
+            );
+            let plain_text = arguments.iter().any(|arg| arg == "--plain-text");
+            let editor = plain_text || arguments.iter().any(|arg| arg == "--editor");
+            assert!(
+                !editor || seconds > 0,
+                "editor profiling requires --sustain-seconds"
+            );
+            Self {
+                seconds,
+                editor,
+                plain_text,
+            }
+        }
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,17 +187,21 @@ mod probe {
         WaitingInitialFrame,
         Switching,
         WaitingPostSwitchFrame,
+        Sustaining,
         Done,
     }
 
     #[derive(Debug, Clone)]
     enum Message {
+        Decoration,
         WindowOpened(window::Id),
         WindowEvent(window::Id, window::Event),
         Frame(Instant),
         BackendConfigured(Result<(), backend::Error>),
         StrictHandoffCompleted(backend::StrictHandoffOutcome),
         Tick(Instant),
+        Scroll,
+        SustainedCompleted,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,9 +233,14 @@ mod probe {
             failure: ProbeFailureMode,
             trace_path: Option<TraceValidation>,
             result_path: PathBuf,
+            sustained: Sustained,
         ) -> (Self, Task<Message>) {
             let (main_window, open_main) = window::open(window::Settings {
-                size: Size::new(420.0, 180.0),
+                size: if sustained.seconds > 0 {
+                    Size::new(900.0, 640.0)
+                } else {
+                    Size::new(640.0, 380.0)
+                },
                 ..window::Settings::default()
             });
 
@@ -205,6 +265,7 @@ mod probe {
                     windows_closed: 0,
                     resizes_seen: 0,
                     resize_requested: false,
+                    requested_resize_observed: false,
                     close_requested: false,
                     switch_started: false,
                     result: ProbeResult::Failed,
@@ -213,6 +274,20 @@ mod probe {
                     trace_path,
                     result_path,
                     result_written: false,
+                    sustained,
+                    document: sustained.editor.then(|| {
+                        let source = if sustained.plain_text {
+                            "A plain text document with enough content for scrolling and glyph uploads.\n".repeat(12_000)
+                        } else {
+                            include_str!("../src/editor/widget.rs").repeat(12)
+                        };
+                        fragile_notepad::core::Document::from_path(
+                            fragile_notepad::core::DocumentId::new(1),
+                            if sustained.plain_text { "profile.txt" } else { "profile.rs" },
+                            &source,
+                        )
+                    }),
+                    editor_settings: fragile_notepad::core::EditorSettings::default(),
                 },
                 open_main.map(Message::WindowOpened),
             )
@@ -220,6 +295,17 @@ mod probe {
 
         fn update(&mut self, message: Message) -> Task<Message> {
             match message {
+                Message::Decoration => Task::none(),
+                Message::Scroll => {
+                    if let Some(document) = &mut self.document {
+                        document.scroll.first_visible_row += 3;
+                    }
+                    Task::none()
+                }
+                Message::SustainedCompleted => {
+                    println!("VULKAN_SUSTAIN_END timestamp_us={}", timestamp_us());
+                    self.finish(ProbeResult::Ok, "strict handoff followed by sustained workload; consult frame trace for cadence".to_owned())
+                }
                 Message::WindowOpened(id) => {
                     self.windows_opened += 1;
                     self.windows
@@ -249,11 +335,11 @@ mod probe {
                         );
                         match self.mode {
                             ProbeMode::PrepareWarmCommit => println!(
-                                "BACKEND_SWITCH_PROBE_HANDOFF_COMMIT_REQUESTED target_backend=hardware api=best mode={}",
+                                "BACKEND_SWITCH_PROBE_HANDOFF_COMMIT_REQUESTED target_backend=hardware api=vulkan mode={}",
                                 self.mode.marker_value()
                             ),
                             ProbeMode::Configure => println!(
-                                "BACKEND_SWITCH_PROBE_CONFIGURED target_backend=hardware api=best mode={}",
+                                "BACKEND_SWITCH_PROBE_CONFIGURED target_backend=hardware api=vulkan mode={}",
                                 self.mode.marker_value()
                             ),
                         }
@@ -314,6 +400,14 @@ mod probe {
                 }
                 window::Event::Resized(size) => {
                     self.resizes_seen += 1;
+                    if self.resize_requested
+                        && self.state == ProbeState::Switching
+                        && self.first_live_window() == Some(id)
+                        && (size.width - REQUESTED_RESIZE.width).abs() < 0.5
+                        && (size.height - REQUESTED_RESIZE.height).abs() < 0.5
+                    {
+                        self.requested_resize_observed = true;
+                    }
                     println!(
                         "BACKEND_SWITCH_PROBE_RESIZE_OBSERVED id={id:?} width={} height={} count={}",
                         size.width, size.height, self.resizes_seen
@@ -385,7 +479,7 @@ mod probe {
                         self.finish(result, reason)
                     }
                 }
-                ProbeState::Switching | ProbeState::Done => Task::none(),
+                ProbeState::Switching | ProbeState::Sustaining | ProbeState::Done => Task::none(),
             }
         }
 
@@ -417,13 +511,37 @@ mod probe {
             };
 
             self.strict_outcome = Some(outcome);
+            if result == ProbeResult::Ok && self.sustained.seconds > 0 {
+                self.state = ProbeState::Sustaining;
+                println!(
+                    "VULKAN_SUSTAIN_START timestamp_us={} seconds={} workload={} windows={}",
+                    timestamp_us(),
+                    self.sustained.seconds,
+                    if self.sustained.plain_text {
+                        "plain_text_scroll"
+                    } else if self.sustained.editor {
+                        "editor_scroll"
+                    } else {
+                        "about_animation"
+                    },
+                    self.live_window_count()
+                );
+                let duration = Duration::from_secs(self.sustained.seconds);
+                return Task::perform(async move { tokio::time::sleep(duration).await }, |_| {
+                    Message::SustainedCompleted
+                });
+            }
             self.finish(result, reason)
         }
 
         fn open_extra_window(&mut self) -> Task<Message> {
             self.window_open_requests += 1;
             let (_, open) = window::open(window::Settings {
-                size: Size::new(300.0, 140.0),
+                size: if self.sustained.seconds > 0 {
+                    Size::new(900.0, 640.0)
+                } else {
+                    Size::new(620.0, 360.0)
+                },
                 ..window::Settings::default()
             });
 
@@ -437,7 +555,7 @@ mod probe {
                         return Task::none();
                     };
                     self.resize_requested = true;
-                    window::resize(id, Size::new(520.0, 260.0))
+                    window::resize(id, REQUESTED_RESIZE)
                 }
                 ProbeScenario::CloseDuringPreparing if !self.close_requested => {
                     let Some(id) = self.extra_live_window() else {
@@ -558,14 +676,46 @@ mod probe {
         fn subscription(&self) -> Subscription<Message> {
             Subscription::batch([
                 window::events().map(|(id, event)| Message::WindowEvent(id, event)),
-                window::frames().map(Message::Frame),
-                iced::time::every(Duration::from_secs(1)).map(Message::Tick),
+                if self.state != ProbeState::Sustaining {
+                    window::frames().map(Message::Frame)
+                } else {
+                    Subscription::none()
+                },
+                if self.state == ProbeState::Sustaining {
+                    if self.sustained.editor {
+                        iced::time::every(Duration::from_nanos(41_666_667)).map(|_| Message::Scroll)
+                    } else {
+                        Subscription::none()
+                    }
+                } else {
+                    iced::time::every(Duration::from_secs(1)).map(Message::Tick)
+                },
             ])
         }
 
         fn view(&self, _window: window::Id) -> Element<'_, Message> {
+            if self.sustained.seconds > 0 {
+                if let Some(document) = &self.document {
+                    return fragile_notepad::ui::editor::view(document, &self.editor_settings)
+                        .map(|_| Message::Decoration);
+                }
+                return fragile_notepad::ui::about_dialog::view(
+                    fragile_notepad::message::AboutTab::About,
+                    fragile_notepad::ui::about_dialog::RenderingDebugInfo {
+                        current_renderer: "Vulkan".into(),
+                        rendering_policy: "Automatic".into(),
+                        title_bar_style: fragile_notepad::ui::title_bar::ControlStyle::Windows,
+                    },
+                    1.0,
+                    true,
+                )
+                .map(|_| Message::Decoration);
+            }
             center(
                 column![
+                    // Exercise the actual CPU/GPU About artwork through warm-up,
+                    // presentation, multi-window teardown, and rollback.
+                    fragile_notepad::ui::info_vfx::view(1.0, true).map(|_| Message::Decoration),
                     text("Backend switch probe").size(18),
                     text(format!("mode: {}", self.mode.label())).size(14),
                     text(format!("scenario: {}", self.scenario.marker_value())).size(14),
@@ -649,9 +799,9 @@ mod probe {
             }
 
             match self.scenario {
-                ProbeScenario::ResizeDuringPreparing if self.resizes_seen == 0 => (
+                ProbeScenario::ResizeDuringPreparing if !self.requested_resize_observed => (
                     ProbeResult::Failed,
-                    "resize-during-preparing scenario did not observe a resize event".to_owned(),
+                    "resize-during-preparing did not observe the requested 700 x 440 size during handoff".to_owned(),
                 ),
                 ProbeScenario::CloseDuringPreparing if self.windows_closed == 0 => (
                     ProbeResult::Failed,
@@ -908,9 +1058,9 @@ mod probe {
 
         fn strict_scenario_result(&self) -> Option<(ProbeResult, String)> {
             match self.scenario {
-                ProbeScenario::ResizeDuringPreparing if self.resizes_seen == 0 => Some((
+                ProbeScenario::ResizeDuringPreparing if !self.requested_resize_observed => Some((
                     ProbeResult::Failed,
-                    "resize-during-preparing scenario did not observe a resize event".to_owned(),
+                    "resize-during-preparing did not observe the requested 700 x 440 size during handoff".to_owned(),
                 )),
                 ProbeScenario::CloseDuringPreparing if self.windows_closed == 0 => Some((
                     ProbeResult::Failed,
@@ -944,6 +1094,7 @@ mod probe {
                 ProbeState::WaitingInitialFrame => "waiting_initial_frame",
                 ProbeState::Switching => "switching",
                 ProbeState::WaitingPostSwitchFrame => "waiting_post_switch_frame",
+                ProbeState::Sustaining => "sustaining",
                 ProbeState::Done => "done",
             }
         }
@@ -1010,6 +1161,7 @@ mod probe {
                     "  \"windows_opened\": {},\n",
                     "  \"windows_closed\": {},\n",
                     "  \"resizes_seen\": {},\n",
+                    "  \"requested_resize_observed\": {},\n",
                     "  \"trace_path\": {},\n",
                     "  \"trace_evidence\": {}\n",
                     "}}\n"
@@ -1026,6 +1178,7 @@ mod probe {
                     ProbeState::WaitingInitialFrame => "waiting_initial_frame",
                     ProbeState::Switching => "switching",
                     ProbeState::WaitingPostSwitchFrame => "waiting_post_switch_frame",
+                    ProbeState::Sustaining => "sustaining",
                     ProbeState::Done => "done",
                 }),
                 strict_outcome_json,
@@ -1033,6 +1186,7 @@ mod probe {
                 self.windows_opened,
                 self.windows_closed,
                 self.resizes_seen,
+                self.requested_resize_observed,
                 trace_path,
                 evidence_json
             )
@@ -1861,6 +2015,38 @@ mod probe {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn resize_scenario_requires_requested_size_on_the_live_window_during_handoff() {
+            let (mut probe, _) = Probe::new(
+                ProbeMode::PrepareWarmCommit,
+                ProbeScenario::ResizeDuringPreparing,
+                ProbeFailureMode::None,
+                None,
+                PathBuf::new(),
+                Sustained::default(),
+            );
+            probe.windows[0].live = true;
+            let id = probe.windows[0].id;
+            let _ = probe.window_event(id, window::Event::Resized(REQUESTED_RESIZE));
+            assert!(!probe.requested_resize_observed);
+
+            probe.resize_requested = true;
+            probe.state = ProbeState::Switching;
+            let _ = probe.window_event(id, window::Event::Resized(Size::new(640.0, 380.0)));
+            let _ = probe.window_event(
+                window::Id::unique(),
+                window::Event::Resized(REQUESTED_RESIZE),
+            );
+            assert!(matches!(
+                probe.strict_scenario_result(),
+                Some((ProbeResult::Failed, _))
+            ));
+
+            let _ = probe.window_event(id, window::Event::Resized(REQUESTED_RESIZE));
+            assert!(probe.requested_resize_observed);
+            assert!(probe.strict_scenario_result().is_none());
+        }
 
         fn strict_error(
             phase: backend::StrictHandoffPhase,

@@ -22,13 +22,12 @@ git clone https://github.com/MemoriesDoll/fragile-notepad.git
 cd fragile-notepad
 ```
 
-Run both setup steps before Cargo: dependencies need local patches, and raster
-assets are generated rather than stored in Git.
+Vendored dependencies are included as local source in this repository. Generate
+the raster assets before running Cargo; these assets are not stored in Git.
 
 **Windows — PowerShell**
 
 ```powershell
-.\scripts\setup-vendor.ps1 apply
 .\scripts\generate_icon_assets.ps1
 cargo run --release --locked
 ```
@@ -36,7 +35,6 @@ cargo run --release --locked
 **Linux / macOS**
 
 ```sh
-bash scripts/setup-vendor.sh apply
 bash scripts/generate_icon_assets.sh
 cargo run --release --locked
 ```
@@ -49,7 +47,8 @@ on Linux and macOS.
 
 ## License
 
-The project code is licensed under [BSD-3-Clause](LICENSE).
+The project code is licensed under [BSD-3-Clause](LICENSE). Vendored dependencies
+retain their upstream licenses; see [vendor provenance](vendor/README.md).
 The original artwork in [`assets/icons/colored/`](assets/icons/colored/LICENSE)
 and [`assets/illustrations/`](assets/illustrations/LICENSE),
 including generated rasters and reproductions, is **all rights reserved** and
