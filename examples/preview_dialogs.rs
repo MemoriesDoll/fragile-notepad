@@ -4,8 +4,8 @@
 
 use fragile_notepad::{
     core::{
-        AppearanceMode, Document, DocumentId, EditorSettings, ShortcutCommand, ShortcutConflict,
-        ShortcutGroup, Workspace,
+        AppearanceMode, Document, DocumentId, EditorSettings, SearchMode, ShortcutCommand,
+        ShortcutConflict, ShortcutGroup, Workspace,
     },
     message::{AdvancedSearchTab, Message, SettingsCategory, WindowTarget},
     search_dialog::SearchDialogState,
@@ -60,7 +60,7 @@ fn main() {
                 &format!("windows-{name}-{size_name}"),
             );
         }
-        for (width, height, size_name) in [(900, 724, "normal"), (760, 524, "minimum")] {
+        for (width, height, size_name) in [(800, 604, "normal"), (720, 524, "minimum")] {
             for (tab, tab_name) in [
                 (AdvancedSearchTab::Find, "find"),
                 (AdvancedSearchTab::Replace, "replace"),
@@ -100,7 +100,27 @@ fn main() {
                     Size::new(width, height),
                     &format!("search-{tab_name}-{name}-{size_name}"),
                 );
+                if matches!(
+                    tab,
+                    AdvancedSearchTab::Replace | AdvancedSearchTab::ReplaceInFiles
+                ) {
+                    for (mode, mode_name) in [
+                        (SearchMode::Regex, "regex"),
+                        (SearchMode::Extended, "escapes"),
+                    ] {
+                        dialog.mode = mode;
+                        render(
+                            &mut renderer,
+                            advanced_search_panel::view(&dialog),
+                            &theme,
+                            Size::new(width, height),
+                            &format!("search-{tab_name}-{mode_name}-{name}-{size_name}"),
+                        );
+                    }
+                }
             }
+        }
+        for (width, height, size_name) in [(900, 724, "normal"), (760, 524, "minimum")] {
             for (category, category_name) in [
                 (SettingsCategory::General, "general"),
                 (SettingsCategory::Appearance, "appearance"),

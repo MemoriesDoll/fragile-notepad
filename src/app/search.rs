@@ -6,6 +6,7 @@ use crate::editor::{
     EditorRange, EditorSelection, position_for_byte_offset, word_range_at_position,
 };
 use crate::message::{AdvancedSearchTab, Message};
+use crate::ui::advanced_search_panel::QUERY_INPUT_ID;
 use crate::ui::find_panel::FIND_INPUT_ID;
 
 use super::App;
@@ -106,7 +107,7 @@ impl App {
             Message::AdvancedSearchTabSelected(tab) => {
                 self.search_dialog.set_active_tab(tab);
                 self.refresh_search_results();
-                Task::none()
+                operation::focus(QUERY_INPUT_ID)
             }
             Message::AdvancedSearchQueryChanged(query) => {
                 self.search_dialog.set_query(query);
@@ -204,6 +205,7 @@ impl App {
         }
         self.refresh_search_results();
         self.open_advanced_search_window()
+            .chain(operation::focus(QUERY_INPUT_ID))
     }
 
     fn replace_current(&mut self) -> Task<Message> {

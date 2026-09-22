@@ -22,13 +22,6 @@ pub fn description(label: &str) -> Element<'_, Message> {
         .into()
 }
 
-pub fn eyebrow(label: &str) -> Element<'_, Message> {
-    container(text(label).size(10).font(semibold()))
-        .padding([0, 10])
-        .style(styles::info_muted)
-        .into()
-}
-
 pub fn badge(label: impl Into<String>) -> Element<'static, Message> {
     container(text(label.into()).size(11))
         .padding([4, 8])

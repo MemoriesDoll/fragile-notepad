@@ -9,12 +9,15 @@ The Windows dialog uses selectable rows to activate an application window. It
 shows the current window and the number of open windows; the list scrolls in
 small editor windows while its Done button remains visible.
 
-Find and Replace separates current-document searches from searches across open
-documents in its sidebar. The latter includes unsaved tabs and supports file-name
-filters; it does not search unopened files on disk. Search actions stay visible
-below the scrollable fields, results are grouped by document, and the footer
-retains search status and errors. Enter in the query field finds the next match
-in the current-document views or lists matches in the open-document views.
+Find and Replace uses Find, Replace, and Go to line tabs with an explicit Search
+in selector for the current document or open documents. Switching between Find
+and Replace preserves the scope. Open documents includes unsaved tabs and supports
+file-name filters; it does not search unopened files on disk. Fields, options, and
+actions remain visible without scrolling; grouped results use the remaining space.
+The footer retains search status and errors. Opening the dialog or switching its
+workflow focuses the query (or line number) for immediate typing. Enter in the
+query field finds the next match in the current document or lists matches across
+open documents.
 
 Preferences groups rendering and scrolling under General, color mode and syntax
 under Appearance, and editing and document markers under Editor. The appearance
