@@ -212,7 +212,7 @@ fn options(dialog: &SearchDialogState) -> Element<'_, Message> {
         )
     });
     let hint = match dialog.mode {
-        SearchMode::Extended => Some(r"Escapes: \n, \t, \r."),
+        SearchMode::Extended => Some(r"Escapes: \n (new line), \t (tab), \r (carriage return)."),
         SearchMode::Regex if replace_mode(dialog.active_tab) => {
             Some("Use $1, $2, … for captured groups.")
         }

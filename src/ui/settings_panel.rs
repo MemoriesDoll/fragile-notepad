@@ -393,11 +393,15 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
                     .into()
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
-                toggle_row(
-                    "Word wrap",
-                    settings.word_wrap,
-                    Message::DraftWordWrapToggled
-                ),
+                column![
+                    toggle_row(
+                        "Word wrap",
+                        settings.word_wrap,
+                        Message::DraftWordWrapToggled
+                    ),
+                    utility::description("Wrap at the window edge without inserting line breaks."),
+                ]
+                .spacing(5),
             ]
             .spacing(14)
             .into()
@@ -429,6 +433,7 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
         section(
             "Whitespace",
             column![
+                utility::description("Show markers without changing file contents."),
                 toggle_row(
                     "Spaces",
                     settings.decorations.show_spaces,
@@ -473,6 +478,7 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         .filter(|command| command.group() == dialog.shortcut_group)
         .collect();
     let mut pane = column![
+        utility::description("Click a binding, then press the new shortcut."),
         row![
             groups,
             space::horizontal(),
