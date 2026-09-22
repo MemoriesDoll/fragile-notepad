@@ -263,8 +263,13 @@ impl State {
                     bounds,
                     clip_bounds,
                 } => {
-                    let bounds = (*bounds * scale).round();
-                    let clip_bounds = (*clip_bounds * scale).round();
+                    let bounds = *bounds * scale;
+                    let clip_bounds = *clip_bounds * scale;
+                    let (bounds, clip_bounds) = if image.snap {
+                        (bounds.round(), clip_bounds.round())
+                    } else {
+                        (bounds, clip_bounds)
+                    };
 
                     if bounds.width < 1.0 || bounds.height < 1.0 {
                         continue;

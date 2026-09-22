@@ -39,6 +39,7 @@ impl Pipeline {
         filter_method: raster::FilterMethod,
         bounds: Rectangle,
         opacity: f32,
+        snap: bool,
         pixels: &mut tiny_skia::PixmapMut<'_>,
         transform: tiny_skia::Transform,
         clip_mask: Option<&tiny_skia::Mask>,
@@ -52,11 +53,16 @@ impl Pipeline {
             return;
         };
 
-        let bounds = physical_pixel_aligned(bounds, transform);
+        let bounds = if snap {
+            physical_pixel_aligned(bounds, transform)
+        } else {
+            bounds
+        };
         let width_scale = bounds.width / image_width as f32;
         let height_scale = bounds.height / image_height as f32;
 
-        if filter_method == raster::FilterMethod::Linear
+        if snap
+            && filter_method == raster::FilterMethod::Linear
             && !transform.has_skew()
             && let Some(physical_bounds) = physical_pixel_bounds(bounds, transform)
             && let Some(resampled) = cache.resample_straight_alpha(
@@ -542,6 +548,7 @@ mod tests {
             raster::FilterMethod::Linear,
             bounds,
             1.0,
+            true,
             &mut actual.as_mut(),
             tiny_skia::Transform::identity(),
             None,

@@ -1,7 +1,7 @@
 """Measure traced CPU frame costs and cadence after a strict Vulkan handoff.
 
 These are instrumented wall times, not GPU timings or display scanout latency.
-About retains its own 24 Hz scheduler; editor scrolling advances three rows per
+About retains its own 60 Hz scheduler; editor scrolling advances three rows per
 24 Hz timer tick. No changing probe labels or frame subscription drive redraws.
 """
 

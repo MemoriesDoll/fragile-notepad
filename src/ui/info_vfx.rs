@@ -14,7 +14,7 @@ use crate::message::Message;
 #[cfg(feature = "hybrid-rendering")]
 mod gpu;
 
-const FRAME_INTERVAL: Duration = Duration::from_nanos(41_666_667);
+const FRAME_INTERVAL: Duration = Duration::from_nanos(16_666_667);
 pub(super) const HEADER_HEIGHT: f32 = 96.0;
 pub(super) const LOGO_SIZE: f32 = 80.0;
 const TILE_SIZE: f32 = 64.0;
@@ -135,6 +135,7 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
             renderer.draw_image(
                 image::Image::new(handle)
                     .filter_method(image::FilterMethod::Linear)
+                    .snap(false)
                     .opacity(self.progress),
                 area,
                 clip,
@@ -299,8 +300,8 @@ impl Widget<Message, Theme, Renderer> for InfoVfx {
                         .as_secs_f64();
                 }
                 state.last_tick = Some(now);
-                // Keep the 24 Hz cadence anchored when a display presents late
-                // (e.g. alternating 2/3 refreshes at 60 Hz), without catch-up bursts.
+                // Keep the 60 Hz cadence anchored when a display presents late,
+                // without catch-up bursts.
                 let deadline = state.next_tick.unwrap_or(now);
                 let remainder =
                     now.saturating_duration_since(deadline).as_nanos() % FRAME_INTERVAL.as_nanos();
@@ -581,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn late_display_frames_preserve_twenty_four_updates_per_second() {
+    fn floating_motion_advances_on_each_sixty_hz_display_frame() {
         let renderer = renderer();
         let (mut widget, mut tree, node) = mount(&renderer);
         let start = Instant::now();
@@ -601,8 +602,8 @@ mod tests {
             changes += usize::from(tree.state.downcast_ref::<State>().elapsed != before);
         }
         assert_eq!(
-            changes, 48,
-            "24 animation updates per second on a 60 Hz display"
+            changes, 120,
+            "floating artwork must advance on every 60 Hz display frame"
         );
     }
 
@@ -802,6 +803,49 @@ mod tests {
             scale,
             Color::TRANSPARENT,
         )
+    }
+
+    #[test]
+    fn floating_artwork_moves_between_subpixel_software_frames() {
+        assert_subpixel_motion(renderer());
+    }
+
+    #[test]
+    #[cfg(feature = "hybrid-rendering")]
+    fn floating_artwork_moves_between_subpixel_vulkan_frames() {
+        let renderer = futures::executor::block_on(<Renderer as Headless>::new(
+            renderer::Settings::default(),
+            Some("wgpu"),
+        ))
+        .expect("Vulkan renderer required for floating artwork validation");
+        assert_subpixel_motion(renderer);
+    }
+
+    fn assert_subpixel_motion(mut renderer: Renderer) {
+        for scale in [1.0, 1.5, 2.0] {
+            let mut previous = None;
+            for frame in 0..12 {
+                let pixels = snapshot(
+                    &mut renderer,
+                    &Theme::Light,
+                    1.0,
+                    frame as f64 / 60.0,
+                    scale,
+                );
+                // Isolate the logo from the independently animated quill trail.
+                let logo: Vec<u8> = pixels
+                    .chunks_exact((BOUNDS.width * scale) as usize * 4)
+                    .flat_map(|row| row[..(100.0 * scale) as usize * 4].iter().copied())
+                    .collect();
+                if let Some(previous) = previous {
+                    assert!(
+                        logo != previous,
+                        "floating artwork stalled at frame {frame}, scale {scale}"
+                    );
+                }
+                previous = Some(logo);
+            }
+        }
     }
 
     #[test]

@@ -31,7 +31,7 @@ with a 5.5-second cycle, 3.5px vertical float and 1.5px sideways drift. The righ
 paper stays with the bunny. All layers use the same pausable animation clock.
 Soft blue, lavender and rose wisps flow toward the quill, tapering into its nib;
 the trail keeps the title area clear and fades out at its boundaries.
-The shared 24fps clock keeps deadlines anchored across late display frames,
+The shared 60fps clock keeps deadlines anchored across late display frames,
 and retains fade and focus/visibility pausing. The 384px `about-background`
 and `about-bunny` rasters are generated from the master layers. Once per four
 seconds, the eyes close and reopen over 250ms using generated half-open and
@@ -48,7 +48,9 @@ preview does not emulate macOS window-manager behavior.
 Add `-- --vulkan` to render through Vulkan into `target/bunny-review-vulkan/`.
 In the application, opening About requests Vulkan through the shared renderer
 handoff when hardware acceleration is enabled. Software-only mode and failure
-fallback remain supported; the animation clock stays at 24fps on either backend.
+fallback remain supported; the animation clock stays at 60fps on either backend.
+Floating layers preserve fractional pixel positions in both renderers so their
+small movements interpolate smoothly instead of jumping between whole pixels.
 
 ## Visual review checklist
 

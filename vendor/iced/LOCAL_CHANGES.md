@@ -181,3 +181,19 @@ The strengthened handoff probe fails before this fix on Wayland (640 x 380 after
 requesting 700 x 440) and passes after it. The matrix runner also requires a
 successful software presentation at the requested logical size before Vulkan
 warm-up, with matching physical warm-up dimensions at the current scale.
+
+## Fractional image motion
+
+Raster images expose `Image::snap(false)` to retain fractional physical bounds
+and clipping during animation. Snapping remains enabled by default for existing
+widgets. Both tiny-skia and wgpu honor the option; the software path bypasses
+the integer-position resample cache and uses bilinear image transforms.
+The About bunny, paper, and background opt out of snapping. Pixel regressions
+exercise consecutive animation frames at 100%, 150%, and 200% scaling on both
+renderers, alongside the application's 60 Hz scheduling regression.
+
+Windows validation: all 732 application/example tests and 24 tiny-skia tests
+pass, as does the software-only build check. An eight-second live Vulkan About
+probe on an NVIDIA RTX 5070 Laptop GPU at 150% scaling passed strict handoff
+and measured 60.0 fps after warm-up (16.7 ms median, 17.8 ms maximum frame
+interval). This measures redraw/presentation cadence, not display scanout.

@@ -40,7 +40,7 @@ menus, custom settings dropdowns, and confirmation/window-list popups have brief
 entrance motion. These run on both renderers and request frames only while
 transitioning. The About panel and its backdrop fade in and out. Its header has
 independently floating bunny and paper layers, with soft curved light trails
-flowing toward a macaw quill, on a shared 24fps clock. The effect stops scheduling
+flowing toward a macaw quill, on a shared 60fps clock. The effect stops scheduling
 frames while unfocused, clipped out, or closing. Animation ticks never request
 additional handoffs. The small trail texture is generated on the CPU; Vulkan
 handles image sampling, blending, compositing, and presentation after handoff.

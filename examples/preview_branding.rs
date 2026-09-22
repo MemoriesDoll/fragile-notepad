@@ -74,7 +74,7 @@ fn main() {
             // Advance the widget's real animation clock, rather than imitating
             // its motion in an HTML/CSS mockup. One four-second float/blink cycle.
             let frames = if name == "windows" && theme_name == "light" {
-                97
+                241
             } else {
                 1
             };
@@ -86,7 +86,7 @@ fn main() {
                 content.as_widget_mut().update(
                     &mut tree,
                     &Event::Window(window::Event::RedrawRequested(
-                        start + Duration::from_nanos(41_666_667) * frame,
+                        start + Duration::from_nanos(16_666_667) * frame,
                     )),
                     Layout::new(&node),
                     mouse::Cursor::Unavailable,

@@ -758,6 +758,7 @@ impl Engine {
                     image.filter_method,
                     *bounds,
                     image.opacity,
+                    image.snap,
                     _pixels,
                     transform,
                     Some(_clip_mask.set(clip_bounds)),

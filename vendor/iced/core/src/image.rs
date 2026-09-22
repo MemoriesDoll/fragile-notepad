@@ -30,6 +30,10 @@ pub struct Image<H = Handle> {
     ///
     /// 0 means transparent. 1 means opaque.
     pub opacity: f32,
+
+    /// Whether image bounds should snap to physical pixels. Defaults to `true`.
+    /// Disable this for smooth movement at fractional pixel positions.
+    pub snap: bool,
 }
 
 impl Image<Handle> {
@@ -41,6 +45,7 @@ impl Image<Handle> {
             rotation: Radians(0.0),
             border_radius: border::Radius::default(),
             opacity: 1.0,
+            snap: true,
         }
     }
 
@@ -59,6 +64,12 @@ impl Image<Handle> {
     /// Sets the opacity of the [`Image`].
     pub fn opacity(mut self, opacity: impl Into<f32>) -> Self {
         self.opacity = opacity.into();
+        self
+    }
+
+    /// Sets whether image bounds snap to physical pixels.
+    pub fn snap(mut self, snap: bool) -> Self {
+        self.snap = snap;
         self
     }
 }

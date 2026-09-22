@@ -22,7 +22,7 @@ Both styles use the transparent bunny at 24 logical pixels. Windows places it
 before the caption; macOS places it in the right side slot to preserve the
 centered caption and the traffic lights. The About logo keeps the rounded blue
 background, with the bunny floating slightly beyond the tile and blinking once
-every four seconds on a shared 24fps clock. The left paper drifts independently,
+every four seconds on a shared 60fps clock. The left paper drifts independently,
 and curved, softly fading light trails lead into the decorative quill.
 Opening About requests the Vulkan renderer when hardware acceleration is enabled,
 using the existing prepare/warm/commit handoff and software fallback.
