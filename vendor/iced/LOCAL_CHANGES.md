@@ -47,10 +47,7 @@ The local source also backports recent fixes without the intervening API migrati
 
 Upstream: https://github.com/iced-rs/iced
 
-License: MIT; see [LICENSE](LICENSE). Source is tracked directly in this
-repository. The original revision above records provenance; no patch application
-or separate Git checkout is needed. Earlier patch-validation results below are
-historical evidence from before localization on 2026-09-22.
+License: [MIT](LICENSE).
 
 ## Backport selection
 
@@ -81,8 +78,6 @@ Other reviewed changes are not required on this base:
 - Linux graphical system-appearance and live-change checks passed under WSLg/X11,
   using an isolated settings portal; explicit overrides and no-portal fallback passed.
 - Rapid scrolling of titanic.html completed with a successful software-to-GPU handoff.
-- Applying the exported patch to a fresh checkout of the pin reproduces all 30
-  patched files in the tested vendor tree.
 
 The GPU probes test handoff success and rollback. Normal driver surface-error
 recovery is an upstream backport; a real driver surface failure was not induced.
@@ -94,10 +89,6 @@ recovery is an upstream backport; a real driver surface failure was not induced.
 - On both platforms: `cargo test --locked -p iced_core -p iced_runtime -p iced_widget --lib` — 9 passed per platform, including all four new regressions.
 - Each new regression test was run against the unfixed implementation on Windows
   and failed its behavioral assertion, then passed with its upstream fix.
-- A fresh checkout of the unchanged base plus the exported patch reproduces all
-  34 modified vendor files in the tested checkout.
-- No system settings were changed. The renderer handoff, syntax parser, and
-  appearance implementations were not modified in these four backports.
 
 ## Application image atlas sizing
 

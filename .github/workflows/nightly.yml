@@ -197,14 +197,6 @@ jobs:
           cargo build --locked --release --example backend_switch_probe
           python scripts/check-wayland-vulkan.py --binary target/release/examples/backend_switch_probe
 
-      - name: Upload Wayland Vulkan evidence
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: vulkan-wayland-linux
-          path: target/vulkan-wayland/
-          if-no-files-found: warn
-
       - name: Package Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh

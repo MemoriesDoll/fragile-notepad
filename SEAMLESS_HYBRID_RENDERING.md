@@ -196,7 +196,4 @@ across supported drivers/platforms remain separate validation work.
 
 ## Maintaining the vendor changes
 
-The customized source is tracked directly under `vendor/iced`. A normal clone
-includes it. Edit and commit these files with the application; see
-[DEVELOPMENT.md](DEVELOPMENT.md#vendored-dependencies) for the update process.
-Run the relevant package tests with the application lockfile before committing.
+See [DEVELOPMENT.md](DEVELOPMENT.md#vendored-dependencies) for vendor updates and validation.

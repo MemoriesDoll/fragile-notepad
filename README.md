@@ -22,8 +22,7 @@ git clone https://github.com/MemoriesDoll/fragile-notepad.git
 cd fragile-notepad
 ```
 
-Vendored dependencies are included as local source in this repository. Generate
-the raster assets before running Cargo; these assets are not stored in Git.
+Generate the raster assets, then build:
 
 **Windows — PowerShell**
 

@@ -1,16 +1,13 @@
 # Packaging
 
-Fragile Notepad is packaged from checked-in local dependencies and generated
-embedded icon assets. Generate the assets before building a release; vendor
-sources are already included in a fresh clone.
+Generate the embedded assets before building a release.
 
 ## Source Layout
 
 - `src/` contains the application.
 - `assets/` contains source assets and generated RGBA icon files consumed at
   compile time through `src/assets.rs`.
-- `vendor/iced` and `vendor/encoding_rs` are repository-owned source directories.
-  Upstream provenance and licenses are recorded in `vendor/README.md`.
+- `vendor/` contains customized dependencies; see [provenance and licenses](vendor/README.md).
 - `scripts/` contains repeatable setup, asset generation, and CI entry points.
 
 ## Preparing a Checkout

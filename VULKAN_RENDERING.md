@@ -4,26 +4,17 @@ Objective: unified Vulkan across Windows, Linux and macOS; explicit GPU resource
 ownership and measured optimization, retaining software-first startup and the
 prepare/warm/commit/first-present rollback contract. This work is incomplete.
 
-## Requested pause checkpoint (2026-09-22)
+## Status (2026-09-22)
 
-The user requested a pause after the current implementation and basic
-validation, deferring deep optimization. The current transform push-constant
-implementation is finished and its pixel/resource regression passes on NVIDIA,
-AMD, SwiftShader, and Linux Lavapipe. About/editor offscreen scenarios also pass.
-The vendor patch has been exported and passes reverse-application checking.
-The Windows local CI script passes formatting, build/example/software-only
-checks, 725 Rust tests, and 12 Python tests with SwiftShader configured.
+Implementation and basic validation are complete; deep optimization is paused.
+Transform pixel/resource tests pass on NVIDIA, AMD, SwiftShader, and Linux
+Lavapipe. About/editor offscreen scenarios pass. Windows local CI passes build,
+formatting, example, and software-only checks, plus 725 Rust and 12 Python tests.
 Log: `target/vulkan-transform-windows-ci.log`.
 
-Further optimization, extended live/throughput/power measurements, native macOS
-verification, physical-GPU Linux validation, and additional cross-platform source
-validation are deferred. Earlier handoff results below predate
-the transform change; no new live handoff matrix is claimed for that change.
-Vendor source was subsequently localized on 2026-09-22; historical patch-export
-results below describe the former workflow. Current provenance is in
-`vendor/README.md`. The broader work remains uncommitted; the unsigned animation
-commit is
-`7bb1ec8 feat: improve About page animations`.
+Native macOS, physical-GPU Linux, extended live rendering, and power/throughput
+validation remain deferred. Live handoff results below predate the transform
+change.
 
 ## Completion requirements
 
@@ -53,18 +44,6 @@ commit is
 - Debian WSL is available. Current Vulkan runtime availability needs checking.
 - Native macOS evidence is missing; existing CI/package configuration has no
   MoltenVK preparation or distribution.
-
-## Work sequence
-
-1. Capture animation baseline; restrict hardware features to Vulkan/portability.
-2. Move procedural animation to a reusable GPU pipeline and verify parity,
-   clipping, opacity, multiple instances, resource reuse and handoff behavior.
-3. Profile and optimize shared renderer resource ownership and hot paths.
-4. Complete loader/packaging/CI work and execute the full platform matrix.
-5. Audit every requirement above against current artifacts before completion.
-
-No platform validation or optimization is considered complete merely because a
-build or a narrow probe passes. Record missing evidence explicitly.
 
 ## Implemented and measured (2026-09-22)
 
@@ -526,7 +505,8 @@ on Windows. The exported patch reproduces all 42 files in
 hosted CI execution is still pending.
 
 The cross-platform matrix runner requires actual Vulkan warm-up and per-window
-presentation evidence; it rejects indeterminate results. CI saves JSON/CSV/logs.
+presentation evidence; it rejects indeterminate results. Diagnostic JSON, CSV,
+and logs are written under `target/` for local inspection.
 
 macOS packaging now includes a lazy launcher, Vulkan loader, MoltenVK, relative
 ICD manifest, library relocation/signature checks, runtime checksums, and notices

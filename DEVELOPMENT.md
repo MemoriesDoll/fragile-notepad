@@ -254,22 +254,13 @@ a five-second timeout, and test diagnostics report both timings and the budget.
 
 ## Vendored Dependencies
 
-`vendor/iced` and `vendor/encoding_rs` are ordinary source directories tracked by
-this repository. Cargo uses their local paths; a fresh clone includes the
-customized sources without a separate vendor setup step.
+See [vendor/README.md](vendor/README.md) for upstream revisions, licenses, and
+local changes.
 
-See [vendor/README.md](vendor/README.md) for upstream URLs, original revisions,
-licenses, and customization records. Edit vendor files directly and review them
-with the application's normal `git diff`. Include vendor changes in the same
-commit as application changes that depend on them.
-
-For an upstream update, compare a separate upstream checkout at the recorded
-revision with the desired revision, port the relevant changes into `vendor/`,
-and review conflicts with the local customizations. Update the provenance and
-customization notes, then run the application checks and affected vendor tests
-using the application's lockfile (for example,
-`cargo test --locked -p iced_wgpu --lib`). Upstream updates are deliberate source
-changes; builds do not fetch or replace vendor source.
+For upstream updates, compare the recorded and desired revisions, port the
+selected changes into `vendor/`, and update the provenance notes. Run application
+checks and affected vendor tests with the application's lockfile, for example
+`cargo test --locked -p iced_wgpu --lib`.
 
 ## Validation
 
@@ -324,9 +315,7 @@ cargo check --no-default-features
 
 ## Packaging
 
-Release packaging expectations are documented in `PACKAGING.md`. In short:
-use the checked-in vendor sources, regenerate icon assets when sources change, run the CI
-entry point, and then build the release binary.
+See [PACKAGING.md](PACKAGING.md) for release builds.
 
 For renderer performance changes, also run:
 
@@ -357,8 +346,7 @@ cargo test --locked -p iced_winit -p iced_wgpu --lib
 The application icon parity test also checks cached-frame equality at 100%,
 150%, and 200% scale. Its top-edge check allows a one-level alpha rounding
 difference at the same pixel; extra rows with greater coverage differences still
-fail. Pixel-difference limits remain separate from that edge check. Commit vendor tests and implementation files directly so fresh checkouts
-include the same fixes.
+fail. Pixel-difference limits remain separate from that edge check.
 
 ## Backend Switch Probe
 

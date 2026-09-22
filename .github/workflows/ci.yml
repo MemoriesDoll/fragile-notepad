@@ -138,13 +138,3 @@ jobs:
         run: |
           cargo build --locked --release --example backend_switch_probe
           python scripts/check-wayland-vulkan.py --binary target/release/examples/backend_switch_probe
-
-      - name: Upload Vulkan handoff evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vulkan-handoff-${{ runner.os }}
-          path: |
-            target/vulkan-handoff/
-            target/vulkan-wayland/
-          if-no-files-found: warn
