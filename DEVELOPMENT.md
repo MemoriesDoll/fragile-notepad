@@ -25,6 +25,8 @@ Enter jumps and returns focus to the editor, while Escape, Cancel, or a backdrop
 click dismisses without moving the caret. Invalid input keeps the prompt open.
 Like the previous command, out-of-range numbers clamp to the first or last line.
 The shortcut can be changed in Preferences, and the prompt preserves search state.
+The prompt and backdrop fade over 140 ms with a small vertical motion; closing
+keeps the editor blocked until the transition ends and focus returns.
 
 Preferences groups rendering and scrolling under General, color mode and syntax
 under Appearance, and editing and document markers under Editor. The appearance

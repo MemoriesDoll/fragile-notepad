@@ -41,12 +41,19 @@ fn main() {
             ] {
                 render(
                     &mut renderer,
-                    go_to_line_prompt::view(value, error),
+                    go_to_line_prompt::view(value, error, 1.0, true),
                     &theme,
                     Size::new(width, height),
                     &format!("go-to-line-{suffix}-{name}-{size_name}"),
                 );
             }
+            render(
+                &mut renderer,
+                go_to_line_prompt::view("120", None, 0.5, false),
+                &theme,
+                Size::new(width, height),
+                &format!("go-to-line-transition-{name}-{size_name}"),
+            );
             let entries = vec![
                 WindowListEntry {
                     target: WindowTarget::Main,

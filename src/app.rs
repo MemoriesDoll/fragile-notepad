@@ -607,15 +607,22 @@ impl App {
     }
 
     fn needs_animation_frames(&self) -> bool {
-        self.chrome_animation.needs_frames() || self.close_prompt.needs_frames()
+        self.chrome_animation.needs_frames()
+            || self.close_prompt.needs_frames()
+            || self
+                .go_to_line_prompt
+                .as_ref()
+                .is_some_and(|prompt| prompt.animation.needs_frames())
     }
 
     fn update_chrome_animation_frame(&mut self, at: Instant) -> Task<Message> {
         self.chrome_animation.update_frame(at);
-        self.close_prompt
+        let close = self
+            .close_prompt
             .update_frame(at)
             .map(Message::DirtyCloseFadeFinished)
-            .map_or_else(Task::none, Task::done)
+            .map_or_else(Task::none, Task::done);
+        Task::batch([close, self.update_go_to_line_frame(at)])
     }
 
     fn select_function_list_entry(

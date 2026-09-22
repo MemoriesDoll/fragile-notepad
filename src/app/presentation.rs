@@ -61,7 +61,12 @@ impl App {
         {
             iced::widget::stack![
                 ui::motion::fade(element, 1.0, ui::styles::editor_background, false),
-                ui::go_to_line_prompt::view(&prompt.input, prompt.error.as_deref()),
+                ui::go_to_line_prompt::view(
+                    &prompt.input,
+                    prompt.error.as_deref(),
+                    prompt.animation.progress(),
+                    prompt.animation.target_visible(),
+                ),
             ]
             .into()
         } else {

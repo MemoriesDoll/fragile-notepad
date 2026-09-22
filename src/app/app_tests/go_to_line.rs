@@ -165,3 +165,86 @@ fn go_to_line_yields_to_unsaved_changes_when_the_window_closes() {
     assert!(app.go_to_line_prompt.is_none());
     assert_eq!(app.close_prompt.document(), Some(id));
 }
+
+#[test]
+fn go_to_line_animation_keeps_the_barrier_until_dismissal_finishes() {
+    use std::time::{Duration, Instant};
+    for visible_for in [35, 140] {
+        for submit in [false, true] {
+            let (mut app, _) = App::new();
+            set_active_document_text(
+                &mut app,
+                "one\ntwo\nthree",
+                EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
+            );
+            let _ = app.update(Message::GoToLineOpened);
+            assert!(app.needs_animation_frames());
+            assert_eq!(
+                app.go_to_line_prompt.as_ref().unwrap().animation.progress(),
+                0.0
+            );
+            let start = Instant::now();
+            let _ = app.update_inner(Message::ChromeAnimationFrame(start));
+            let close_start = start + Duration::from_millis(visible_for);
+            let _ = app.update_inner(Message::ChromeAnimationFrame(close_start));
+            let visible_progress = app.go_to_line_prompt.as_ref().unwrap().animation.progress();
+            assert!(visible_progress > 0.0);
+            let _ = app.update(Message::GoToLineChanged("3".into()));
+            let dismissal = if submit {
+                Message::GoToLineSubmitted
+            } else {
+                Message::GoToLineClosed
+            };
+            assert_eq!(
+                app.update_inner(dismissal).units(),
+                0,
+                "focus stays in the prompt during closing"
+            );
+            assert!(
+                !app.go_to_line_prompt
+                    .as_ref()
+                    .unwrap()
+                    .animation
+                    .target_visible()
+            );
+            let _ = app.update_inner(Message::ChromeAnimationFrame(close_start));
+            let _ = app.update_inner(Message::ChromeAnimationFrame(
+                close_start + Duration::from_millis(70),
+            ));
+            let progress = app.go_to_line_prompt.as_ref().unwrap().animation.progress();
+            assert!(progress > 0.0 && progress < visible_progress);
+            let _ = app.update(Message::GoToLineChanged("2".into()));
+            let _ = app.update(Message::GoToLineSubmitted);
+            let _ = app.update(Message::GoToLineClosed);
+            let _ = app.update(Message::GoToLineOpened);
+            assert_eq!(app.go_to_line_prompt.as_ref().unwrap().input, "3");
+            assert_eq!(
+                app.workspace
+                    .active_document()
+                    .unwrap()
+                    .selection
+                    .cursor
+                    .line,
+                if submit { 2 } else { 0 }
+            );
+            let _ = app.update_inner(Message::ChromeAnimationFrame(
+                close_start + Duration::from_micros(139_900),
+            ));
+            assert!(
+                app.needs_animation_frames(),
+                "rounded zero must still schedule final removal"
+            );
+            let focus = app.update_inner(Message::ChromeAnimationFrame(
+                close_start + Duration::from_millis(140),
+            ));
+            assert!(focus.units() > 0, "restore editor focus after the fade");
+            assert!(app.go_to_line_prompt.is_none());
+            assert!(!app.needs_animation_frames());
+            let _ = app.update(Message::GoToLineOpened);
+            assert_eq!(
+                app.go_to_line_prompt.as_ref().unwrap().animation.progress(),
+                0.0
+            );
+        }
+    }
+}
