@@ -2,6 +2,7 @@ use super::{DEFAULT_SYNTAX_TOKEN, SyntaxRenderSpan};
 use crate::editor::buffer::EditorBuffer;
 use iced::advanced::text::Highlighter as _;
 use iced::highlighter;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,6 +18,74 @@ pub struct SyntaxLineCache {
     preview_parser: Option<PreviewParser>,
     preview_anchor: usize,
     preview_batches: usize,
+    // Presentation fallback only; never used as valid parser context.
+    displayed: RefCell<BTreeMap<usize, DisplayedSyntaxLine>>,
+    line_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct DisplayedSyntaxLine {
+    text: String,
+    spans: Vec<SyntaxRenderSpan>,
+}
+
+impl DisplayedSyntaxLine {
+    fn rebase(&self, text: &str) -> Vec<SyntaxRenderSpan> {
+        if self.text == text {
+            return self.spans.clone();
+        }
+        // Preserve prefix/suffix colors and let inserted text inherit the
+        // color at the edit. Character iteration keeps byte ranges UTF-8 safe.
+        let prefix: usize = self
+            .text
+            .chars()
+            .zip(text.chars())
+            .take_while(|(old, new)| old == new)
+            .map(|(ch, _)| ch.len_utf8())
+            .sum();
+        let suffix: usize = self.text[prefix..]
+            .chars()
+            .rev()
+            .zip(text[prefix..].chars().rev())
+            .take_while(|(old, new)| old == new)
+            .map(|(ch, _)| ch.len_utf8())
+            .sum();
+        let old_end = self.text.len() - suffix;
+        let new_end = text.len() - suffix;
+        let mut spans = Vec::new();
+        for span in &self.spans {
+            let end = span.range.end.min(prefix);
+            if span.range.start < end {
+                spans.push(SyntaxRenderSpan {
+                    range: span.range.start..end,
+                    color: span.color,
+                });
+            }
+        }
+        if prefix < new_end {
+            let color = self
+                .spans
+                .iter()
+                .find(|span| span.range.end > prefix)
+                .or_else(|| self.spans.last())
+                .and_then(|span| span.color);
+            spans.push(SyntaxRenderSpan {
+                range: prefix..new_end,
+                color,
+            });
+        }
+        for span in &self.spans {
+            let start = span.range.start.max(old_end);
+            if start < span.range.end {
+                spans.push(SyntaxRenderSpan {
+                    range: start - old_end + new_end..span.range.end - old_end + new_end,
+                    color: span.color,
+                });
+            }
+        }
+        merge_adjacent_syntax_spans(&mut spans);
+        spans
+    }
 }
 
 impl Clone for SyntaxLineCache {
@@ -24,6 +93,7 @@ impl Clone for SyntaxLineCache {
         Self {
             settings: self.settings.clone(),
             lines: self.lines.clone(),
+            line_count: self.line_count,
             // Parser snapshots are not cloneable. Resume a cloned cache by
             // replaying context on the worker, keeping its valid spans visible.
             highlighter: None,
@@ -92,6 +162,8 @@ impl SyntaxLineCache {
             *self = Self::new(settings);
         }
 
+        self.line_count = buffer.line_count();
+
         let target_last_line = last_line.min(buffer.line_count().saturating_sub(1));
         if target_last_line < self.lines.len() {
             return;
@@ -124,11 +196,53 @@ impl SyntaxLineCache {
         }
     }
 
+    pub(crate) fn invalidate_edit(&mut self, first: usize, last: usize, line_count: usize) {
+        let previous_count = std::mem::replace(&mut self.line_count, line_count);
+        if previous_count != 0 && previous_count != line_count {
+            let added = line_count.saturating_sub(previous_count);
+            let removed = previous_count.saturating_sub(line_count);
+            // Callers supply the maximum of the old/new inclusive edit ends.
+            // Whole-document refreshes (including undo/reload) can supply only
+            // the new last line. In that case there is no unchanged suffix.
+            let (old_last, new_last) = if last >= line_count.saturating_sub(1) {
+                (previous_count - 1, line_count.saturating_sub(1))
+            } else {
+                (last.saturating_sub(added), last.saturating_sub(removed))
+            };
+            let displayed = self.displayed.get_mut();
+            let split_last = (old_last == first && new_last > first)
+                .then(|| displayed.get(&first).cloned())
+                .flatten();
+            *displayed = std::mem::take(displayed)
+                .into_iter()
+                .filter_map(|(line, spans)| {
+                    let line = if line <= first {
+                        line
+                    } else if line > old_last {
+                        line + added - removed
+                    } else if line == old_last && new_last > first {
+                        new_last
+                    } else {
+                        return None;
+                    };
+                    (line < line_count).then_some((line, spans))
+                })
+                .collect();
+            if let Some(spans) = split_last {
+                displayed.insert(new_last, spans);
+            }
+            trim_displayed(displayed, first);
+        }
+        self.invalidate_from(first);
+    }
+
     pub fn cached_line_count(&self) -> usize {
         self.lines.len()
     }
 
     pub fn clear(&mut self) {
+        self.displayed.get_mut().clear();
+        self.line_count = 0;
         self.settings = None;
         self.lines.clear();
         self.highlighter = None;
@@ -144,6 +258,34 @@ impl SyntaxLineCache {
             .get(line)
             .or_else(|| self.preview.get(&line))
             .cloned()
+    }
+
+    pub(super) fn spans_for_text(&self, line: usize, text: &str) -> Option<Vec<SyntaxRenderSpan>> {
+        let mut displayed = self.displayed.borrow_mut();
+        let spans = if let Some(spans) = self.lines.get(line) {
+            spans.clone()
+        } else if let Some(previous) = displayed.get(&line) {
+            // Context-free previews can be less accurate than previous colors
+            // inside multiline constructs. Wait for exact context to replace
+            // these colors instead of flashing through a provisional palette.
+            previous.rebase(text)
+        } else {
+            self.spans(line)?
+        };
+        if !displayed
+            .get(&line)
+            .is_some_and(|old| old.text == text && old.spans == spans)
+        {
+            displayed.insert(
+                line,
+                DisplayedSyntaxLine {
+                    text: text.to_owned(),
+                    spans: spans.clone(),
+                },
+            );
+        }
+        trim_displayed(&mut displayed, line);
+        Some(spans)
     }
 
     /// Invalidates incompatible spans without initializing or running a parser.
@@ -172,6 +314,7 @@ impl SyntaxLineCache {
         buffer: Arc<EditorBuffer>,
         priority_lines: &[usize],
     ) -> SyntaxParseRequest {
+        self.line_count = buffer.line_count();
         self.preview_anchor = priority_lines.first().copied().unwrap_or(0);
         let missing: Vec<_> = priority_lines
             .iter()
@@ -263,6 +406,19 @@ impl SyntaxLineCache {
 const PARSE_BATCH_LINES: usize = 128;
 const PARSE_BATCH_TIME: Duration = Duration::from_millis(4);
 const PREVIEW_CACHE_LINES: usize = 1024;
+
+fn trim_displayed(displayed: &mut BTreeMap<usize, DisplayedSyntaxLine>, anchor: usize) {
+    while displayed.len() > PREVIEW_CACHE_LINES {
+        let first = *displayed.first_key_value().unwrap().0;
+        let last = *displayed.last_key_value().unwrap().0;
+        let furthest = if first.abs_diff(anchor) > last.abs_diff(anchor) {
+            first
+        } else {
+            last
+        };
+        displayed.remove(&furthest);
+    }
+}
 
 #[derive(Debug)]
 struct PreviewParser {
@@ -422,6 +578,104 @@ mod tests {
             token: "html".into(),
             theme: highlighter::Theme::InspiredGitHub,
         }
+    }
+
+    #[test]
+    fn retained_colors_follow_unicode_insertions_deletions_and_replacements() {
+        let settings = highlighter::Settings {
+            token: "rs".into(),
+            ..settings()
+        };
+        let original = "let café = \"🦀 text\"; // comment";
+        let buffer = EditorBuffer::from_text(original);
+        let mut cache = SyntaxLineCache::rebuild(&buffer, &settings);
+        cache.spans_for_text(0, original).unwrap();
+        for text in [
+            "let café_long = \"🦀 text\"; // comment",
+            "let café_long = \"é text\"; // comment",
+            "let café = \"é text\"; // comment",
+            "let café = \"text\"; // comment",
+            "let café = \"text\"; // comment 🦀",
+        ] {
+            cache.invalidate_from(0);
+            let retained = cache.spans_for_text(0, text).unwrap();
+            let expected = SyntaxLineCache::rebuild(&EditorBuffer::from_text(text), &settings);
+            assert_eq!(retained, expected.spans(0).unwrap(), "{text}");
+            assert!(
+                cache.needs_parse(0),
+                "retained colors are not parsed context"
+            );
+        }
+    }
+
+    #[test]
+    fn displayed_colors_are_bounded_and_cleared_on_language_or_theme_changes() {
+        let buffer = EditorBuffer::from_text("<p>text</p>\n".repeat(PREVIEW_CACHE_LINES + 10));
+        let mut cache = SyntaxLineCache::rebuild(&buffer, &settings());
+        for line in 0..buffer.line_count() {
+            cache.spans_for_text(line, &buffer.line(line).unwrap());
+        }
+        assert_eq!(cache.displayed.borrow().len(), PREVIEW_CACHE_LINES);
+        cache.invalidate_from(0);
+        assert!(cache.spans_for_text(100, "<p>text</p>").is_some());
+        for changed in [
+            highlighter::Settings {
+                token: "rs".into(),
+                ..settings()
+            },
+            highlighter::Settings {
+                theme: highlighter::Theme::SolarizedDark,
+                ..settings()
+            },
+            highlighter::Settings {
+                token: "txt".into(),
+                ..settings()
+            },
+        ] {
+            cache.configure(&changed);
+            assert!(cache.displayed.borrow().is_empty());
+            assert!(cache.spans_for_text(100, "<p>text</p>").is_none());
+            cache = SyntaxLineCache::rebuild(&buffer, &settings());
+            cache.spans_for_text(100, "<p>text</p>");
+        }
+    }
+
+    #[test]
+    fn full_document_shrink_drops_removed_display_lines() {
+        let buffer = EditorBuffer::from_text("<p>text</p>\n".repeat(200));
+        let mut cache = SyntaxLineCache::rebuild(&buffer, &settings());
+        for line in 0..buffer.line_count() {
+            cache.spans_for_text(line, &buffer.line(line).unwrap());
+        }
+        cache.invalidate_edit(0, 1, 2);
+        assert!(cache.displayed.borrow().keys().all(|line| *line < 2));
+        assert!(cache.spans_for_text(0, "<p>replacement</p>").is_some());
+    }
+
+    #[test]
+    fn changed_multiline_context_eventually_replaces_retained_colors() {
+        let mut buffer =
+            EditorBuffer::from_text(format!("<!--\n{}-->\n", "<p>text</p>\n".repeat(200)));
+        let mut cache = SyntaxLineCache::rebuild(&buffer, &settings());
+        let before = cache.spans_for_text(120, "<p>text</p>").unwrap();
+        buffer.replace_range(
+            crate::editor::EditorRange::new(
+                crate::editor::EditorPosition::new(0, 0),
+                crate::editor::EditorPosition::new(0, 4),
+            ),
+            "<div>",
+        );
+        cache.invalidate_edit(0, 0, buffer.line_count());
+        assert_eq!(cache.spans_for_text(120, "<p>text</p>").unwrap(), before);
+        finish(&mut cache, Arc::new(buffer.clone()), &[120]);
+        let after = cache.spans_for_text(120, "<p>text</p>").unwrap();
+        assert_ne!(after, before, "retained colors must not become permanent");
+        assert_eq!(
+            after,
+            SyntaxLineCache::rebuild(&buffer, &settings())
+                .spans(120)
+                .unwrap()
+        );
     }
 
     fn finish(cache: &mut SyntaxLineCache, buffer: Arc<EditorBuffer>, viewport: &[usize]) {

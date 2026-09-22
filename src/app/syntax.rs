@@ -157,6 +157,86 @@ impl App {
 mod tests {
     use super::*;
 
+    fn rendered_rows(app: &App) -> Vec<crate::editor::render::RowRenderPlan> {
+        let document = app.workspace.active_document().unwrap();
+        crate::editor::build_render_plan_with_cache(
+            &document.buffer,
+            &document.viewport,
+            &document.decorations,
+            document.main_selection(),
+            crate::editor::EditorLayout::new(
+                crate::editor::EditorMetrics::default(),
+                document.scroll,
+                800.0,
+                400.0,
+            ),
+            &document.syntax_cache.borrow(),
+        )
+        .rows
+    }
+
+    #[test]
+    fn typing_keeps_displayed_highlights_until_exact_replacement_arrives() {
+        let (mut app, _) = App::new();
+        let source = format!("<!--\n{}-->\n", "<p>comment text</p>\n".repeat(200));
+        app.workspace.insert_loaded_file("example.html", &source);
+        let document = app.workspace.active_document_mut().unwrap();
+        document.scroll.first_visible_row = 75;
+        let position = crate::editor::EditorPosition::new(80, 10);
+        document.set_main_selection(crate::editor::EditorSelection::new(position, position));
+        document.ensure_syntax_cache(app.settings.syntax_theme);
+        let before = rendered_rows(&app);
+        let id = app.workspace.active_document_id;
+
+        for text in ["a", "é", "🦀"] {
+            let _ = app.update_editor(id, crate::editor::EditorAction::InsertText(text.into()));
+            // This is the frame immediately after an edit, before any worker
+            // can return. Previously every visible row lost its colors here.
+            let after = rendered_rows(&app);
+            for (old, new) in before.iter().zip(&after) {
+                assert!(
+                    !new.syntax_spans.is_empty(),
+                    "line {} flashed unstyled",
+                    new.line
+                );
+                if old.line != 80 {
+                    assert_eq!(old.syntax_spans, new.syntax_spans);
+                }
+            }
+            while let Some((batch, request)) = app.next_syntax_request() {
+                let _ = app.complete_syntax_parse(batch, Ok(request.parse()));
+                for row in rendered_rows(&app) {
+                    assert!(!row.syntax_spans.is_empty());
+                    assert!(row.syntax_spans.iter().all(|span| {
+                        row.text.is_char_boundary(span.range.start)
+                            && row.text.is_char_boundary(span.range.end)
+                    }));
+                    if row.line != 80 {
+                        assert_eq!(
+                            row.syntax_spans,
+                            before
+                                .iter()
+                                .find(|old| old.line == row.line)
+                                .unwrap()
+                                .syntax_spans
+                        );
+                    }
+                }
+            }
+            let document = app.workspace.active_document().unwrap();
+            assert_eq!(
+                *document.syntax_cache.borrow(),
+                crate::editor::SyntaxLineCache::rebuild(
+                    &document.buffer,
+                    &highlighter::Settings {
+                        token: "html".into(),
+                        theme: app.settings.syntax_theme,
+                    }
+                )
+            );
+        }
+    }
+
     fn app() -> App {
         let (mut app, _) = App::new();
         app.workspace
@@ -167,6 +247,69 @@ mod tests {
             .scroll
             .first_visible_row = 300;
         app
+    }
+
+    #[test]
+    fn rapid_typing_and_line_breaks_keep_colors_while_obsolete_work_finishes() {
+        let (mut app, _) = App::new();
+        app.workspace.insert_loaded_file(
+            "example.rs",
+            "fn main() {\n    let café = 42;\n    // comment\n    let other = \"🦀\";\n}\n",
+        );
+        let document = app.workspace.active_document_mut().unwrap();
+        document.ensure_syntax_cache(app.settings.syntax_theme);
+        let position = crate::editor::EditorPosition::new(1, 8);
+        document.set_main_selection(crate::editor::EditorSelection::new(position, position));
+        let before = rendered_rows(&app);
+        let document_id = app.workspace.active_document_id;
+        let _ = app.update_editor(
+            document_id,
+            crate::editor::EditorAction::InsertText("x".into()),
+        );
+        rendered_rows(&app);
+        let (old_id, old_request) = app.next_syntax_request().unwrap();
+        let _ = app.update_editor(
+            document_id,
+            crate::editor::EditorAction::InsertText("é".into()),
+        );
+        let _ = app.update_editor(
+            document_id,
+            crate::editor::EditorAction::InsertText("\n".into()),
+        );
+        let split = rendered_rows(&app);
+        assert!(!split[1].syntax_spans.is_empty());
+        assert!(
+            !split[2].syntax_spans.is_empty(),
+            "split suffix keeps its colors"
+        );
+        for original in before.iter().filter(|row| row.line > 1) {
+            assert_eq!(split[original.line + 1].syntax_spans, original.syntax_spans);
+        }
+        let _ = app.complete_syntax_parse(old_id, Ok(old_request.parse()));
+        assert_eq!(
+            rendered_rows(&app),
+            split,
+            "obsolete work cannot change the frame"
+        );
+        let _ = app.update_editor(document_id, crate::editor::EditorAction::Backspace);
+        let joined = rendered_rows(&app);
+        for original in before.iter().filter(|row| row.line > 1) {
+            assert_eq!(joined[original.line].syntax_spans, original.syntax_spans);
+        }
+        while let Some((id, request)) = app.next_syntax_request() {
+            let _ = app.complete_syntax_parse(id, Ok(request.parse()));
+        }
+        let document = app.workspace.active_document().unwrap();
+        assert_eq!(
+            *document.syntax_cache.borrow(),
+            crate::editor::SyntaxLineCache::rebuild(
+                &document.buffer,
+                &highlighter::Settings {
+                    token: "rs".into(),
+                    theme: app.settings.syntax_theme
+                }
+            )
+        );
     }
 
     #[test]

@@ -183,8 +183,11 @@ Only one syntax batch is outstanding. Batches yield after 128 lines or about 4 m
 a single slow line may exceed that budget on the worker. Viewport requests follow
 the latest scroll position, provisional storage is bounded to 1,024 lines, and
 document revision, language, theme, and cache generation checks reject stale
-results. Editing clears provisional spans and invalidates the affected exact
-suffix. Syntax results redraw the editor without triggering session writes.
+results. Editing invalidates parser spans but retains the last displayed colors
+for up to 1,024 lines until exact replacements arrive. Retained colors follow
+line insertions/deletions and Unicode text edits; they are display-only and never
+count as valid parser context. Language/theme changes clear them. Syntax results
+redraw the editor without triggering session writes.
 
 The tab strip reserves space below the labels for a visible horizontal scrollbar
 when the tabs overflow. When they fit, that strip disappears. Window resizing,

@@ -666,9 +666,11 @@ impl Document {
         }
         self.clamp_scroll();
         self.refresh_dirty_state();
-        self.syntax_cache
-            .borrow_mut()
-            .invalidate_from(first_changed_line);
+        self.syntax_cache.borrow_mut().invalidate_edit(
+            first_changed_line,
+            last_changed_line,
+            self.buffer.line_count(),
+        );
         self.revision = self.revision.saturating_add(1);
     }
 

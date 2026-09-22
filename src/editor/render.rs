@@ -443,7 +443,9 @@ pub fn build_render_plan_for_selection_set_with_cache_and_caret_rows(
         if cached_line != Some(line) {
             cached_line = Some(line);
             line_text = buffer.line(line).unwrap_or_default();
-            line_spans = syntax_cache.spans(line).unwrap_or_default();
+            line_spans = syntax_cache
+                .spans_for_text(line, &line_text)
+                .unwrap_or_default();
             projected.clear();
             for selection in selections.ranges() {
                 if let Some(projection) = project_selection_line(
