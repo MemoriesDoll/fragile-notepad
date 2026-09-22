@@ -372,7 +372,7 @@ fn search_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
             Message::ToggleFind,
         ),
         menu::item(
-            "Find in Files...",
+            "Find in Open Documents...",
             Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::FindInFiles),
         ),
         menu::item("Find Next", Message::FindNext),

@@ -402,6 +402,16 @@ pub fn utility_dialog(theme: &Theme) -> container::Style {
     }
 }
 
+pub fn utility_card(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(palette.surface.into()),
+        text_color: Some(palette.text),
+        border: border(1.0, palette.border_soft, 10.0),
+        ..Default::default()
+    }
+}
+
 pub fn utility_selection(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let palette = VisualPalette::from_theme(theme);

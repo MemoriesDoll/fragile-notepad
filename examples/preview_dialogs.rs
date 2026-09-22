@@ -3,10 +3,11 @@
 //! Images are written to target/dialog-review/.
 
 use fragile_notepad::{
-    core::AppearanceMode,
-    message::{Message, WindowTarget},
+    core::{AppearanceMode, Document, DocumentId, Workspace},
+    message::{AdvancedSearchTab, Message, WindowTarget},
+    search_dialog::SearchDialogState,
     ui::{
-        styles,
+        advanced_search_panel, styles,
         window_list_dialog::{self, WindowListEntry},
     },
 };
@@ -54,6 +55,38 @@ fn main() {
                 Size::new(width, height),
                 &format!("windows-{name}-{size_name}"),
             );
+        }
+        for (width, height, size_name) in [(900, 724, "normal"), (760, 524, "minimum")] {
+            for (tab, tab_name) in [
+                (AdvancedSearchTab::Find, "find"),
+                (AdvancedSearchTab::Replace, "replace"),
+                (AdvancedSearchTab::FindInFiles, "find-open"),
+                (AdvancedSearchTab::ReplaceInFiles, "replace-open"),
+                (AdvancedSearchTab::GoToLine, "go-to"),
+            ] {
+                let mut dialog = SearchDialogState::new();
+                dialog.active_tab = tab;
+                if tab != AdvancedSearchTab::Find {
+                    dialog.query = "release".into();
+                    dialog.replacement = "launch".into();
+                    dialog.go_to_line = "120".into();
+                    let mut workspace = Workspace::new();
+                    workspace.documents.push(Document::from_path(DocumentId::new(20), "release-notes.md", "# September release\nPrepare the release notes.\nReview the release checklist.\n"));
+                    workspace.documents.push(Document::from_path(
+                        DocumentId::new(21),
+                        "src/main.rs",
+                        "fn prepare_release() {}\n// Publish the release after review.",
+                    ));
+                    dialog.refresh_from_workspace(&workspace);
+                }
+                render(
+                    &mut renderer,
+                    advanced_search_panel::view(&dialog),
+                    &theme,
+                    Size::new(width, height),
+                    &format!("search-{tab_name}-{name}-{size_name}"),
+                );
+            }
         }
     }
     println!("Screenshots: target/dialog-review/");

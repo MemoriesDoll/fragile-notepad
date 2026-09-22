@@ -1,324 +1,408 @@
 use iced::widget::{
     button, checkbox, column, container, row, rule, scrollable, space, text, text_input,
 };
-use iced::{Center, Element, Fill, FillPortion, Length};
+use iced::{Center, Element, Fill, FillPortion, Font};
 
 use crate::core::SearchMode;
 use crate::message::{AdvancedSearchTab, Message};
 use crate::search_dialog::{SearchDialogState, SearchResult};
-use crate::ui::{centered_button_label, centered_fill_button_label, styles};
-
-const TABS: &[(AdvancedSearchTab, &str)] = &[
-    (AdvancedSearchTab::Find, "Find"),
-    (AdvancedSearchTab::Replace, "Replace"),
-    (AdvancedSearchTab::FindInFiles, "Find in Files"),
-    (AdvancedSearchTab::ReplaceInFiles, "Replace in Files"),
-    (AdvancedSearchTab::GoToLine, "Go To Line"),
-];
-const BODY_TEXT_SIZE: u32 = 14;
-const SECONDARY_TEXT_SIZE: u32 = 13;
-const OPTION_TEXT_SIZE: u32 = 12;
+use crate::ui::{styles, utility};
 
 pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let content = if matches!(dialog.active_tab, AdvancedSearchTab::GoToLine) {
+    let go_to = dialog.active_tab == AdvancedSearchTab::GoToLine;
+    let title = match dialog.active_tab {
+        AdvancedSearchTab::Find | AdvancedSearchTab::FindInFiles => "Find text",
+        AdvancedSearchTab::Replace | AdvancedSearchTab::ReplaceInFiles => "Replace text",
+        AdvancedSearchTab::GoToLine => "Go to line",
+    };
+    let subtitle = if go_to {
+        "Jump to a line in the current document."
+    } else if open_scope(dialog.active_tab) {
+        "Search across your open tabs, including unsaved documents."
+    } else {
+        "Search within the document selected in the editor."
+    };
+    let header = column![
+        row![
+            utility::heading(title),
+            space::horizontal(),
+            utility::badge(scope_label(dialog.active_tab))
+        ]
+        .align_y(Center)
+        .spacing(12),
+        utility::description(subtitle),
+    ]
+    .spacing(6);
+
+    let body: Element<'_, Message> = if go_to {
         column![
-            tabs(dialog.active_tab),
-            rule::horizontal(1),
-            go_to_line_panel(dialog),
+            header,
+            container(
+                column![
+                    field(
+                        "Line number",
+                        text_input("e.g. 120", &dialog.go_to_line)
+                            .on_input(Message::AdvancedSearchQueryChanged)
+                            .on_submit(Message::AdvancedFindNextRun)
+                            .padding([10, 12])
+                            .size(15)
+                            .style(styles::input)
+                            .into()
+                    ),
+                    utility::description("Line numbers start at 1."),
+                    row![
+                        space::horizontal(),
+                        action(
+                            "Go to line",
+                            Message::AdvancedFindNextRun,
+                            true,
+                            !dialog.go_to_line.trim().is_empty()
+                        )
+                    ],
+                ]
+                .spacing(16)
+            )
+            .padding(20)
+            .width(Fill)
+            .style(styles::utility_card),
             space::vertical(),
         ]
-        .height(Fill)
-        .width(Fill)
+        .spacing(22)
+        .into()
     } else {
         column![
-            tabs(dialog.active_tab),
-            rule::horizontal(1),
+            header,
             container(
-                row![
-                    column![fields(dialog), options(dialog), status_line(dialog)]
-                        .spacing(12)
-                        .width(FillPortion(3)),
-                    container(command_column(dialog)).width(Length::Fixed(188.0)),
+                column![
+                    scrollable(container(search_form(dialog)).padding(16))
+                        .smooth_scroll(true)
+                        .spacing(8)
+                        .height(Fill),
+                    container(commands(dialog)).padding([12, 16]).width(Fill),
                 ]
-                .spacing(14)
-                .padding([14, 16])
-                .height(Length::Fixed(304.0))
+                .height(Fill)
             )
-            .width(Fill)
-            .style(styles::settings_content),
-            rule::horizontal(1),
+            .style(styles::utility_card)
+            .height(FillPortion(3))
+            .width(Fill),
             results(dialog),
         ]
+        .spacing(18)
         .height(Fill)
-        .width(Fill)
+        .into()
     };
 
-    container(content)
-        .width(Fill)
-        .height(Fill)
-        .style(styles::settings_panel)
-        .into()
-}
-
-fn tabs(active: AdvancedSearchTab) -> Element<'static, Message> {
-    let tab_row = TABS.iter().fold(row![].spacing(2), |row, (tab, label)| {
-        row.push(
-            button(centered_button_label(label, BODY_TEXT_SIZE))
-                .padding([7, 14])
-                .style(styles::settings_category_button(active == *tab))
-                .on_press(Message::AdvancedSearchTabSelected(*tab)),
-        )
-    });
-
-    container(tab_row.padding([8, 10]).width(Fill))
-        .width(Fill)
-        .style(styles::settings_category_list)
-        .into()
-}
-
-fn fields(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let mut fields = column![field_row(
-        "Find what:",
-        text_input("Text to find", &dialog.query)
-            .on_input(Message::AdvancedSearchQueryChanged)
-            .on_submit(Message::AdvancedFindNextRun)
-            .padding([7, 10])
-            .size(BODY_TEXT_SIZE)
-            .width(Fill)
-            .style(styles::input)
-            .into(),
-    ),]
-    .spacing(8);
-
-    if needs_replace(dialog.active_tab) {
-        fields = fields.push(field_row(
-            "Replace with:",
-            text_input("Replacement text", &dialog.replacement)
-                .on_input(Message::AdvancedSearchReplacementChanged)
-                .padding([7, 10])
-                .size(BODY_TEXT_SIZE)
-                .width(Fill)
-                .style(styles::input)
-                .into(),
-        ));
-    }
-
-    if needs_open_document_scope(dialog.active_tab) {
-        fields = fields.push(field_row(
-            "Filters:",
-            text_input("*.rs;*.txt or *", &dialog.include_pattern)
-                .on_input(Message::AdvancedSearchIncludeChanged)
-                .padding([7, 10])
-                .size(BODY_TEXT_SIZE)
-                .width(Fill)
-                .style(styles::input)
-                .into(),
-        ));
-    }
-
-    fields.into()
-}
-
-fn go_to_line_panel(dialog: &SearchDialogState) -> Element<'_, Message> {
     container(
-        row![
-            column![
-                field_row(
-                    "Line number:",
-                    text_input("Line number", &dialog.go_to_line)
-                        .on_input(Message::AdvancedSearchQueryChanged)
-                        .on_submit(Message::AdvancedFindNextRun)
-                        .padding([7, 10])
-                        .size(BODY_TEXT_SIZE)
-                        .width(Fill)
-                        .style(styles::input)
-                        .into(),
-                ),
-                status_line(dialog),
+        column![
+            row![
+                navigation(dialog.active_tab),
+                container(body).padding(24).width(Fill).height(Fill),
             ]
-            .spacing(12)
-            .width(FillPortion(3)),
-            container(command_column(dialog)).width(Length::Fixed(188.0)),
+            .height(Fill),
+            rule::horizontal(1),
+            row![
+                container(text(status_label(dialog)).size(12))
+                    .style(styles::info_muted)
+                    .width(Fill),
+                action("Close", Message::AdvancedSearchClosed, false, true),
+            ]
+            .spacing(16)
+            .align_y(Center)
+            .padding([12, 20]),
         ]
-        .spacing(14)
-        .padding([14, 16])
-        .height(Length::Fixed(112.0)),
+        .height(Fill),
     )
     .width(Fill)
-    .style(styles::settings_content)
+    .height(Fill)
+    .style(styles::settings_panel)
     .into()
 }
 
+fn navigation(active: AdvancedSearchTab) -> Element<'static, Message> {
+    let nav = |label, tab| {
+        utility::navigation(
+            label,
+            active == tab,
+            Message::AdvancedSearchTabSelected(tab),
+        )
+    };
+    container(
+        column![
+            utility::eyebrow("FIND & REPLACE"),
+            space::vertical().height(14),
+            utility::eyebrow("CURRENT DOCUMENT"),
+            nav("Find", AdvancedSearchTab::Find),
+            nav("Replace", AdvancedSearchTab::Replace),
+            space::vertical().height(14),
+            utility::eyebrow("OPEN DOCUMENTS"),
+            nav("Find all", AdvancedSearchTab::FindInFiles),
+            nav("Replace all", AdvancedSearchTab::ReplaceInFiles),
+            space::vertical().height(14),
+            utility::eyebrow("NAVIGATE"),
+            nav("Go to line", AdvancedSearchTab::GoToLine),
+            space::vertical(),
+            utility::description("Keep this window open while you work."),
+        ]
+        .spacing(6)
+        .height(Fill),
+    )
+    .padding([24, 14])
+    .width(174)
+    .height(Fill)
+    .style(styles::settings_category_list)
+    .into()
+}
+
+fn search_form(dialog: &SearchDialogState) -> Element<'_, Message> {
+    let submit = if open_scope(dialog.active_tab) {
+        Message::AdvancedFindAllOpenRun
+    } else {
+        Message::AdvancedFindNextRun
+    };
+    let find = field(
+        "Find",
+        text_input("Enter text or a pattern", &dialog.query)
+            .on_input(Message::AdvancedSearchQueryChanged)
+            .on_submit(submit)
+            .padding([10, 12])
+            .size(15)
+            .width(Fill)
+            .style(styles::input)
+            .into(),
+    );
+    let input_fields: Element<'_, Message> = if replace_mode(dialog.active_tab) {
+        row![
+            container(find).width(Fill),
+            container(field(
+                "Replace with",
+                text_input("Replacement text", &dialog.replacement)
+                    .on_input(Message::AdvancedSearchReplacementChanged)
+                    .padding([10, 12])
+                    .size(15)
+                    .width(Fill)
+                    .style(styles::input)
+                    .into()
+            ))
+            .width(Fill),
+        ]
+        .spacing(14)
+        .into()
+    } else {
+        find
+    };
+    let mut fields = column![input_fields].spacing(14);
+    if open_scope(dialog.active_tab) {
+        fields = fields.push(
+            row![
+                text("File names").size(12).width(76),
+                text_input(
+                    "All open documents · e.g. *.rs;*.txt",
+                    &dialog.include_pattern
+                )
+                .on_input(Message::AdvancedSearchIncludeChanged)
+                .padding([8, 10])
+                .size(13)
+                .width(Fill)
+                .style(styles::input),
+            ]
+            .spacing(12)
+            .align_y(Center),
+        );
+    }
+    column![fields, options(dialog)].spacing(16).into()
+}
+
 fn options(dialog: &SearchDialogState) -> Element<'_, Message> {
-    row![
-        group_box(
-            "Search mode",
-            column![
-                mode_checkbox(dialog.mode, SearchMode::Normal, "Normal"),
-                mode_checkbox(dialog.mode, SearchMode::Extended, "Extended"),
-                mode_checkbox(dialog.mode, SearchMode::Regex, "Regular expression"),
-            ]
-            .spacing(5)
-            .into(),
+    let modes = [
+        (SearchMode::Normal, "Plain text"),
+        (SearchMode::Extended, "Escapes"),
+        (SearchMode::Regex, "Regex"),
+    ]
+    .into_iter()
+    .fold(row![].spacing(4), |row, (mode, label)| {
+        row.push(
+            button(text(label).size(12))
+                .padding([6, 12])
+                .style(styles::settings_category_button(dialog.mode == mode))
+                .on_press(Message::AdvancedSearchModeSelected(mode)),
         )
-        .height(Length::Fixed(104.0))
-        .width(FillPortion(1)),
-        group_box(
-            "Options",
-            column![
-                checkbox(dialog.case_sensitive)
-                    .label("Match case")
-                    .text_size(OPTION_TEXT_SIZE)
-                    .on_toggle(Message::AdvancedSearchCaseSensitiveToggled),
-                checkbox(dialog.whole_word)
-                    .label("Match whole word only")
-                    .text_size(OPTION_TEXT_SIZE)
-                    .on_toggle(Message::AdvancedSearchWholeWordToggled),
-                checkbox(dialog.wrap_around)
-                    .label("Wrap around")
-                    .text_size(OPTION_TEXT_SIZE)
-                    .on_toggle(Message::AdvancedSearchWrapAroundToggled),
-            ]
-            .spacing(5)
-            .into(),
-        )
-        .height(Length::Fixed(104.0))
-        .width(FillPortion(1)),
+    });
+    let hint = match dialog.mode {
+        SearchMode::Normal => "Treat the query as plain text.",
+        SearchMode::Extended => r"Use escapes such as \n for a new line and \t for a tab.",
+        SearchMode::Regex => "Search with a regular expression; use $1 in replacements.",
+    };
+    let mut flags = row![
+        checkbox(dialog.case_sensitive)
+            .label("Match case")
+            .text_size(12)
+            .size(16)
+            .on_toggle(Message::AdvancedSearchCaseSensitiveToggled),
+        checkbox(dialog.whole_word)
+            .label("Whole words")
+            .text_size(12)
+            .size(16)
+            .on_toggle(Message::AdvancedSearchWholeWordToggled),
+    ]
+    .spacing(18)
+    .align_y(Center);
+    if !open_scope(dialog.active_tab) {
+        flags = flags.push(
+            checkbox(dialog.wrap_around)
+                .label("Wrap around")
+                .text_size(12)
+                .size(16)
+                .on_toggle(Message::AdvancedSearchWrapAroundToggled),
+        );
+    }
+    column![
+        row![text("Match using").size(12), modes]
+            .spacing(12)
+            .align_y(Center),
+        utility::description(hint),
+        flags,
     ]
     .spacing(10)
     .into()
 }
 
-fn mode_checkbox<'a>(
-    active: SearchMode,
-    mode: SearchMode,
-    label: &'static str,
-) -> Element<'a, Message> {
-    checkbox(active == mode)
-        .label(label)
-        .text_size(OPTION_TEXT_SIZE)
-        .on_toggle(move |_| Message::AdvancedSearchModeSelected(mode))
-        .into()
-}
-
-fn command_column(dialog: &SearchDialogState) -> Element<'_, Message> {
-    match dialog.active_tab {
-        AdvancedSearchTab::Find => column![
-            action_button("Find Next", Message::AdvancedFindNextRun, true),
-            action_button("Count", Message::AdvancedCountRun, true),
-            action_button(
-                "Find All in Current Document",
-                Message::AdvancedFindAllCurrentRun,
-                true
-            ),
-            action_button(
-                "Find All in Open Documents",
-                Message::AdvancedFindAllOpenRun,
-                true
-            ),
-            space::vertical(),
-            action_button("Close", Message::AdvancedSearchClosed, true),
-        ],
-        AdvancedSearchTab::Replace => column![
-            action_button("Find Next", Message::AdvancedFindNextRun, true),
-            action_button("Replace", Message::AdvancedReplaceRun, true),
-            action_button(
-                "Replace All in Current Document",
-                Message::AdvancedReplaceAllCurrentRun,
-                true
-            ),
-            action_button(
-                "Replace All in Open Documents",
-                Message::AdvancedReplaceAllOpenRun,
-                true
-            ),
-            space::vertical(),
-            action_button("Close", Message::AdvancedSearchClosed, true),
-        ],
-        AdvancedSearchTab::FindInFiles => column![
-            action_button("Find All", Message::AdvancedFindAllOpenRun, true),
-            action_button("Count", Message::AdvancedCountRun, true),
-            action_button("Find Next", Message::AdvancedFindNextRun, true),
-            space::vertical(),
-            scope_hint(dialog),
-            action_button("Close", Message::AdvancedSearchClosed, true),
-        ],
-        AdvancedSearchTab::ReplaceInFiles => column![
-            action_button("Find All", Message::AdvancedFindAllOpenRun, true),
-            action_button("Replace", Message::AdvancedReplaceRun, true),
-            action_button("Replace All", Message::AdvancedReplaceAllOpenRun, true),
-            space::vertical(),
-            scope_hint(dialog),
-            action_button("Close", Message::AdvancedSearchClosed, true),
-        ],
-        AdvancedSearchTab::GoToLine => column![
-            action_button("Go", Message::AdvancedFindNextRun, true),
-            space::vertical(),
-            action_button("Close", Message::AdvancedSearchClosed, true),
-        ],
+fn commands(dialog: &SearchDialogState) -> Element<'_, Message> {
+    let enabled = !dialog.query.is_empty();
+    let is_open = open_scope(dialog.active_tab);
+    let find_all = if is_open {
+        Message::AdvancedFindAllOpenRun
+    } else {
+        Message::AdvancedFindAllCurrentRun
+    };
+    let replace_all = if is_open {
+        Message::AdvancedReplaceAllOpenRun
+    } else {
+        Message::AdvancedReplaceAllCurrentRun
+    };
+    let mut actions = row![].spacing(8);
+    if !is_open {
+        actions = actions.push(action(
+            "Find next",
+            Message::AdvancedFindNextRun,
+            true,
+            enabled,
+        ));
     }
-    .spacing(7)
-    .height(Fill)
-    .into()
-}
-
-fn status_line(dialog: &SearchDialogState) -> Element<'_, Message> {
-    row![
-        text(&dialog.status).size(SECONDARY_TEXT_SIZE),
-        space::horizontal(),
-        text(scope_label(dialog.active_tab)).size(SECONDARY_TEXT_SIZE),
-    ]
-    .align_y(Center)
-    .into()
+    actions = actions
+        .push(action("Find all", find_all, is_open, enabled))
+        .push(action("Count", Message::AdvancedCountRun, false, enabled));
+    if replace_mode(dialog.active_tab) {
+        if !is_open {
+            actions = actions.push(action(
+                "Replace",
+                Message::AdvancedReplaceRun,
+                false,
+                enabled,
+            ));
+        }
+        actions = actions.push(action("Replace all", replace_all, false, enabled));
+    }
+    actions.into()
 }
 
 fn results(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let result_list = dialog
-        .results
-        .iter()
-        .fold(column![].spacing(1), |column, result| {
-            column.push(result_row(result))
-        });
-
-    container(
-        column![
-            row![
-                text("Search results").size(BODY_TEXT_SIZE),
-                text(&dialog.status).size(SECONDARY_TEXT_SIZE),
-                space::horizontal(),
+    let count = dialog.results.len();
+    let header = row![
+        text("Results").size(14).font(utility::semibold()),
+        utility::badge(count.to_string()),
+        space::horizontal(),
+        utility::description("Select a match to jump to it"),
+    ]
+    .spacing(10)
+    .align_y(Center);
+    let body: Element<'_, Message> = if count == 0 {
+        let (title, hint) = if dialog.query.is_empty() {
+            (
+                "Start with a search",
+                "Enter text above, then choose Find all to see matches here.",
+            )
+        } else if dialog.status.starts_with("No matches") || dialog.status.starts_with("0 matches")
+        {
+            (
+                "No matches found",
+                "Try a shorter query or adjust the matching options.",
+            )
+        } else {
+            (
+                "Your matches appear here",
+                "Choose Find all to collect matches in the selected scope.",
+            )
+        };
+        container(
+            column![
+                text(title).size(16).font(utility::semibold()),
+                utility::description(hint),
             ]
-            .spacing(10)
-            .align_y(Center)
-            .padding([8, 12]),
-            scrollable(result_list.padding([0, 8]))
-                .smooth_scroll(true)
-                .height(Fill),
-        ]
-        .height(Fill),
-    )
-    .height(Fill)
-    .width(Fill)
-    .style(styles::settings_content)
-    .into()
+            .spacing(8)
+            .align_x(Center),
+        )
+        .padding(16)
+        .center(Fill)
+        .into()
+    } else {
+        let mut rows = column![].spacing(2);
+        let mut previous = None;
+        for result in &dialog.results {
+            if previous != Some(result.document_id) {
+                rows = rows.push(
+                    container(
+                        text(&result.document_title)
+                            .size(12)
+                            .font(utility::semibold())
+                            .wrapping(text::Wrapping::None),
+                    )
+                    .padding([8, 10])
+                    .width(Fill)
+                    .clip(true)
+                    .style(styles::find_status),
+                );
+                previous = Some(result.document_id);
+            }
+            rows = rows.push(result_row(result));
+        }
+        scrollable(rows)
+            .spacing(8)
+            .smooth_scroll(true)
+            .height(Fill)
+            .into()
+    };
+    container(column![header, body].spacing(12).height(Fill))
+        .padding(16)
+        .height(FillPortion(2))
+        .width(Fill)
+        .style(styles::utility_card)
+        .into()
 }
 
 fn result_row(result: &SearchResult) -> Element<'_, Message> {
+    let start = result.selection.range().start;
     button(
         row![
-            text(format!(
-                "{}:{}:{}",
-                result.document_title,
-                result.selection.range().start.line + 1,
-                result.selection.range().start.column + 1
-            ))
-            .size(SECONDARY_TEXT_SIZE)
-            .width(Length::Fixed(230.0)),
-            text(&result.preview).size(SECONDARY_TEXT_SIZE).width(Fill),
+            container(
+                text(format!("{}:{}", start.line + 1, start.column + 1))
+                    .size(12)
+                    .font(Font::MONOSPACE)
+            )
+            .width(76)
+            .style(styles::info_muted),
+            container(
+                text(&result.preview)
+                    .size(13)
+                    .font(Font::MONOSPACE)
+                    .wrapping(text::Wrapping::None)
+            )
+            .width(Fill)
+            .clip(true),
         ]
         .spacing(12)
         .align_y(Center),
     )
-    .padding([6, 8])
+    .padding([8, 10])
     .width(Fill)
     .style(styles::menu_dropdown_item)
     .on_press(Message::AdvancedSearchResultSelected(
@@ -328,55 +412,45 @@ fn result_row(result: &SearchResult) -> Element<'_, Message> {
     .into()
 }
 
-fn field_row<'a>(label: &'static str, control: Element<'a, Message>) -> Element<'a, Message> {
-    row![text(label).size(BODY_TEXT_SIZE).width(108), control]
-        .spacing(10)
-        .align_y(Center)
-        .height(Length::Fixed(34.0))
+fn field<'a>(label: &'static str, control: Element<'a, Message>) -> Element<'a, Message> {
+    column![text(label).size(13).font(utility::semibold()), control]
+        .spacing(7)
         .into()
 }
 
-fn group_box<'a>(
-    title: &'static str,
-    content: Element<'a, Message>,
-) -> container::Container<'a, Message> {
-    container(column![text(title).size(SECONDARY_TEXT_SIZE), content].spacing(7))
-        .padding([8, 10])
-        .style(styles::find_status)
-}
-
-fn action_button<'a>(label: &'static str, message: Message, enabled: bool) -> Element<'a, Message> {
-    button(centered_fill_button_label(label, SECONDARY_TEXT_SIZE))
-        .padding([7, 10])
-        .width(Fill)
-        .style(styles::command_button)
+fn action<'a>(
+    label: &'static str,
+    message: Message,
+    primary: bool,
+    enabled: bool,
+) -> Element<'a, Message> {
+    button(text(label).size(13))
+        .padding([8, 14])
+        .style(if primary {
+            styles::primary_command_button
+        } else {
+            styles::command_button
+        })
         .on_press_maybe(enabled.then_some(message))
         .into()
 }
 
-fn scope_hint(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let filter = dialog.include_pattern.trim();
-    let label = if filter.is_empty() {
-        "Scope: open documents"
+fn status_label(dialog: &SearchDialogState) -> &str {
+    if dialog.status == "No query" {
+        "Ready to search"
     } else {
-        "Scope: filtered open documents"
-    };
-
-    container(text(label).size(SECONDARY_TEXT_SIZE))
-        .padding([6, 8])
-        .width(Fill)
-        .style(styles::find_status)
-        .into()
+        &dialog.status
+    }
 }
 
-const fn needs_replace(tab: AdvancedSearchTab) -> bool {
+const fn replace_mode(tab: AdvancedSearchTab) -> bool {
     matches!(
         tab,
         AdvancedSearchTab::Replace | AdvancedSearchTab::ReplaceInFiles
     )
 }
 
-const fn needs_open_document_scope(tab: AdvancedSearchTab) -> bool {
+const fn open_scope(tab: AdvancedSearchTab) -> bool {
     matches!(
         tab,
         AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
@@ -384,9 +458,9 @@ const fn needs_open_document_scope(tab: AdvancedSearchTab) -> bool {
 }
 
 const fn scope_label(tab: AdvancedSearchTab) -> &'static str {
-    match tab {
-        AdvancedSearchTab::Find | AdvancedSearchTab::Replace => "Current document",
-        AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles => "Open documents",
-        AdvancedSearchTab::GoToLine => "Current document",
+    if open_scope(tab) {
+        "Open documents"
+    } else {
+        "Current document"
     }
 }

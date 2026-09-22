@@ -19,6 +19,7 @@ pub mod styles;
 pub mod tabs;
 pub mod title_bar;
 pub mod toolbar;
+mod utility;
 mod view_model;
 pub mod window_list_dialog;
 pub use view_model::WorkbenchView;
