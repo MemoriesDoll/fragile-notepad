@@ -149,6 +149,12 @@ icons; the measured About scene is unchanged. Mixed scenes can use both pools.
 The resource regression covers repeated small-image growth/eviction alongside
 retained large images and independent worker uploads.
 
+Image uploads larger than the 100 KiB staging chunk use a temporary mapped
+buffer. The command submission retains it until GPU completion, then releases
+it. Small uploads remain pooled. This saves 2.73 MiB of retained buffer memory
+per measured About window. The atlas regression checks delayed submission,
+padding, fragmentation, atlas growth, and release after completion.
+
 Atlas growth now respects requested device layer/dimension limits. Fragmented
 allocation is transactional: failure frees its reservations before upload.
 Full icon atlases spill into the main pool; full shared pools use independent

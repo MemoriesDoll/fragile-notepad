@@ -4,9 +4,9 @@ Objective: unified Vulkan across Windows, Linux and macOS; explicit GPU resource
 ownership and measured optimization, retaining software-first startup and the
 prepare/warm/commit/first-present rollback contract. This work is incomplete.
 
-## Status (2026-09-22)
+## Status (2026-09-23)
 
-Implementation and basic validation are complete; optimization has resumed.
+Optimization is paused at the user's request after implementation and validation.
 Transform pixel/resource tests pass on NVIDIA, AMD, SwiftShader, and Linux
 Lavapipe. About/editor offscreen scenarios pass. Windows local CI passes build,
 formatting, example, and software-only checks, plus 725 Rust and 12 Python tests.
@@ -606,6 +606,25 @@ text, images, quads, and the About trail. Logs:
 These runs use the profiling build without API trace capture. GPU times remain
 similar (About roughly 25/44/71 microseconds and editor 20/33/51 at the three
 scales); this is not evidence of a general frame-latency improvement.
+
+## Release oversized image upload buffers
+
+Image uploads above 100 KiB now use temporary mapped buffers, released after
+GPU completion. Small uploads remain pooled. Measured retained buffer memory
+falls by 2.73 MiB per About window; editor buffer totals are unchanged. Steady
+mapped host ranges fall by approximately 75%, with unchanged GPU transfer
+volume. These are buffer savings, not a claim about driver pool memory or frame
+latency. Replacing large images repeatedly now requires repeated allocations.
+
+The regression checks every pixel and replicated edge padding across delayed
+submission, fragmentation, atlas growth, and buffer release. It passes on
+NVIDIA, AMD, SwiftShader, and WSL2 Lavapipe. The completed Windows validation
+run passed 731 Rust tests and 13 Python tests, plus formatting, build, examples,
+and software-only checks. All nine live handoff scenarios passed on NVIDIA,
+SwiftShader, and isolated Weston 14/Lavapipe (27 cases); Wayland About and editor
+workloads also passed. Logs: `target/vulkan-upload-lifetime-windows-ci-fixed.log`,
+`target/vulkan-upload-lifetime-linux-vendor.log`, and
+`target/vulkan-upload-lifetime-wayland.log`.
 
 ## Still required before completing the objective
 

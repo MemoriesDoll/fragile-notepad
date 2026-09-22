@@ -4,6 +4,9 @@ mod allocation;
 mod allocator;
 mod layer;
 
+#[cfg(test)]
+mod tests;
+
 pub use allocation::Allocation;
 pub use entry::Entry;
 pub use layer::Layer;
@@ -113,7 +116,7 @@ impl Atlas {
 
         match &entry {
             Entry::Contiguous(allocation) => {
-                self.upload_allocation(pixels, width, 0, allocation, encoder, belt);
+                self.upload_allocation(device, pixels, width, 0, allocation, encoder, belt);
             }
             Entry::Fragmented { fragments, .. } => {
                 for fragment in fragments {
@@ -121,6 +124,7 @@ impl Atlas {
                     let offset = 4 * (y * width + x) as usize;
 
                     self.upload_allocation(
+                        device,
                         pixels,
                         width,
                         offset,
@@ -313,6 +317,7 @@ impl Atlas {
 
     fn upload_allocation(
         &self,
+        device: &wgpu::Device,
         pixels: &[u8],
         image_width: u32,
         offset: usize,
@@ -334,10 +339,26 @@ impl Atlas {
             as usize;
         let total_bytes = bytes_per_row * (height + padding.height * 2) as usize;
 
-        let buffer_slice = belt.allocate(
-            wgpu::BufferSize::new(total_bytes as u64).unwrap(),
-            wgpu::BufferSize::new(8 * 4).unwrap(),
-        );
+        // A large image is usually uploaded once. Keeping its buffer in the
+        // belt retains the peak allocation and remaps it for tiny later writes.
+        // Command submission keeps a dedicated upload alive until the GPU is
+        // done; small image uploads still reuse the renderer's staging chunks.
+        let dedicated = (total_bytes > crate::buffer::MAX_WRITE_SIZE).then(|| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("iced_wgpu::image transient upload"),
+                size: total_bytes as u64,
+                usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: true,
+            })
+        });
+        let buffer_slice = if let Some(buffer) = &dedicated {
+            buffer.slice(..)
+        } else {
+            belt.allocate(
+                wgpu::BufferSize::new(total_bytes as u64).unwrap(),
+                wgpu::BufferSize::new(8 * 4).unwrap(),
+            )
+        };
 
         const PIXEL: usize = 4;
 
@@ -413,6 +434,11 @@ impl Atlas {
                     )
                     .copy_from_slice(&pixels[src_bottom + PIXEL * (w - 1)..src_bottom + PIXEL * w]);
             }
+        }
+
+        drop(fragment);
+        if let Some(buffer) = &dedicated {
+            buffer.unmap();
         }
 
         // Copy actual image
