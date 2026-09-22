@@ -11,22 +11,6 @@ A desktop text editor for notes and source files. Written in Rust with
 
 > **Generative AI Notice:** Generative AI was used throughout the development of this project.
 
-## Application icons and About
-
-- The README and application icon use the bunny artwork with its rounded blue
-  background. Windows executables embed a multi-size icon; both Windows and
-  macOS-style title bars use a transparent 24px version and follow the theme.
-- About features a floating bunny, blinking eyes, independently drifting paper,
-  and soft light trails. The animation preserves fractional-pixel movement and
-  uses a shared 60fps clock that pauses when the window loses focus.
-- Editable SVG sources are included. Build scripts generate the embedded RGBA
-  assets and ICO, ICNS, and PNG exports; generated files are not stored in Git.
-
-See [Bunny artwork](assets/illustrations/bunny/README.md) for asset details and
-preview commands, and [Hybrid rendering](SEAMLESS_HYBRID_RENDERING.md) for GPU
-handoff and software fallback behavior. Opening About requests Vulkan when
-hardware acceleration is enabled; software-only mode is also supported.
-
 ## Build from source
 
 You need Git, a current stable [Rust toolchain](https://rustup.rs), and Python
