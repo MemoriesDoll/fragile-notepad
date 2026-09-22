@@ -22,7 +22,7 @@ pub(crate) struct SettingsWindow {
 }
 
 impl SettingsWindow {
-    pub(crate) const TITLE: &'static str = "Settings - Fragile Notepad";
+    pub(crate) const TITLE: &'static str = "Preferences - Fragile Notepad";
 
     pub(crate) const fn new(id: window::Id) -> Self {
         Self { id }
@@ -30,8 +30,8 @@ impl SettingsWindow {
 
     pub(crate) fn settings() -> window::Settings {
         super::custom_chrome(window::Settings {
-            size: Size::new(820.0, 560.0),
-            min_size: Some(Size::new(720.0, 460.0)),
+            size: Size::new(900.0, 760.0),
+            min_size: Some(Size::new(760.0, 560.0)),
             resizable: true,
             exit_on_close_request: false,
             ..window::Settings::default()

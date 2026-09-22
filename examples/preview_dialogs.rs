@@ -3,11 +3,15 @@
 //! Images are written to target/dialog-review/.
 
 use fragile_notepad::{
-    core::{AppearanceMode, Document, DocumentId, Workspace},
-    message::{AdvancedSearchTab, Message, WindowTarget},
+    core::{
+        AppearanceMode, Document, DocumentId, EditorSettings, ShortcutCommand, ShortcutConflict,
+        ShortcutGroup, Workspace,
+    },
+    message::{AdvancedSearchTab, Message, SettingsCategory, WindowTarget},
     search_dialog::SearchDialogState,
+    settings_dialog::SettingsDialogState,
     ui::{
-        advanced_search_panel, styles,
+        advanced_search_panel, settings_panel, styles,
         window_list_dialog::{self, WindowListEntry},
     },
 };
@@ -77,7 +81,17 @@ fn main() {
                         "src/main.rs",
                         "fn prepare_release() {}\n// Publish the release after review.",
                     ));
-                    dialog.refresh_from_workspace(&workspace);
+                    if matches!(
+                        tab,
+                        AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
+                    ) {
+                        dialog.refresh_from_workspace(&workspace);
+                    } else {
+                        dialog.refresh_from_documents([&workspace.documents[1]]);
+                    }
+                    if tab == AdvancedSearchTab::GoToLine {
+                        dialog.status = "Enter a line number".into();
+                    }
                 }
                 render(
                     &mut renderer,
@@ -86,6 +100,56 @@ fn main() {
                     Size::new(width, height),
                     &format!("search-{tab_name}-{name}-{size_name}"),
                 );
+            }
+            for (category, category_name) in [
+                (SettingsCategory::General, "general"),
+                (SettingsCategory::Appearance, "appearance"),
+                (SettingsCategory::Editor, "editor"),
+                (SettingsCategory::Shortcuts, "shortcuts"),
+            ] {
+                let mut dialog = SettingsDialogState {
+                    draft: EditorSettings {
+                        appearance,
+                        ..EditorSettings::default()
+                    },
+                    category,
+                    shortcut_group: ShortcutGroup::Edit,
+                    capturing_shortcut: None,
+                    shortcut_conflict: None,
+                };
+                render(
+                    &mut renderer,
+                    settings_panel::view(&dialog),
+                    &theme,
+                    Size::new(width, height),
+                    &format!("preferences-{category_name}-{name}-{size_name}"),
+                );
+                if category == SettingsCategory::Shortcuts {
+                    dialog.capturing_shortcut = Some(ShortcutCommand::Copy);
+                    render(
+                        &mut renderer,
+                        settings_panel::view(&dialog),
+                        &theme,
+                        Size::new(width, height),
+                        &format!("preferences-recording-{name}-{size_name}"),
+                    );
+                    dialog.capturing_shortcut = None;
+                    dialog.shortcut_conflict = Some(ShortcutConflict {
+                        binding: dialog
+                            .draft
+                            .shortcuts
+                            .binding(ShortcutCommand::Copy)
+                            .unwrap(),
+                        command: ShortcutCommand::Copy,
+                    });
+                    render(
+                        &mut renderer,
+                        settings_panel::view(&dialog),
+                        &theme,
+                        Size::new(width, height),
+                        &format!("preferences-conflict-{name}-{size_name}"),
+                    );
+                }
             }
         }
     }

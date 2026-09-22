@@ -1,100 +1,116 @@
+use iced::advanced::text::highlighter::Highlighter as _;
 use iced::highlighter;
-use iced::widget::{button, column, container, row, rule, scrollable, space, text, toggler};
-use iced::{Center, Element, Fill, Length};
+use iced::widget::{
+    button, column, container, keyed_column, rich_text, row, rule, scrollable, space, span, text,
+    toggler,
+};
+use iced::{Center, Color, Element, Fill, Font};
 
 use crate::core::{
     AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode, KeyBinding,
-    ShortcutCommand, ShortcutConflict, ShortcutDisplayPart, ShortcutGroup, ShortcutModifierIcon,
+    ShortcutCommand, ShortcutDisplayPart, ShortcutGroup, ShortcutModifierIcon,
 };
 use crate::message::{Message, SettingsCategory};
 use crate::settings_dialog::SettingsDialogState;
 use crate::ui::dropdown::dropdown;
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::shortcut::{self, ShortcutIcon};
-use crate::ui::{centered_fill_button_label, controls, styles};
+use crate::ui::{controls, styles, utility};
 
-const APPEARANCE_OPTIONS: &[AppearanceMode] = &[
-    AppearanceMode::System,
-    AppearanceMode::Light,
-    AppearanceMode::Dark,
-];
 const INDENTATION_OPTIONS: &[IndentationMode] = &[
     IndentationMode::Tabs,
     IndentationMode::Spaces(2),
     IndentationMode::Spaces(4),
     IndentationMode::Spaces(8),
 ];
-const BODY_TEXT_SIZE: u32 = 14;
-const SECONDARY_TEXT_SIZE: u32 = 13;
-const TITLE_TEXT_SIZE: u32 = 19;
 
 pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
-    let categories = column![
-        category_button(
-            "General",
-            SettingsCategory::General,
-            dialog.category == SettingsCategory::General,
-        ),
-        category_button(
+    let (title, description) = match dialog.category {
+        SettingsCategory::General => ("General", "Rendering and scrolling for your workspace."),
+        SettingsCategory::Appearance => (
             "Appearance",
-            SettingsCategory::Appearance,
-            dialog.category == SettingsCategory::Appearance,
+            "Choose your colors and make text comfortable to read.",
         ),
-        category_button(
+        SettingsCategory::Editor => (
             "Editor",
-            SettingsCategory::Editor,
-            dialog.category == SettingsCategory::Editor,
+            "Set up typing, indentation, and the details you want to see.",
         ),
-        category_button(
-            "Shortcuts",
-            SettingsCategory::Shortcuts,
-            dialog.category == SettingsCategory::Shortcuts,
+        SettingsCategory::Shortcuts => (
+            "Keyboard shortcuts",
+            "Select a binding, then press the key combination you want to use.",
         ),
-    ]
-    .spacing(1)
-    .padding([8, 0])
-    .width(160);
-
+    };
     let pane = match dialog.category {
         SettingsCategory::General => general_pane(&dialog.draft),
         SettingsCategory::Appearance => appearance_pane(&dialog.draft),
         SettingsCategory::Editor => editor_pane(&dialog.draft),
-        SettingsCategory::Shortcuts => shortcuts_pane(
-            &dialog.draft,
-            dialog.shortcut_group,
-            dialog.capturing_shortcut,
-            dialog.shortcut_conflict,
-        ),
+        SettingsCategory::Shortcuts => shortcuts_pane(dialog),
     };
+    let pane: Element<'_, Message> = if dialog.category == SettingsCategory::Shortcuts {
+        pane
+    } else {
+        scrollable(pane)
+            .smooth_scroll(true)
+            .spacing(10)
+            .height(Fill)
+            .into()
+    };
+    let sidebar = container(
+        column![
+            utility::eyebrow("PREFERENCES"),
+            space::vertical().height(14),
+            category("General", SettingsCategory::General, dialog.category),
+            category("Appearance", SettingsCategory::Appearance, dialog.category),
+            category("Editor", SettingsCategory::Editor, dialog.category),
+            category("Shortcuts", SettingsCategory::Shortcuts, dialog.category),
+            space::vertical(),
+            utility::description("Fragile Notepad"),
+        ]
+        .spacing(6)
+        .height(Fill),
+    )
+    .padding([24, 14])
+    .width(174)
+    .height(Fill)
+    .style(styles::settings_category_list);
 
     container(
         column![
             row![
-                container(categories)
+                sidebar,
+                container(
+                    column![
+                        column![utility::heading(title), utility::description(description)]
+                            .spacing(6),
+                        // A new category starts at the top; redraws within a page retain scrolling.
+                        keyed_column![(dialog.category, pane)]
+                            .height(Fill)
+                            .width(Fill),
+                    ]
+                    .spacing(22)
                     .height(Fill)
-                    .style(styles::settings_category_list),
-                rule::vertical(1),
-                container(pane)
-                    .padding([18, 22])
-                    .width(Fill)
-                    .height(Fill)
-                    .style(styles::settings_content),
+                )
+                .padding(24)
+                .width(Fill)
+                .height(Fill)
             ]
             .height(Fill),
-            rule::horizontal(1),
+            rule::horizontal(1).style(styles::utility_rule),
             row![
-                space::horizontal(),
-                button_bar_primary("Save", Message::SaveSettings),
-                button_bar_command("Apply", Message::ApplySettings),
-                button_bar_command("Cancel", Message::CancelSettings),
+                container(utility::description(
+                    "Changes take effect when you apply or save."
+                ))
+                .width(Fill),
+                footer_button("Cancel", Message::CancelSettings, false),
+                footer_button("Apply", Message::ApplySettings, false),
+                footer_button("Save", Message::SaveSettings, true),
             ]
             .spacing(8)
             .align_y(Center)
-            .padding([10, 14])
-            .width(Fill),
+            .padding([12, 20]),
         ]
-        .height(Fill)
-        .width(Fill),
+        .width(Fill)
+        .height(Fill),
     )
     .width(Fill)
     .height(Fill)
@@ -102,391 +118,654 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
     .into()
 }
 
-fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
-    column![
-        pane_title("General"),
-        option_row(
-            "Appearance",
-            dropdown(
-                Some(settings.appearance),
-                APPEARANCE_OPTIONS,
-                appearance_label,
-                Message::DraftAppearanceSelected,
-            )
-            .placeholder("Appearance")
-            .width(220)
-            .into(),
-        ),
-        option_row(
-            "Default syntax theme",
-            dropdown(
-                Some(settings.syntax_theme),
-                highlighter::Theme::ALL,
-                highlighter::Theme::to_string,
-                Message::DraftThemeSelected,
-            )
-            .placeholder("Syntax theme")
-            .width(220)
-            .into(),
-        ),
-        option_row(
-            "Hardware acceleration",
-            dropdown(
-                Some(settings.hardware_acceleration),
-                HardwareAccelerationMode::ALL,
-                hardware_acceleration_label,
-                Message::DraftHardwareAccelerationSelected,
-            )
-            .placeholder("Hardware acceleration")
-            .width(220)
-            .into(),
-        ),
-    ]
-    .spacing(14)
-    .into()
-}
-
-fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
-    column![
-        pane_title("Appearance"),
-        option_row(
-            "Color mode",
-            dropdown(
-                Some(settings.appearance),
-                APPEARANCE_OPTIONS,
-                appearance_label,
-                Message::DraftAppearanceSelected,
-            )
-            .placeholder("Appearance")
-            .width(220)
-            .into(),
-        ),
-        row![
-            text("Editor zoom").size(BODY_TEXT_SIZE).width(180),
-            controls::icon_command_button(hero_icon(HeroIcon::Minus, 16), Message::SettingsZoomOut),
-            controls::value_pill(
-                format!("{:.0}%", settings.zoom * 100.0),
-                BODY_TEXT_SIZE,
-                56.0,
-            ),
-            controls::icon_command_button(hero_icon(HeroIcon::Plus, 16), Message::SettingsZoomIn),
-            controls::compact_command_button(
-                "Reset",
-                SECONDARY_TEXT_SIZE,
-                Message::SettingsZoomReset,
-            ),
-        ]
-        .spacing(8)
-        .align_y(Center),
-    ]
-    .spacing(14)
-    .into()
-}
-
-fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
-    column![
-        pane_title("Editor"),
-        option_row(
-            "Indentation",
-            dropdown(
-                Some(settings.indentation),
-                INDENTATION_OPTIONS,
-                indentation_label,
-                Message::DraftIndentationSelected,
-            )
-            .placeholder("Indentation")
-            .width(220)
-            .into(),
-        ),
-        row![
-            text("Word wrap").size(BODY_TEXT_SIZE).width(180),
-            toggler(settings.word_wrap)
-                .label("")
-                .on_toggle(Message::DraftWordWrapToggled),
-        ]
-        .spacing(8)
-        .align_y(Center),
-        row![
-            text("Wheel scroll speed").size(BODY_TEXT_SIZE).width(180),
-            controls::icon_command_button(
-                hero_icon(HeroIcon::Minus, 16),
-                Message::SettingsScrollSpeedDecrease,
-            ),
-            controls::value_pill(
-                format!("{:.2}x", settings.scroll_speed),
-                BODY_TEXT_SIZE,
-                56.0,
-            ),
-            controls::icon_command_button(
-                hero_icon(HeroIcon::Plus, 16),
-                Message::SettingsScrollSpeedIncrease,
-            ),
-            controls::compact_command_button(
-                "Reset",
-                SECONDARY_TEXT_SIZE,
-                Message::SettingsScrollSpeedReset,
-            ),
-        ]
-        .spacing(8)
-        .align_y(Center),
-        toggle_row(
-            "Line numbers",
-            settings.decorations.show_line_numbers,
-            Message::DraftLineNumbersToggled,
-        ),
-        toggle_row(
-            "Visible spaces",
-            settings.decorations.show_spaces,
-            Message::DraftVisibleSpacesToggled,
-        ),
-        toggle_row(
-            "Visible tabs",
-            settings.decorations.show_tabs,
-            Message::DraftVisibleTabsToggled,
-        ),
-        toggle_row(
-            "End of line markers",
-            settings.decorations.show_end_of_line_markers,
-            Message::DraftEolMarkersToggled,
-        ),
-        toggle_row(
-            "Indentation guides",
-            settings.decorations.show_indentation_guides,
-            Message::DraftIndentationGuidesToggled,
-        ),
-        toggle_row(
-            "Folding controls",
-            settings.decorations.show_folding_controls,
-            Message::DraftFoldingControlsToggled,
-        ),
-    ]
-    .spacing(14)
-    .into()
-}
-
-fn shortcuts_pane(
-    settings: &EditorSettings,
-    active_group: ShortcutGroup,
-    capturing: Option<ShortcutCommand>,
-    conflict: Option<ShortcutConflict>,
-) -> Element<'_, Message> {
-    let mut content = column![
-        row![
-            pane_title("Shortcuts"),
-            space::horizontal(),
-            controls::compact_command_button(
-                "Reset",
-                SECONDARY_TEXT_SIZE,
-                Message::ShortcutsResetToDefaults,
-            ),
-        ]
-        .align_y(Center)
-    ]
-    .spacing(12);
-
-    let group_tabs =
-        ShortcutGroup::ALL
-            .iter()
-            .copied()
-            .fold(row![].spacing(6).width(Fill), |row, group| {
-                row.push(
-                    button(crate::ui::centered_button_label(
-                        group.label(),
-                        SECONDARY_TEXT_SIZE,
-                    ))
-                    .padding([5, 10])
-                    .style(styles::settings_category_button(group == active_group))
-                    .on_press(Message::ShortcutGroupSelected(group)),
-                )
-            });
-
-    content = content.push(group_tabs);
-
-    if let Some(conflict) = conflict {
-        content = content.push(
-            container(
-                row![
-                    text(format!(
-                        "{} is already assigned to {}",
-                        conflict.binding.display(),
-                        conflict.command.label()
-                    ))
-                    .size(SECONDARY_TEXT_SIZE)
-                    .width(Fill),
-                    controls::command_button(
-                        "Dismiss",
-                        SECONDARY_TEXT_SIZE,
-                        Message::ShortcutConflictDismissed,
-                    ),
-                ]
-                .spacing(8)
-                .align_y(Center),
-            )
-            .padding([8, 10])
-            .style(styles::settings_category_list),
-        );
-    }
-
-    let rows = ShortcutCommand::ALL
-        .iter()
-        .copied()
-        .filter(|command| command.group() == active_group)
-        .fold(column![].spacing(6), |column, command| {
-            column.push(shortcut_row(settings, command, capturing))
-        });
-
-    content = content.push(rows);
-
-    scrollable(content.spacing(16))
-        .smooth_scroll(true)
-        .height(Fill)
-        .into()
-}
-
-fn shortcut_row<'a>(
-    settings: &'a EditorSettings,
-    command: ShortcutCommand,
-    capturing: Option<ShortcutCommand>,
-) -> Element<'a, Message> {
-    let is_capturing = capturing == Some(command);
-    let binding = settings.shortcuts.binding(command);
-
-    let action_label = if is_capturing { "..." } else { "Set" };
-
-    row![
-        text(command.label()).size(BODY_TEXT_SIZE).width(Fill),
-        container(shortcut_binding_view(binding, is_capturing))
-            .width(Length::Fixed(138.0))
-            .padding([5, 8])
-            .style(styles::settings_panel),
-        shortcut_set_button(
-            action_label,
-            is_capturing,
-            Message::ShortcutCaptureStarted(command),
-        ),
-        controls::fixed_fill_command_button(
-            "Clr",
-            SECONDARY_TEXT_SIZE,
-            44.0,
-            Message::ShortcutCleared(command),
-        ),
-    ]
-    .spacing(6)
-    .align_y(Center)
-    .height(Length::Fixed(32.0))
-    .into()
-}
-
-fn shortcut_binding_view<'a>(
-    binding: Option<KeyBinding>,
-    is_capturing: bool,
-) -> Element<'a, Message> {
-    if is_capturing {
-        return text("Press shortcut").size(SECONDARY_TEXT_SIZE).into();
-    }
-
-    let Some(binding) = binding else {
-        return text("Unassigned").size(SECONDARY_TEXT_SIZE).into();
-    };
-
-    let display = binding.display_parts();
-    let mut parts = row![].spacing(3).align_y(Center);
-
-    for modifier in display.modifiers {
-        parts = parts.push(shortcut_display_part(modifier));
-    }
-
-    parts = parts.push(text(display.key).size(SECONDARY_TEXT_SIZE));
-    parts.into()
-}
-
-fn shortcut_display_part<'a>(part: ShortcutDisplayPart) -> Element<'a, Message> {
-    match part {
-        ShortcutDisplayPart::Text(label) => text(label).size(SECONDARY_TEXT_SIZE).into(),
-        ShortcutDisplayPart::Icon(icon) => shortcut_modifier_icon(icon),
-    }
-}
-
-fn shortcut_modifier_icon<'a>(icon: ShortcutModifierIcon) -> Element<'a, Message> {
-    let icon = match icon {
-        ShortcutModifierIcon::Command => ShortcutIcon::Command,
-        ShortcutModifierIcon::Option => ShortcutIcon::Option,
-        ShortcutModifierIcon::Shift => ShortcutIcon::Shift,
-        ShortcutModifierIcon::Windows => ShortcutIcon::Windows,
-    };
-
-    shortcut::icon_with_color(icon, 14, styles::shortcut_text_color)
-}
-
-fn category_button<'a>(
+fn category(
     label: &'static str,
     category: SettingsCategory,
-    is_active: bool,
-) -> Element<'a, Message> {
-    controls::category_button(
+    active: SettingsCategory,
+) -> Element<'static, Message> {
+    utility::navigation(
         label,
-        BODY_TEXT_SIZE,
-        is_active,
+        category == active,
         Message::SettingsCategorySelected(category),
     )
 }
 
-fn pane_title<'a>(label: &'static str) -> Element<'a, Message> {
-    text(label).size(TITLE_TEXT_SIZE).width(Fill).into()
-}
-
-fn option_row<'a>(label: &'static str, control: Element<'a, Message>) -> Element<'a, Message> {
-    row![text(label).size(BODY_TEXT_SIZE).width(180), control]
-        .spacing(8)
-        .align_y(Center)
-        .height(Length::Fixed(32.0))
-        .into()
-}
-
-fn toggle_row<'a>(
-    label: &'static str,
-    enabled: bool,
-    message: impl Fn(bool) -> Message + 'a,
-) -> Element<'a, Message> {
-    row![
-        text(label).size(BODY_TEXT_SIZE).width(180),
-        toggler(enabled).label("").on_toggle(message),
+fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
+    let modes = [
+        (
+            HardwareAccelerationMode::Off,
+            "Software",
+            "Render without graphics acceleration.",
+        ),
+        (
+            HardwareAccelerationMode::Lazy,
+            "Hybrid",
+            "Use graphics hardware when available.",
+        ),
+        (
+            HardwareAccelerationMode::Diagnostic,
+            "Diagnostic",
+            "Request hardware rendering for troubleshooting.",
+        ),
     ]
-    .spacing(8)
-    .align_y(Center)
-    .height(Length::Fixed(32.0))
+    .into_iter()
+    .fold(row![].spacing(10), |row, (mode, title, hint)| {
+        row.push(
+            button(
+                column![
+                    text(title).size(14).font(utility::semibold()),
+                    utility::description(hint),
+                    space::vertical(),
+                    text(if settings.hardware_acceleration == mode {
+                        "Selected"
+                    } else {
+                        "Select"
+                    })
+                    .size(11),
+                ]
+                .spacing(8)
+                .height(105),
+            )
+            .padding(14)
+            .width(Fill)
+            .style(styles::utility_selection(
+                settings.hardware_acceleration == mode,
+            ))
+            .on_press(Message::DraftHardwareAccelerationSelected(mode)),
+        )
+    });
+    column![
+        section("Rendering", "Balance smooth drawing and hardware compatibility.", column![
+            modes,
+            utility::description("If hardware rendering is already active, switching to Software takes effect after restarting."),
+        ].spacing(14).into()),
+        section("Scrolling", "Tune the distance traveled with each turn of the mouse wheel.", setting_row(
+            "Scroll speed", "Affects the text editor.",
+            stepper(format!("{:.2}×", settings.scroll_speed), Message::SettingsScrollSpeedDecrease,
+                Message::SettingsScrollSpeedIncrease, Message::SettingsScrollSpeedReset,
+                settings.scroll_speed > EditorSettings::MIN_SCROLL_SPEED, settings.scroll_speed < EditorSettings::MAX_SCROLL_SPEED),
+        )),
+    ].spacing(18).into()
+}
+
+fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
+    let modes = [
+        AppearanceMode::System,
+        AppearanceMode::Light,
+        AppearanceMode::Dark,
+    ]
+    .into_iter()
+    .fold(row![].spacing(10), |row, mode| {
+        row.push(appearance_choice(mode, settings.appearance == mode))
+    });
+    column![
+        section(
+            "Color mode",
+            "Follow your device or choose a consistent light or dark workspace.",
+            modes.into()
+        ),
+        section(
+            "Text & syntax",
+            "Preview the editor colors and text size before applying them.",
+            column![
+                setting_row(
+                    "Syntax theme",
+                    "Colors for source code.",
+                    dropdown(
+                        Some(settings.syntax_theme),
+                        highlighter::Theme::ALL,
+                        highlighter::Theme::to_string,
+                        Message::DraftThemeSelected,
+                    )
+                    .width(210)
+                    .into()
+                ),
+                rule::horizontal(1).style(styles::utility_rule),
+                setting_row(
+                    "Editor zoom",
+                    "Text size in your documents.",
+                    stepper(
+                        format!("{:.0}%", settings.zoom * 100.0),
+                        Message::SettingsZoomOut,
+                        Message::SettingsZoomIn,
+                        Message::SettingsZoomReset,
+                        settings.zoom > EditorSettings::MIN_ZOOM,
+                        settings.zoom < EditorSettings::MAX_ZOOM,
+                    )
+                ),
+                syntax_preview(settings),
+            ]
+            .spacing(14)
+            .into()
+        ),
+    ]
+    .spacing(18)
     .into()
 }
 
-fn hero_icon<'a>(icon: HeroIcon, size: u32) -> Element<'a, Message> {
-    hero::icon(icon, size, IconTone::Text)
+fn appearance_choice(mode: AppearanceMode, selected: bool) -> Element<'static, Message> {
+    let label = match mode {
+        AppearanceMode::System => "System",
+        AppearanceMode::Light => "Light",
+        AppearanceMode::Dark => "Dark",
+    };
+    let preview: Element<'static, Message> = if mode == AppearanceMode::System {
+        row![miniature(false), miniature(true)].spacing(1).into()
+    } else {
+        miniature(mode == AppearanceMode::Dark)
+    };
+    button(
+        column![
+            preview,
+            row![
+                text(label).size(13).font(utility::semibold()),
+                space::horizontal(),
+                text(if selected { "Selected" } else { "" }).size(10)
+            ]
+            .align_y(Center),
+        ]
+        .spacing(10),
+    )
+    .padding(10)
+    .width(Fill)
+    .style(styles::utility_selection(selected))
+    .on_press(Message::DraftAppearanceSelected(mode))
+    .into()
 }
 
-fn button_bar_primary<'a>(label: &'static str, message: Message) -> Element<'a, Message> {
-    button(crate::ui::centered_button_label(label, SECONDARY_TEXT_SIZE))
-        .padding([6, 18])
-        .style(styles::primary_command_button)
-        .on_press(message)
+/// A small, code-native window illustration; both color modes remain visible in any theme.
+fn miniature(dark: bool) -> Element<'static, Message> {
+    let surface = if dark {
+        Color::from_rgb8(27, 31, 38)
+    } else {
+        Color::from_rgb8(250, 251, 253)
+    };
+    let chrome = if dark {
+        Color::from_rgb8(51, 58, 70)
+    } else {
+        Color::from_rgb8(225, 231, 240)
+    };
+    let ink = if dark {
+        Color::from_rgb8(123, 167, 217)
+    } else {
+        Color::from_rgb8(101, 142, 191)
+    };
+    let line = move |width| {
+        container(space::horizontal())
+            .width(width)
+            .height(3)
+            .style(move |_| container::Style {
+                background: Some(ink.into()),
+                border: iced::Border {
+                    radius: 2.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+    };
+    container(column![
+        container(space::horizontal())
+            .height(11)
+            .width(Fill)
+            .style(move |_| container::Style {
+                background: Some(chrome.into()),
+                ..Default::default()
+            }),
+        row![
+            container(space::horizontal())
+                .width(14)
+                .height(Fill)
+                .style(move |_| container::Style {
+                    background: Some(chrome.into()),
+                    ..Default::default()
+                }),
+            column![line(30), line(20), line(27)]
+                .spacing(6)
+                .padding(10)
+                .width(Fill),
+        ]
+        .height(Fill),
+    ])
+    .height(60)
+    .width(Fill)
+    .clip(true)
+    .style(move |_| container::Style {
+        background: Some(surface.into()),
+        border: iced::Border {
+            color: chrome,
+            width: 1.0,
+            radius: 5.0.into(),
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+fn syntax_preview(settings: &EditorSettings) -> Element<'_, Message> {
+    let mut highlighter = highlighter::Highlighter::new(&highlighter::Settings {
+        token: "rs".into(),
+        theme: settings.syntax_theme,
+    });
+    let mut lines = column![].spacing(3);
+    for (index, line) in [
+        "fn main() {",
+        "    let message = \"Hello, world!\";",
+        "    println!(\"{message}\");",
+        "}",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let spans: Vec<iced::widget::text::Span<'_, (), Font>> = highlighter
+            .highlight_line(line)
+            .map(|(range, highlight)| {
+                let mut part = span(&line[range]).font(highlight.font().unwrap_or(Font::MONOSPACE));
+                if let Some(color) = highlight.color() {
+                    part = part.color(color);
+                }
+                part
+            })
+            .collect();
+        let mut line_row = row![].spacing(16).align_y(Center);
+        if settings.decorations.show_line_numbers {
+            line_row = line_row.push(
+                container(text((index + 1).to_string()).size(13).font(Font::MONOSPACE))
+                    .width(20)
+                    .style(styles::info_muted),
+            );
+        }
+        lines = lines.push(
+            line_row.push(
+                rich_text(spans)
+                    .font(Font::MONOSPACE)
+                    .size(16.0 * settings.zoom)
+                    .wrapping(text::Wrapping::None),
+            ),
+        );
+    }
+    let preview = container(column![
+        row![
+            utility::description("EDITOR PREVIEW"),
+            space::horizontal(),
+            utility::description("Rust")
+        ]
+        .padding([10, 14]),
+        rule::horizontal(1).style(styles::utility_rule),
+        scrollable(container(lines).padding(14))
+            .direction(scrollable::Direction::Both {
+                vertical: scrollable::Scrollbar::default(),
+                horizontal: scrollable::Scrollbar::default(),
+            })
+            .height(128)
+            .width(Fill),
+    ])
+    .width(Fill)
+    .style(styles::utility_card);
+    iced::widget::themer(styles::modern_theme(settings.appearance), preview).into()
+}
+
+fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
+    column![
+        section(
+            "Typing & layout",
+            "Control indentation and how long lines fit in the editor.",
+            column![
+                setting_row(
+                    "Indentation",
+                    "Use tabs or a fixed number of spaces.",
+                    dropdown(
+                        Some(settings.indentation),
+                        INDENTATION_OPTIONS,
+                        indentation_label,
+                        Message::DraftIndentationSelected
+                    )
+                    .width(190)
+                    .into()
+                ),
+                rule::horizontal(1).style(styles::utility_rule),
+                toggle_row(
+                    "Word wrap",
+                    "Fit long lines to the window without changing the file.",
+                    settings.word_wrap,
+                    Message::DraftWordWrapToggled
+                ),
+            ]
+            .spacing(14)
+            .into()
+        ),
+        section(
+            "Gutter & structure",
+            "Keep your place and see how the document is organized.",
+            column![
+                toggle_row(
+                    "Line numbers",
+                    "Show the line number beside your text.",
+                    settings.decorations.show_line_numbers,
+                    Message::DraftLineNumbersToggled
+                ),
+                rule::horizontal(1).style(styles::utility_rule),
+                toggle_row(
+                    "Indentation guides",
+                    "Connect lines at the same indentation level.",
+                    settings.decorations.show_indentation_guides,
+                    Message::DraftIndentationGuidesToggled
+                ),
+                rule::horizontal(1).style(styles::utility_rule),
+                toggle_row(
+                    "Folding controls",
+                    "Collapse and expand blocks of code.",
+                    settings.decorations.show_folding_controls,
+                    Message::DraftFoldingControlsToggled
+                ),
+            ]
+            .spacing(14)
+            .into()
+        ),
+        section(
+            "Whitespace",
+            "Reveal invisible characters without changing your document.",
+            column![
+                toggle_row(
+                    "Spaces",
+                    "Mark each space with a small dot.",
+                    settings.decorations.show_spaces,
+                    Message::DraftVisibleSpacesToggled
+                ),
+                rule::horizontal(1).style(styles::utility_rule),
+                toggle_row(
+                    "Tabs",
+                    "Show a marker for tab characters.",
+                    settings.decorations.show_tabs,
+                    Message::DraftVisibleTabsToggled
+                ),
+                rule::horizontal(1).style(styles::utility_rule),
+                toggle_row(
+                    "Line endings",
+                    "Show the end of each logical line.",
+                    settings.decorations.show_end_of_line_markers,
+                    Message::DraftEolMarkersToggled
+                ),
+            ]
+            .spacing(14)
+            .into()
+        ),
+    ]
+    .spacing(18)
+    .into()
+}
+
+fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
+    let groups = ShortcutGroup::ALL
+        .into_iter()
+        .fold(row![].spacing(4), |row, group| {
+            row.push(
+                button(text(group.label()).size(13))
+                    .padding([7, 14])
+                    .style(styles::settings_category_button(
+                        group == dialog.shortcut_group,
+                    ))
+                    .on_press(Message::ShortcutGroupSelected(group)),
+            )
+        });
+    let commands: Vec<_> = ShortcutCommand::ALL
+        .into_iter()
+        .filter(|command| command.group() == dialog.shortcut_group)
+        .collect();
+    let mut pane = column![
+        row![
+            groups,
+            space::horizontal(),
+            button(text("Restore all defaults").size(12))
+                .padding([7, 10])
+                .style(styles::command_button)
+                .on_press(Message::ShortcutsResetToDefaults)
+        ]
+        .spacing(8)
+        .align_y(Center),
+        row![
+            utility::description("COMMAND"),
+            space::horizontal(),
+            utility::badge(format!("{} commands", commands.len()))
+        ]
+        .align_y(Center),
+    ]
+    .spacing(14);
+    // Keep the notice slot mounted so recording/conflict feedback does not
+    // replace the list's widget tree and jump back to the first shortcut.
+    let mut notices = column![].spacing(12);
+    if let Some(command) = dialog.capturing_shortcut {
+        notices = notices.push(
+            container(
+                row![
+                    column![
+                        text(format!("Recording: {}", command.label()))
+                            .size(13)
+                            .font(utility::semibold()),
+                        text("Press the new key combination now.").size(12)
+                    ]
+                    .spacing(4)
+                    .width(Fill),
+                    button(text("Cancel recording").size(12))
+                        .padding([7, 10])
+                        .style(styles::command_button)
+                        .on_press(Message::ShortcutGroupSelected(dialog.shortcut_group)),
+                ]
+                .spacing(12)
+                .align_y(Center),
+            )
+            .padding(14)
+            .width(Fill)
+            .style(styles::info_badge),
+        );
+    }
+    if let Some(conflict) = dialog.shortcut_conflict {
+        notices = notices.push(
+            container(
+                row![
+                    column![
+                        text("Shortcut already in use")
+                            .size(13)
+                            .font(utility::semibold()),
+                        text(format!(
+                            "{} is assigned to {}. Choose another combination.",
+                            conflict.binding.display(),
+                            conflict.command.label()
+                        ))
+                        .size(12)
+                    ]
+                    .spacing(4)
+                    .width(Fill),
+                    button(text("Dismiss").size(12))
+                        .padding([7, 10])
+                        .style(styles::command_button)
+                        .on_press(Message::ShortcutConflictDismissed),
+                ]
+                .spacing(12)
+                .align_y(Center),
+            )
+            .padding(14)
+            .width(Fill)
+            .style(styles::utility_notice),
+        );
+    }
+    pane = pane.push(notices);
+    let mut rows = column![].spacing(0);
+    for (index, command) in commands.into_iter().enumerate() {
+        if index > 0 {
+            rows = rows.push(rule::horizontal(1).style(styles::utility_rule));
+        }
+        rows = rows.push(shortcut_row(
+            &dialog.draft,
+            command,
+            dialog.capturing_shortcut,
+        ));
+    }
+    pane.push(
+        keyed_column![(
+            dialog.shortcut_group,
+            scrollable(container(rows).style(styles::utility_card))
+                .spacing(10)
+                .smooth_scroll(true)
+                .height(Fill)
+        )]
+        .height(Fill),
+    )
+    .height(Fill)
+    .into()
+}
+
+fn shortcut_row(
+    settings: &EditorSettings,
+    command: ShortcutCommand,
+    capturing: Option<ShortcutCommand>,
+) -> Element<'_, Message> {
+    let recording = capturing == Some(command);
+    let binding = settings.shortcuts.binding(command);
+    let binding_view: Element<'_, Message> = if recording {
+        text("Press keys…").size(13).into()
+    } else {
+        shortcut_binding_view(binding)
+    };
+    container(
+        row![
+            text(command.label()).size(13).width(Fill),
+            button(container(binding_view).center_x(Fill))
+                .padding([8, 10])
+                .width(174)
+                .style(if recording {
+                    styles::primary_command_button
+                } else {
+                    styles::command_button
+                })
+                .on_press(Message::ShortcutCaptureStarted(command)),
+            button(text("Clear").size(12))
+                .padding([8, 6])
+                .style(styles::text_button)
+                .on_press_maybe(binding.map(|_| Message::ShortcutCleared(command))),
+        ]
+        .spacing(12)
+        .align_y(Center),
+    )
+    .padding([10, 14])
+    .width(Fill)
+    .into()
+}
+
+fn shortcut_binding_view(binding: Option<KeyBinding>) -> Element<'static, Message> {
+    let Some(binding) = binding else {
+        return utility::description("Click to assign");
+    };
+    let display = binding.display_parts();
+    let mut parts = row![].spacing(4).align_y(Center);
+    for modifier in display.modifiers {
+        let part: Element<'_, Message> = match modifier {
+            ShortcutDisplayPart::Text(label) => text(label).size(12).into(),
+            ShortcutDisplayPart::Icon(icon) => shortcut::icon_with_color(
+                match icon {
+                    ShortcutModifierIcon::Command => ShortcutIcon::Command,
+                    ShortcutModifierIcon::Option => ShortcutIcon::Option,
+                    ShortcutModifierIcon::Shift => ShortcutIcon::Shift,
+                    ShortcutModifierIcon::Windows => ShortcutIcon::Windows,
+                },
+                14,
+                styles::shortcut_text_color,
+            ),
+        };
+        parts = parts.push(part);
+    }
+    parts
+        .push(text(display.key).size(12).font(utility::semibold()))
         .into()
 }
 
-fn button_bar_command<'a>(label: &'static str, message: Message) -> Element<'a, Message> {
-    button(crate::ui::centered_button_label(label, SECONDARY_TEXT_SIZE))
-        .padding([6, 18])
-        .style(styles::command_button)
-        .on_press(message)
-        .into()
-}
-
-fn shortcut_set_button<'a>(
-    label: &'static str,
-    is_capturing: bool,
-    message: Message,
+fn section<'a>(
+    title: &'static str,
+    description: &'static str,
+    content: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    button(centered_fill_button_label(label, SECONDARY_TEXT_SIZE))
-        .width(44)
-        .padding([5, 0])
-        .style(if is_capturing {
+    container(
+        column![
+            column![
+                text(title).size(15).font(utility::semibold()),
+                utility::description(description)
+            ]
+            .spacing(5),
+            content,
+        ]
+        .spacing(18),
+    )
+    .padding(16)
+    .width(Fill)
+    .style(styles::utility_card)
+    .into()
+}
+
+fn setting_row<'a>(
+    title: &'static str,
+    description: &'static str,
+    control: Element<'a, Message>,
+) -> Element<'a, Message> {
+    row![
+        column![
+            text(title).size(13).font(utility::semibold()),
+            utility::description(description)
+        ]
+        .spacing(4)
+        .width(Fill),
+        control
+    ]
+    .spacing(18)
+    .align_y(Center)
+    .into()
+}
+
+fn toggle_row<'a>(
+    title: &'static str,
+    description: &'static str,
+    enabled: bool,
+    message: impl Fn(bool) -> Message + 'a,
+) -> Element<'a, Message> {
+    setting_row(
+        title,
+        description,
+        toggler(enabled).size(20).on_toggle(message).into(),
+    )
+}
+
+fn stepper<'a>(
+    value: String,
+    decrease: Message,
+    increase: Message,
+    reset: Message,
+    can_decrease: bool,
+    can_increase: bool,
+) -> Element<'a, Message> {
+    let icon = |icon| hero::icon(icon, 14, IconTone::Text);
+    row![
+        button(icon(HeroIcon::Minus))
+            .padding(8)
+            .style(styles::command_button)
+            .on_press_maybe(can_decrease.then_some(decrease)),
+        container(text(value).size(13).font(utility::semibold())).center_x(58),
+        button(icon(HeroIcon::Plus))
+            .padding(8)
+            .style(styles::command_button)
+            .on_press_maybe(can_increase.then_some(increase)),
+        controls::compact_command_button("Reset", 12, reset),
+    ]
+    .spacing(5)
+    .align_y(Center)
+    .into()
+}
+
+fn footer_button(
+    label: &'static str,
+    message: Message,
+    primary: bool,
+) -> Element<'static, Message> {
+    button(container(text(label).size(13)).center_x(54))
+        .padding([9, 12])
+        .style(if primary {
             styles::primary_command_button
         } else {
             styles::command_button
@@ -495,21 +774,9 @@ fn shortcut_set_button<'a>(
         .into()
 }
 
-fn appearance_label(appearance: &AppearanceMode) -> String {
-    match appearance {
-        AppearanceMode::System => String::from("System"),
-        AppearanceMode::Light => String::from("Light"),
-        AppearanceMode::Dark => String::from("Dark"),
-    }
-}
-
-fn hardware_acceleration_label(mode: &HardwareAccelerationMode) -> String {
-    mode.label().to_owned()
-}
-
 fn indentation_label(indentation: &IndentationMode) -> String {
     match indentation {
-        IndentationMode::Tabs => String::from("Tabs"),
-        IndentationMode::Spaces(width) => format!("{} spaces", width),
+        IndentationMode::Tabs => "Tabs".into(),
+        IndentationMode::Spaces(width) => format!("{width} spaces"),
     }
 }

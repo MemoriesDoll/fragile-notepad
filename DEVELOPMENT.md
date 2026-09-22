@@ -3,9 +3,39 @@
 See [Architecture](ARCHITECTURE.md) for module ownership, dependency boundaries,
 and the contracts used by file workflows, editor commands, and UI presentation.
 
+## Utility windows
+
+The Windows dialog uses selectable rows to activate an application window. It
+shows the current window and the number of open windows; the list scrolls in
+small editor windows while its Done button remains visible.
+
+Find and Replace separates current-document searches from searches across open
+documents in its sidebar. The latter includes unsaved tabs and supports file-name
+filters; it does not search unopened files on disk. Search actions stay visible
+below the scrollable fields, results are grouped by document, and the footer
+retains search status and errors. Enter in the query field finds the next match
+in the current-document views or lists matches in the open-document views.
+
+Preferences groups rendering and scrolling under General, color mode and syntax
+under Appearance, and editing and document markers under Editor. The appearance
+preview uses the draft color mode, real syntax highlighting, and draft zoom.
+Select a shortcut binding to record a replacement; Cancel recording leaves the
+binding unchanged. Apply, Save, and Cancel retain their existing behavior and
+remain visible while a page scrolls. Switching categories resets the page scroll.
+
+To review the actual widgets in both themes at normal and minimum content sizes:
+
+```text
+cargo run --locked --example preview_dialogs
+```
+
+The software renderer writes PNGs to `target/dialog-review/`, including populated
+search results, shortcut recording, and shortcut conflicts. These previews omit
+native window chrome; window-manager behavior still needs native testing.
+
 ## Window title bars
 
-The main, Settings, and Find and Replace windows use application-drawn title bars
+The main, Preferences, and Find and Replace windows use application-drawn title bars
 on Windows, Linux, and macOS. Other targets retain system decorations. The bar
 follows the light/dark theme and dims when unfocused. Long titles truncate before
 the controls. Drag the caption to move a window; double-click to maximize/restore.

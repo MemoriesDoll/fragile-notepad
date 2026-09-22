@@ -412,6 +412,23 @@ pub fn utility_card(theme: &Theme) -> container::Style {
     }
 }
 
+pub fn utility_notice(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+    container::Style {
+        background: Some(palette.danger_soft.into()),
+        text_color: Some(palette.danger),
+        border: border(1.0, palette.danger.scale_alpha(0.4), 8.0),
+        ..Default::default()
+    }
+}
+
+pub fn utility_rule(theme: &Theme) -> iced::widget::rule::Style {
+    iced::widget::rule::Style {
+        color: VisualPalette::from_theme(theme).border_soft,
+        ..iced::widget::rule::default(theme)
+    }
+}
+
 pub fn utility_selection(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let palette = VisualPalette::from_theme(theme);
