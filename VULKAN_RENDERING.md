@@ -6,15 +6,48 @@ prepare/warm/commit/first-present rollback contract. This work is incomplete.
 
 ## Status (2026-09-22)
 
-Implementation and basic validation are complete; deep optimization is paused.
+Implementation and basic validation are complete; optimization has resumed.
 Transform pixel/resource tests pass on NVIDIA, AMD, SwiftShader, and Linux
 Lavapipe. About/editor offscreen scenarios pass. Windows local CI passes build,
 formatting, example, and software-only checks, plus 725 Rust and 12 Python tests.
 Log: `target/vulkan-transform-windows-ci.log`.
 
-Native macOS, physical-GPU Linux, extended live rendering, and power/throughput
-validation remain deferred. Live handoff results below predate the transform
-change.
+Linux validation uses WSL2. Native macOS testing is deferred at the user's
+request because no Apple hardware is available. Native Linux GPU results also
+remain unavailable; WSL2 currently uses Lavapipe.
+
+### Current live validation
+
+Release handoff checks pass all nine scenarios on NVIDIA, AMD 610M, SwiftShader,
+and WSL2 Weston 14/Lavapipe (36 total), including requested resizing and rollback
+after first-present failure. Captures are under
+`target/vulkan-resume-{handoff,amd-handoff,swiftshader-handoff,wayland}/`.
+
+NVIDIA About rendering at 150% scale sustained 60.00 fps over 600 measured frames;
+CPU redraw median/p95 was 0.454/0.684 ms. Two editor windows sustained 24.00 fps
+each over 432 frames, with median redraw costs of 0.557 and 0.848 ms. Captures:
+`target/vulkan-resume-live/about-3k9mi_ji` and `editor-4yu4noll`.
+
+The live analyzer now uses a 1.5-frame interval budget for each workload: 25 ms
+for About's 60 Hz animation and 62.5 ms for 24 Hz editor scrolling. Focus events
+are logged by the probe. Two interrupted captures were rejected: NVIDIA
+`about-t8_p_gjm` stopped redrawing partway through; AMD `about-08d7qb7r` recorded
+focus loss before its measurement interval. The latter confirms expected focus
+pausing, not sustained animation performance.
+
+Weston headless/Lavapipe delivered 38.95 fps for About with its default 7 ms
+repaint window. An isolated compositor-only experiment at 16 ms raised this to
+56.62 fps while median CPU redraw remained 3.09/3.08 ms. Weston 14's headless
+backend schedules frame completion one simulated refresh after repaint, so
+this cadence is sensitive to compositor timing. The default validation setup
+is unchanged. Captures: `target/vulkan-resume-wayland/run-624sjo0d` and
+`target/vulkan-resume-wayland-repaint16/`. Editor scrolling met 24 Hz with the
+default compositor configuration.
+
+Twenty Windows startup samples with isolated settings/cache directories retained
+software-first presentation. First-view median/p95 was 27.983/31.431 ms;
+first-frame probe completion was 125.568/139.457 ms. This does not flush OS file
+or driver caches. Capture: `target/vulkan-resume-startup/run-7lvwoapw`.
 
 ## Completion requirements
 
@@ -576,12 +609,9 @@ scales); this is not evidence of a general frame-latency improvement.
 
 ## Still required before completing the objective
 
-Native macOS package/loader/driver verification and physical-GPU Linux testing
-remain required. Broader editor workloads, live frame latency, cold startup
-distributions, GPU upload counts for workloads beyond the About scene, and
-integrated GPU power/throughput measurements also remain. The current evidence supports
-the specific CPU and memory improvements above, not completion of the full
-cross-platform optimization objective.
+Native macOS package/loader/driver verification and native Linux GPU testing
+are deferred. Remaining local work includes broader editor workloads, cold
+startup distributions, and integrated GPU power/throughput measurements.
 
 Sustained live About/editor cadence and CPU redraw/presentation-call costs are
 now measured separately from the existing offscreen GPU timestamps. Longer

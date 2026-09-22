@@ -35,7 +35,7 @@ class LiveTraceTests(unittest.TestCase):
                 (timestamp - 10, "fallback_present", 390, "backend=Vulkan status=ok"),
             ])
 
-    def analyze(self):
+    def analyze(self, target_fps=24):
         with self.trace.open("w", newline="", encoding="utf-8") as stream:
             writer = csv.writer(stream)
             writer.writerow(("timestamp_us", "event", "elapsed_us", "detail"))
@@ -43,7 +43,7 @@ class LiveTraceTests(unittest.TestCase):
             # flush later timestamps before earlier ones.
             writer.writerow(("timestamp_us", "event", "elapsed_us", "detail"))
             writer.writerows(reversed(self.rows))
-        return profile.analyze(self.trace, self.log, self.report, 2, 5)
+        return profile.analyze(self.trace, self.log, self.report, 2, 5, target_fps)
 
     def test_buffered_trace_order_preserves_cadence_and_costs(self):
         summary = self.analyze()["windows"]["1"]
@@ -51,6 +51,14 @@ class LiveTraceTests(unittest.TestCase):
         self.assertAlmostEqual(summary["cadence_fps"], 24, places=3)
         self.assertEqual(summary["cpu_frame_us"]["median"], 500)
         self.assertEqual(summary["present_us"]["p95"], 400)
+
+    def test_frame_budget_follows_workload_cadence(self):
+        editor = self.analyze(24)
+        self.assertEqual(editor["interval_budget_us"], 62_500)
+        self.assertEqual(editor["windows"]["1"]["intervals_over_budget"], 0)
+        about = self.analyze(60)
+        self.assertEqual(about["interval_budget_us"], 25_000)
+        self.assertEqual(about["windows"]["1"]["intervals_over_budget"], 59)
 
     def test_rejects_missing_or_failed_presentation(self):
         self.rows.pop()

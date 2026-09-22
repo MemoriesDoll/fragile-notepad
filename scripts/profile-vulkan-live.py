@@ -29,7 +29,7 @@ def distribution(values):
             "max": ordered[-1]}
 
 
-def analyze(trace_path, log, report, warmup_seconds, seconds):
+def analyze(trace_path, log, report, warmup_seconds, seconds, target_fps):
     starts = re.findall(r"VULKAN_SUSTAIN_START timestamp_us=(\d+)", log)
     ends = re.findall(r"VULKAN_SUSTAIN_END timestamp_us=(\d+)", log)
     if len(starts) != 1 or len(ends) != 1:
@@ -92,7 +92,7 @@ def analyze(trace_path, log, report, warmup_seconds, seconds):
             "frames": len(samples),
             "cadence_fps": (len(samples) - 1) * 1_000_000 / sum(intervals),
             "frame_interval_us": distribution(intervals),
-            "intervals_over_62_5_ms": sum(value > 62_500 for value in intervals),
+            "intervals_over_budget": sum(value > 1_500_000 / target_fps for value in intervals),
             "cpu_frame_us": distribution([sample[1] for sample in samples]),
             **{key: distribution([int(sample[2][key]) for sample in samples])
                for key in ("interact_us", "draw_us", "present_us")},
@@ -104,6 +104,7 @@ def analyze(trace_path, log, report, warmup_seconds, seconds):
         summaries[window]["physical_sizes"] = sorted({item["physical"] for item in geometry})
         summaries[window]["scales"] = sorted({float(item["scale"]) for item in geometry})
     return {"warmup_seconds": warmup_seconds, "requested_seconds": seconds,
+            "target_fps": target_fps, "interval_budget_us": 1_500_000 / target_fps,
             "observed_seconds": (end - begin) / 1_000_000,
             "adapters": sorted({window["adapter"] for window in windows}),
             "windows": summaries,
@@ -154,7 +155,8 @@ def main():
     summary = analyze(output / "fragile-perf.csv",
                       (output / "probe.log").read_text(encoding="utf-8"),
                       report,
-                      args.warmup_seconds, args.seconds)
+                      args.warmup_seconds, args.seconds,
+                      60 if args.workload == "about" else 24)
     summary.update(workload=args.workload, evidence=str(output))
     content = json.dumps(summary, indent=2)
     (output / "summary.json").write_text(content + "\n", encoding="utf-8")

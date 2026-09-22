@@ -380,6 +380,16 @@ mod probe {
 
         fn window_event(&mut self, id: window::Id, event: window::Event) -> Task<Message> {
             match event {
+                window::Event::Focused | window::Event::Unfocused => {
+                    if self.sustained.seconds > 0 {
+                        println!(
+                            "VULKAN_WINDOW_FOCUS timestamp_us={} window={id:?} focused={}",
+                            timestamp_us(),
+                            matches!(event, window::Event::Focused)
+                        );
+                    }
+                    Task::none()
+                }
                 window::Event::Closed => {
                     self.windows_closed += 1;
                     if let Some(record) = self.windows.iter_mut().find(|record| record.id == id) {
