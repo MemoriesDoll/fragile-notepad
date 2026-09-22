@@ -8,7 +8,6 @@ use crate::message::AdvancedSearchTab;
 pub struct SearchDialogState {
     pub active_tab: AdvancedSearchTab,
     pub query: String,
-    pub go_to_line: String,
     pub replacement: String,
     pub case_sensitive: bool,
     pub whole_word: bool,
@@ -32,7 +31,6 @@ impl SearchDialogState {
         Self {
             active_tab: AdvancedSearchTab::Find,
             query: String::new(),
-            go_to_line: String::new(),
             replacement: String::new(),
             case_sensitive: false,
             whole_word: false,
@@ -54,19 +52,10 @@ impl SearchDialogState {
 
     pub fn set_active_tab(&mut self, tab: AdvancedSearchTab) {
         self.active_tab = tab;
-        if matches!(self.active_tab, AdvancedSearchTab::GoToLine) {
-            self.results.clear();
-            self.status = go_to_line_ready_status(&self.go_to_line);
-        }
     }
 
     pub fn set_query(&mut self, query: impl Into<String>) {
         let query = query.into();
-        if matches!(self.active_tab, AdvancedSearchTab::GoToLine) {
-            self.set_go_to_line(query);
-            return;
-        }
-
         self.query = query;
         self.results.clear();
         self.status = if self.query.is_empty() {
@@ -74,12 +63,6 @@ impl SearchDialogState {
         } else {
             String::from("Ready")
         };
-    }
-
-    pub fn set_go_to_line(&mut self, go_to_line: impl Into<String>) {
-        self.go_to_line = go_to_line.into();
-        self.results.clear();
-        self.status = go_to_line_ready_status(&self.go_to_line);
     }
 
     pub fn set_replacement(&mut self, replacement: impl Into<String>) {
@@ -166,14 +149,6 @@ impl SearchDialogState {
 fn search_ready_status(query: &str) -> String {
     if query.is_empty() {
         String::from("No query")
-    } else {
-        String::from("Ready")
-    }
-}
-
-fn go_to_line_ready_status(go_to_line: &str) -> String {
-    if go_to_line.trim().is_empty() {
-        String::from("No line")
     } else {
         String::from("Ready")
     }

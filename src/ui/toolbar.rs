@@ -398,9 +398,11 @@ fn search_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
             "Replace in Open Documents...",
             Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::ReplaceInFiles),
         ),
-        menu::item(
+        menu_item(
+            settings,
             "Go To Line...",
-            Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::GoToLine),
+            ShortcutCommand::GoToLine,
+            Message::GoToLineOpened,
         ),
         menu::separator(),
     ];

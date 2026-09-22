@@ -9,15 +9,22 @@ The Windows dialog uses selectable rows to activate an application window. It
 shows the current window and the number of open windows; the list scrolls in
 small editor windows while its Done button remains visible.
 
-Find and Replace uses Find, Replace, and Go to line tabs with an explicit Search
+Find and Replace uses Find and Replace tabs with an explicit Search
 in selector for the current document or open documents. Switching between Find
 and Replace preserves the scope. Open documents includes unsaved tabs and supports
 file-name filters; it does not search unopened files on disk. Fields, options, and
 actions remain visible without scrolling; grouped results use the remaining space.
 The footer retains search status and errors. Opening the dialog or switching its
-workflow focuses the query (or line number) for immediate typing. Enter in the
+workflow focuses the query for immediate typing. Enter in the
 query field finds the next match in the current document or lists matches across
 open documents.
+
+Go to line opens a compact prompt over the editor from Search > Go To Line or
+Ctrl+G (Command+G on macOS). The current line is selected for immediate replacement;
+Enter jumps and returns focus to the editor, while Escape, Cancel, or a backdrop
+click dismisses without moving the caret. Invalid input keeps the prompt open.
+Like the previous command, out-of-range numbers clamp to the first or last line.
+The shortcut can be changed in Preferences, and the prompt preserves search state.
 
 Preferences groups rendering and scrolling under General, color mode and syntax
 under Appearance, and editing and document markers under Editor. The appearance

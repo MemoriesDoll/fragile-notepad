@@ -36,3 +36,6 @@ mod editor_actions;
 mod lifecycle;
 #[path = "app_tests/search.rs"]
 mod search;
+
+#[path = "app_tests/go_to_line.rs"]
+mod go_to_line;

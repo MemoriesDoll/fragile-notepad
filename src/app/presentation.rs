@@ -56,6 +56,17 @@ impl App {
                 active_outline_state: self.active_outline_state(),
             })
         };
+        let element = if self.main_window_id == Some(window_id)
+            && let Some(prompt) = &self.go_to_line_prompt
+        {
+            iced::widget::stack![
+                ui::motion::fade(element, 1.0, ui::styles::editor_background, false),
+                ui::go_to_line_prompt::view(&prompt.input, prompt.error.as_deref()),
+            ]
+            .into()
+        } else {
+            element
+        };
         if let Some(span) = perf_span {
             span.end_with("");
         }

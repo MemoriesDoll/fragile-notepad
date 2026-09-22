@@ -9,6 +9,7 @@ pub enum ShortcutCommand {
     ToggleFind,
     AdvancedFind,
     AdvancedReplace,
+    GoToLine,
     Cut,
     Copy,
     Paste,
@@ -42,7 +43,7 @@ pub enum ShortcutCommand {
 }
 
 impl ShortcutCommand {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 38] = [
         Self::NewFile,
         Self::OpenFile,
         Self::SaveFile,
@@ -50,6 +51,7 @@ impl ShortcutCommand {
         Self::ToggleFind,
         Self::AdvancedFind,
         Self::AdvancedReplace,
+        Self::GoToLine,
         Self::Cut,
         Self::Copy,
         Self::Paste,
@@ -91,6 +93,7 @@ impl ShortcutCommand {
             Self::ToggleFind => "toggle_find",
             Self::AdvancedFind => "advanced_find",
             Self::AdvancedReplace => "advanced_replace",
+            Self::GoToLine => "go_to_line",
             Self::Cut => "cut",
             Self::Copy => "copy",
             Self::Paste => "paste",
@@ -133,6 +136,7 @@ impl ShortcutCommand {
             Self::ToggleFind => "Find",
             Self::AdvancedFind => "Advanced find",
             Self::AdvancedReplace => "Advanced replace",
+            Self::GoToLine => "Go to line",
             Self::Cut => "Cut",
             Self::Copy => "Copy",
             Self::Paste => "Paste",
@@ -174,6 +178,7 @@ impl ShortcutCommand {
             Self::ToggleFind
             | Self::AdvancedFind
             | Self::AdvancedReplace
+            | Self::GoToLine
             | Self::GoToMatchingDelimiter
             | Self::SelectMatchingDelimiter
             | Self::NextFunction
@@ -211,6 +216,7 @@ impl ShortcutCommand {
                 ShortcutKey::character('f'),
             )),
             Self::AdvancedReplace => Some(KeyBinding::primary(ShortcutKey::character('h'))),
+            Self::GoToLine => Some(KeyBinding::primary(ShortcutKey::character('g'))),
             Self::Cut => Some(KeyBinding::primary(ShortcutKey::character('x'))),
             Self::Copy => Some(KeyBinding::primary(ShortcutKey::character('c'))),
             Self::Paste => Some(KeyBinding::primary(ShortcutKey::character('v'))),

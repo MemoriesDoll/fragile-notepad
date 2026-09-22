@@ -11,7 +11,7 @@ use fragile_notepad::{
     search_dialog::SearchDialogState,
     settings_dialog::SettingsDialogState,
     ui::{
-        advanced_search_panel, settings_panel, styles,
+        advanced_search_panel, go_to_line_prompt, settings_panel, styles,
         window_list_dialog::{self, WindowListEntry},
     },
 };
@@ -35,6 +35,18 @@ fn main() {
     ] {
         let theme = styles::modern_theme(appearance).unwrap();
         for (width, height, size_name) in [(900, 600, "normal"), (640, 364, "minimum")] {
+            for (value, error, suffix) in [
+                ("120", None, "ready"),
+                ("abc", Some("Enter a valid line number."), "invalid"),
+            ] {
+                render(
+                    &mut renderer,
+                    go_to_line_prompt::view(value, error),
+                    &theme,
+                    Size::new(width, height),
+                    &format!("go-to-line-{suffix}-{name}-{size_name}"),
+                );
+            }
             let entries = vec![
                 WindowListEntry {
                     target: WindowTarget::Main,
@@ -66,14 +78,12 @@ fn main() {
                 (AdvancedSearchTab::Replace, "replace"),
                 (AdvancedSearchTab::FindInFiles, "find-open"),
                 (AdvancedSearchTab::ReplaceInFiles, "replace-open"),
-                (AdvancedSearchTab::GoToLine, "go-to"),
             ] {
                 let mut dialog = SearchDialogState::new();
                 dialog.active_tab = tab;
                 if tab != AdvancedSearchTab::Find {
                     dialog.query = "release".into();
                     dialog.replacement = "launch".into();
-                    dialog.go_to_line = "120".into();
                     let mut workspace = Workspace::new();
                     workspace.documents.push(Document::from_path(DocumentId::new(20), "release-notes.md", "# September release\nPrepare the release notes.\nReview the release checklist.\n"));
                     workspace.documents.push(Document::from_path(
@@ -88,9 +98,6 @@ fn main() {
                         dialog.refresh_from_workspace(&workspace);
                     } else {
                         dialog.refresh_from_documents([&workspace.documents[1]]);
-                    }
-                    if tab == AdvancedSearchTab::GoToLine {
-                        dialog.status = "Enter a line number".into();
                     }
                 }
                 render(

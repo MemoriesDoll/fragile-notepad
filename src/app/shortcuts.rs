@@ -11,7 +11,7 @@ impl App {
     pub(super) fn update_runtime_event(
         &mut self,
         event: Event,
-        _status: Status,
+        status: Status,
         window_id: window::Id,
     ) -> Task<Message> {
         if matches!(
@@ -45,6 +45,34 @@ impl App {
         if self.main_window_id == Some(window_id)
             && self.close_prompt.document().is_some()
             && !matches!(event, Event::Keyboard(keyboard::Event::ModifiersChanged(_)))
+        {
+            return Task::none();
+        }
+
+        if self.main_window_id == Some(window_id) && self.go_to_line_prompt.is_some() {
+            if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
+                self.keyboard_modifiers = modifiers;
+            }
+            if let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = &event {
+                return match key {
+                    keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                        self.update_go_to_line(Message::GoToLineClosed)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Enter) => {
+                        self.update_go_to_line(Message::GoToLineSubmitted)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Tab) => {
+                        iced::widget::operation::focus(crate::ui::go_to_line_prompt::INPUT_ID)
+                    }
+                    _ => Task::none(),
+                };
+            }
+            return Task::none();
+        }
+        // Escape is forwarded even when a text input consumes it, so the prompt
+        // can dismiss in one press. Other captured keys keep their normal behavior.
+        if status == Status::Captured
+            && matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. }))
         {
             return Task::none();
         }
@@ -95,6 +123,7 @@ impl App {
             ShortcutCommand::OpenFile => self.update_file(Message::OpenFile),
             ShortcutCommand::SaveFile => self.update_file(Message::SaveFile),
             ShortcutCommand::SaveFileAs => self.update_file(Message::SaveFileAs),
+            ShortcutCommand::GoToLine => self.update_go_to_line(Message::GoToLineOpened),
             ShortcutCommand::ToggleFind => self.update_search(Message::ToggleFind),
             ShortcutCommand::AdvancedFind => self.update_search(Message::ToggleAdvancedSearch(
                 crate::message::AdvancedSearchTab::Find,
@@ -167,6 +196,10 @@ fn should_forward_runtime_event(event: &Event, status: Status) -> bool {
         || matches!(
             event,
             Event::Keyboard(keyboard::Event::ModifiersChanged(_))
+                | Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                    ..
+                })
                 | Event::Mouse(mouse::Event::WheelScrolled { .. })
                 | Event::Window(window::Event::FileDropped(_))
                 | Event::Window(

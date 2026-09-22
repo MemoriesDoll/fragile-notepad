@@ -26,6 +26,7 @@ impl App {
             return self.close_now(document_id);
         }
 
+        self.go_to_line_prompt = None;
         self.close_prompt.show(document_id);
         Task::none()
     }

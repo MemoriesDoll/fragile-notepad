@@ -55,7 +55,6 @@ pub enum AdvancedSearchTab {
     Replace,
     FindInFiles,
     ReplaceInFiles,
-    GoToLine,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +212,10 @@ pub enum Message {
     ShowInlineReplace,
     ToggleFind,
     HideFind,
+    GoToLineOpened,
+    GoToLineChanged(String),
+    GoToLineSubmitted,
+    GoToLineClosed,
     ToggleAdvancedSearch(AdvancedSearchTab),
     AdvancedSearchTabSelected(AdvancedSearchTab),
     AdvancedSearchQueryChanged(String),

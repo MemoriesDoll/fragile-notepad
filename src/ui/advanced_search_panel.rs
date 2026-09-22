@@ -1,6 +1,4 @@
-use iced::widget::{
-    button, checkbox, column, container, row, rule, scrollable, space, text, text_input,
-};
+use iced::widget::{button, checkbox, column, container, row, rule, scrollable, text, text_input};
 use iced::{Center, Element, Fill, Font};
 
 use crate::core::SearchMode;
@@ -12,38 +10,9 @@ use crate::ui::{styles, utility};
 pub const QUERY_INPUT_ID: &str = "advanced-search-query";
 
 pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
-    let body: Element<'_, Message> = if dialog.active_tab == AdvancedSearchTab::GoToLine {
-        column![
-            field(
-                "Line number",
-                text_input("e.g. 120", &dialog.go_to_line)
-                    .id(QUERY_INPUT_ID)
-                    .on_input(Message::AdvancedSearchQueryChanged)
-                    .on_submit(Message::AdvancedFindNextRun)
-                    .padding([8, 10])
-                    .size(14)
-                    .style(styles::input)
-                    .into()
-            ),
-            row![
-                space::horizontal(),
-                action(
-                    "Go to line",
-                    Message::AdvancedFindNextRun,
-                    true,
-                    !dialog.go_to_line.trim().is_empty()
-                )
-            ],
-            space::vertical(),
-        ]
+    let body = column![search_form(dialog), commands(dialog), results(dialog)]
         .spacing(12)
-        .into()
-    } else {
-        column![search_form(dialog), commands(dialog), results(dialog)]
-            .spacing(12)
-            .height(Fill)
-            .into()
-    };
+        .height(Fill);
 
     container(
         column![
@@ -74,7 +43,6 @@ fn navigation(active: AdvancedSearchTab) -> Element<'static, Message> {
     [
         ("Find", search_tab(false, open)),
         ("Replace", search_tab(true, open)),
-        ("Go to line", AdvancedSearchTab::GoToLine),
     ]
     .into_iter()
     .fold(row![].spacing(4), |tabs, (label, tab)| {

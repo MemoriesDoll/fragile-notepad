@@ -142,11 +142,7 @@ impl App {
                 self.begin_pending_search(self.dialog_scope(), false)
             }
             Message::AdvancedFindNextRun => {
-                if matches!(self.search_dialog.active_tab, AdvancedSearchTab::GoToLine) {
-                    self.go_to_line();
-                } else {
-                    self.advanced_find_next();
-                }
+                self.advanced_find_next();
                 Task::none()
             }
             Message::AdvancedFindAllCurrentRun => {
@@ -196,13 +192,11 @@ impl App {
     fn toggle_advanced_search_window(&mut self, tab: AdvancedSearchTab) -> Task<Message> {
         self.active_menu = None;
         self.search_dialog.set_active_tab(tab);
-        if !matches!(tab, AdvancedSearchTab::GoToLine) {
-            self.search_dialog.query = self.find.query.clone();
-            self.search_dialog.replacement = self.find.replacement.clone();
-            self.search_dialog.case_sensitive = self.find.case_sensitive;
-            self.search_dialog.whole_word = self.find.whole_word;
-            self.search_dialog.mode = crate::core::SearchMode::Normal;
-        }
+        self.search_dialog.query = self.find.query.clone();
+        self.search_dialog.replacement = self.find.replacement.clone();
+        self.search_dialog.case_sensitive = self.find.case_sensitive;
+        self.search_dialog.whole_word = self.find.whole_word;
+        self.search_dialog.mode = crate::core::SearchMode::Normal;
         self.refresh_search_results();
         self.open_advanced_search_window()
             .chain(operation::focus(QUERY_INPUT_ID))
@@ -426,10 +420,6 @@ impl App {
 
     fn begin_pending_search(&mut self, scope: SearchScope, replace: bool) -> Task<Message> {
         self.pending_search = None;
-        if matches!(self.search_dialog.active_tab, AdvancedSearchTab::GoToLine) && !replace {
-            self.go_to_line();
-            return Task::none();
-        }
         let Some(search) = self.prepare_advanced_search() else {
             return Task::none();
         };
@@ -552,16 +542,6 @@ impl App {
     }
 
     fn refresh_search_results(&mut self) {
-        if matches!(self.search_dialog.active_tab, AdvancedSearchTab::GoToLine) {
-            self.search_dialog.results.clear();
-            self.search_dialog.status = if self.search_dialog.go_to_line.trim().is_empty() {
-                String::from("No line")
-            } else {
-                String::from("Ready")
-            };
-            return;
-        }
-
         if matches!(
             self.search_dialog.active_tab,
             AdvancedSearchTab::FindInFiles | AdvancedSearchTab::ReplaceInFiles
@@ -609,37 +589,6 @@ impl App {
                     .flatten()
             });
         self.select_active_match(text_match);
-    }
-
-    fn go_to_line(&mut self) {
-        self.search_dialog.results.clear();
-        let input = self.search_dialog.go_to_line.trim();
-
-        let Some(document) = self.workspace.active_document_mut() else {
-            self.search_dialog.status = String::from("No document");
-            return;
-        };
-
-        if input.is_empty() {
-            self.search_dialog.status = String::from("No line");
-            return;
-        }
-
-        let Ok(line_number) = input.parse::<usize>() else {
-            self.search_dialog.status = String::from("Invalid line number");
-            return;
-        };
-
-        let line_count = document.buffer.line_count();
-        let last_line = line_count.saturating_sub(1);
-        let target_line = line_number.saturating_sub(1).min(last_line);
-        let position = document
-            .buffer
-            .clamp_position(crate::editor::EditorPosition::new(target_line, 0));
-
-        document.set_main_selection(EditorSelection::new(position, position));
-        document.reveal_position(position);
-        self.search_dialog.status = format!("Line {} of {}", target_line + 1, line_count);
     }
 
     fn prepare_advanced_search(&mut self) -> Option<PreparedSearch> {

@@ -22,6 +22,7 @@ mod close_prompt;
 mod editor;
 mod editor_ops;
 mod files;
+mod go_to_line;
 mod menu;
 mod outline;
 mod presentation;
@@ -64,6 +65,7 @@ pub struct App {
     is_window_list_visible: bool,
     settings_dialog: SettingsDialogState,
     search_dialog: SearchDialogState,
+    go_to_line_prompt: Option<go_to_line::GoToLinePrompt>,
     dragged_tab: Option<crate::core::DocumentId>,
     hovered_drop_tab: Option<crate::core::DocumentId>,
     keyboard_modifiers: keyboard::Modifiers,
@@ -135,6 +137,7 @@ impl App {
             is_window_list_visible: false,
             settings_dialog: SettingsDialogState::new(&EditorSettings::default()),
             search_dialog: SearchDialogState::new(),
+            go_to_line_prompt: None,
             dragged_tab: None,
             hovered_drop_tab: None,
             keyboard_modifiers: keyboard::Modifiers::default(),
@@ -276,6 +279,10 @@ impl App {
             }
             Message::None => Task::none(),
             Message::SingleInstanceShowRequested(request) => self.show_main_window(request),
+            message @ (Message::GoToLineOpened
+            | Message::GoToLineChanged(_)
+            | Message::GoToLineSubmitted
+            | Message::GoToLineClosed) => self.update_go_to_line(message),
             Message::Shortcut(shortcut) => self.update_shortcut(shortcut),
             Message::RuntimeEvent(event, status, window_id) => {
                 self.update_runtime_event(event, status, window_id)
