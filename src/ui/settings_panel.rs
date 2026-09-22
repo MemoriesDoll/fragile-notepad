@@ -25,20 +25,11 @@ const INDENTATION_OPTIONS: &[IndentationMode] = &[
 ];
 
 pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
-    let (title, description) = match dialog.category {
-        SettingsCategory::General => ("General", "Rendering and scrolling for your workspace."),
-        SettingsCategory::Appearance => (
-            "Appearance",
-            "Choose your colors and make text comfortable to read.",
-        ),
-        SettingsCategory::Editor => (
-            "Editor",
-            "Set up typing, indentation, and the details you want to see.",
-        ),
-        SettingsCategory::Shortcuts => (
-            "Keyboard shortcuts",
-            "Select a binding, then press the key combination you want to use.",
-        ),
+    let title = match dialog.category {
+        SettingsCategory::General => "General",
+        SettingsCategory::Appearance => "Appearance",
+        SettingsCategory::Editor => "Editor",
+        SettingsCategory::Shortcuts => "Keyboard shortcuts",
     };
     let pane = match dialog.category {
         SettingsCategory::General => general_pane(&dialog.draft),
@@ -57,14 +48,11 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
     };
     let sidebar = container(
         column![
-            utility::eyebrow("PREFERENCES"),
-            space::vertical().height(14),
             category("General", SettingsCategory::General, dialog.category),
             category("Appearance", SettingsCategory::Appearance, dialog.category),
             category("Editor", SettingsCategory::Editor, dialog.category),
             category("Shortcuts", SettingsCategory::Shortcuts, dialog.category),
             space::vertical(),
-            utility::description("Fragile Notepad"),
         ]
         .spacing(6)
         .height(Fill),
@@ -80,8 +68,7 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
                 sidebar,
                 container(
                     column![
-                        column![utility::heading(title), utility::description(description)]
-                            .spacing(6),
+                        utility::heading(title),
                         // A new category starts at the top; redraws within a page retain scrolling.
                         keyed_column![(dialog.category, pane)]
                             .height(Fill)
@@ -97,10 +84,7 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
             .height(Fill),
             rule::horizontal(1).style(styles::utility_rule),
             row![
-                container(utility::description(
-                    "Changes take effect when you apply or save."
-                ))
-                .width(Fill),
+                space::horizontal(),
                 footer_button("Cancel", Message::CancelSettings, false),
                 footer_button("Apply", Message::ApplySettings, false),
                 footer_button("Save", Message::SaveSettings, true),
@@ -159,12 +143,12 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
                     text(if settings.hardware_acceleration == mode {
                         "Selected"
                     } else {
-                        "Select"
+                        ""
                     })
                     .size(11),
                 ]
                 .spacing(8)
-                .height(105),
+                .height(90),
             )
             .padding(14)
             .width(Fill)
@@ -175,12 +159,12 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
         )
     });
     column![
-        section("Rendering", "Balance smooth drawing and hardware compatibility.", column![
+        section("Rendering", column![
             modes,
             utility::description("If hardware rendering is already active, switching to Software takes effect after restarting."),
         ].spacing(14).into()),
-        section("Scrolling", "Tune the distance traveled with each turn of the mouse wheel.", setting_row(
-            "Scroll speed", "Affects the text editor.",
+        section("Scrolling", setting_row(
+            "Editor scroll speed",
             stepper(format!("{:.2}×", settings.scroll_speed), Message::SettingsScrollSpeedDecrease,
                 Message::SettingsScrollSpeedIncrease, Message::SettingsScrollSpeedReset,
                 settings.scroll_speed > EditorSettings::MIN_SCROLL_SPEED, settings.scroll_speed < EditorSettings::MAX_SCROLL_SPEED),
@@ -199,18 +183,12 @@ fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
         row.push(appearance_choice(mode, settings.appearance == mode))
     });
     column![
-        section(
-            "Color mode",
-            "Follow your device or choose a consistent light or dark workspace.",
-            modes.into()
-        ),
+        section("Color mode", modes.into()),
         section(
             "Text & syntax",
-            "Preview the editor colors and text size before applying them.",
             column![
                 setting_row(
                     "Syntax theme",
-                    "Colors for source code.",
                     dropdown(
                         Some(settings.syntax_theme),
                         highlighter::Theme::ALL,
@@ -223,7 +201,6 @@ fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
                 rule::horizontal(1).style(styles::utility_rule),
                 setting_row(
                     "Editor zoom",
-                    "Text size in your documents.",
                     stepper(
                         format!("{:.0}%", settings.zoom * 100.0),
                         Message::SettingsZoomOut,
@@ -384,12 +361,7 @@ fn syntax_preview(settings: &EditorSettings) -> Element<'_, Message> {
         );
     }
     let preview = container(column![
-        row![
-            utility::description("EDITOR PREVIEW"),
-            space::horizontal(),
-            utility::description("Rust")
-        ]
-        .padding([10, 14]),
+        container(utility::description("Preview")).padding([10, 14]),
         rule::horizontal(1).style(styles::utility_rule),
         scrollable(container(lines).padding(14))
             .direction(scrollable::Direction::Both {
@@ -408,11 +380,9 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
     column![
         section(
             "Typing & layout",
-            "Control indentation and how long lines fit in the editor.",
             column![
                 setting_row(
                     "Indentation",
-                    "Use tabs or a fixed number of spaces.",
                     dropdown(
                         Some(settings.indentation),
                         INDENTATION_OPTIONS,
@@ -425,7 +395,6 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
                 rule::horizontal(1).style(styles::utility_rule),
                 toggle_row(
                     "Word wrap",
-                    "Fit long lines to the window without changing the file.",
                     settings.word_wrap,
                     Message::DraftWordWrapToggled
                 ),
@@ -435,25 +404,21 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
         ),
         section(
             "Gutter & structure",
-            "Keep your place and see how the document is organized.",
             column![
                 toggle_row(
                     "Line numbers",
-                    "Show the line number beside your text.",
                     settings.decorations.show_line_numbers,
                     Message::DraftLineNumbersToggled
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
                 toggle_row(
                     "Indentation guides",
-                    "Connect lines at the same indentation level.",
                     settings.decorations.show_indentation_guides,
                     Message::DraftIndentationGuidesToggled
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
                 toggle_row(
                     "Folding controls",
-                    "Collapse and expand blocks of code.",
                     settings.decorations.show_folding_controls,
                     Message::DraftFoldingControlsToggled
                 ),
@@ -463,25 +428,21 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
         ),
         section(
             "Whitespace",
-            "Reveal invisible characters without changing your document.",
             column![
                 toggle_row(
                     "Spaces",
-                    "Mark each space with a small dot.",
                     settings.decorations.show_spaces,
                     Message::DraftVisibleSpacesToggled
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
                 toggle_row(
                     "Tabs",
-                    "Show a marker for tab characters.",
                     settings.decorations.show_tabs,
                     Message::DraftVisibleTabsToggled
                 ),
                 rule::horizontal(1).style(styles::utility_rule),
                 toggle_row(
                     "Line endings",
-                    "Show the end of each logical line.",
                     settings.decorations.show_end_of_line_markers,
                     Message::DraftEolMarkersToggled
                 ),
@@ -522,12 +483,6 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         ]
         .spacing(8)
         .align_y(Center),
-        row![
-            utility::description("COMMAND"),
-            space::horizontal(),
-            utility::badge(format!("{} commands", commands.len()))
-        ]
-        .align_y(Center),
     ]
     .spacing(14);
     // Keep the notice slot mounted so recording/conflict feedback does not
@@ -537,14 +492,9 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         notices = notices.push(
             container(
                 row![
-                    column![
-                        text(format!("Recording: {}", command.label()))
-                            .size(13)
-                            .font(utility::semibold()),
-                        text("Press the new key combination now.").size(12)
-                    ]
-                    .spacing(4)
-                    .width(Fill),
+                    text(format!("Press a shortcut for {}", command.label()))
+                        .size(13)
+                        .width(Fill),
                     button(text("Cancel recording").size(12))
                         .padding([7, 10])
                         .style(styles::command_button)
@@ -562,18 +512,12 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         notices = notices.push(
             container(
                 row![
-                    column![
-                        text("Shortcut already in use")
-                            .size(13)
-                            .font(utility::semibold()),
-                        text(format!(
-                            "{} is assigned to {}. Choose another combination.",
-                            conflict.binding.display(),
-                            conflict.command.label()
-                        ))
-                        .size(12)
-                    ]
-                    .spacing(4)
+                    text(format!(
+                        "{} is already assigned to {}.",
+                        conflict.binding.display(),
+                        conflict.command.label()
+                    ))
+                    .size(13)
                     .width(Fill),
                     button(text("Dismiss").size(12))
                         .padding([7, 10])
@@ -653,7 +597,7 @@ fn shortcut_row(
 
 fn shortcut_binding_view(binding: Option<KeyBinding>) -> Element<'static, Message> {
     let Some(binding) = binding else {
-        return utility::description("Click to assign");
+        return utility::description("Assign shortcut");
     };
     let display = binding.display_parts();
     let mut parts = row![].spacing(4).align_y(Center);
@@ -678,40 +622,17 @@ fn shortcut_binding_view(binding: Option<KeyBinding>) -> Element<'static, Messag
         .into()
 }
 
-fn section<'a>(
-    title: &'static str,
-    description: &'static str,
-    content: Element<'a, Message>,
-) -> Element<'a, Message> {
-    container(
-        column![
-            column![
-                text(title).size(15).font(utility::semibold()),
-                utility::description(description)
-            ]
-            .spacing(5),
-            content,
-        ]
-        .spacing(18),
-    )
-    .padding(16)
-    .width(Fill)
-    .style(styles::utility_card)
-    .into()
+fn section<'a>(title: &'static str, content: Element<'a, Message>) -> Element<'a, Message> {
+    container(column![text(title).size(15).font(utility::semibold()), content,].spacing(18))
+        .padding(16)
+        .width(Fill)
+        .style(styles::utility_card)
+        .into()
 }
 
-fn setting_row<'a>(
-    title: &'static str,
-    description: &'static str,
-    control: Element<'a, Message>,
-) -> Element<'a, Message> {
+fn setting_row<'a>(title: &'static str, control: Element<'a, Message>) -> Element<'a, Message> {
     row![
-        column![
-            text(title).size(13).font(utility::semibold()),
-            utility::description(description)
-        ]
-        .spacing(4)
-        .width(Fill),
+        text(title).size(13).font(utility::semibold()).width(Fill),
         control
     ]
     .spacing(18)
@@ -721,15 +642,10 @@ fn setting_row<'a>(
 
 fn toggle_row<'a>(
     title: &'static str,
-    description: &'static str,
     enabled: bool,
     message: impl Fn(bool) -> Message + 'a,
 ) -> Element<'a, Message> {
-    setting_row(
-        title,
-        description,
-        toggler(enabled).size(20).on_toggle(message).into(),
-    )
+    setting_row(title, toggler(enabled).size(20).on_toggle(message).into())
 }
 
 fn stepper<'a>(

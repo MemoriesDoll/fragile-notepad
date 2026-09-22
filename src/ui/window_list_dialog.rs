@@ -38,16 +38,13 @@ fn dialog(entries: Vec<WindowListEntry>) -> Element<'static, Message> {
     container(
         column![
             row![
-                column![
-                    text("Windows").size(24).font(Font {
+                text("Windows")
+                    .size(24)
+                    .font(Font {
                         weight: iced::font::Weight::Semibold,
                         ..Font::DEFAULT
-                    }),
-                    container(text("Pick a window to bring it to the front.").size(13))
-                        .style(styles::info_muted),
-                ]
-                .spacing(5)
-                .width(Fill),
+                    })
+                    .width(Fill),
                 container(text(format!("{count} open")).size(12))
                     .padding([5, 9])
                     .style(styles::info_badge),
@@ -58,9 +55,7 @@ fn dialog(entries: Vec<WindowListEntry>) -> Element<'static, Message> {
                 .max_height(250)
                 .width(Fill),
             row![
-                container(text("Your open documents stay in the editor.").size(12))
-                    .style(styles::info_muted)
-                    .width(Fill),
+                space::horizontal(),
                 button(text("Done").size(13))
                     .padding([9, 22])
                     .style(styles::command_button)
@@ -74,7 +69,7 @@ fn dialog(entries: Vec<WindowListEntry>) -> Element<'static, Message> {
     .width(Fill)
     .max_width(560)
     .height(Fill)
-    .max_height((count as f32 * 72.0 + 180.0).min(400.0))
+    .max_height((count as f32 * 72.0 + 150.0).min(370.0))
     .padding(24)
     .style(styles::utility_dialog)
     .into()
@@ -86,14 +81,27 @@ fn window_row(entry: WindowListEntry) -> Element<'static, Message> {
         WindowTarget::AdvancedSearch => ("Find & Replace", ".*"),
         WindowTarget::Settings => ("Preferences", "≡"),
     };
-    let title = match entry.target {
-        WindowTarget::Main => entry
+    let mut label = column![text(label).size(14).font(Font {
+        weight: iced::font::Weight::Semibold,
+        ..Font::DEFAULT
+    })]
+    .spacing(4)
+    .width(Fill)
+    .clip(true);
+    if entry.target == WindowTarget::Main {
+        let title = entry
             .title
             .trim_end_matches(" - Fragile Notepad")
-            .to_owned(),
-        WindowTarget::AdvancedSearch => "Search and edit across documents".into(),
-        WindowTarget::Settings => "Personalize your workspace".into(),
-    };
+            .to_owned();
+        label = label.push(
+            container(
+                text(title)
+                    .size(12)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .style(styles::info_muted),
+        );
+    }
     let mut trailing = row![].spacing(12).align_y(Center);
     if entry.is_focused {
         trailing = trailing.push(
@@ -109,21 +117,7 @@ fn window_row(entry: WindowListEntry) -> Element<'static, Message> {
             container(text(symbol).size(18).font(Font::MONOSPACE))
                 .center(40)
                 .style(styles::info_card),
-            column![
-                text(label).size(14).font(Font {
-                    weight: iced::font::Weight::Semibold,
-                    ..Font::DEFAULT
-                }),
-                container(
-                    text(title)
-                        .size(12)
-                        .wrapping(iced::widget::text::Wrapping::None)
-                )
-                .style(styles::info_muted),
-            ]
-            .spacing(4)
-            .width(Fill)
-            .clip(true),
+            label,
             trailing,
         ]
         .spacing(14)

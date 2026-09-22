@@ -15,24 +15,13 @@ pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
         AdvancedSearchTab::Replace | AdvancedSearchTab::ReplaceInFiles => "Replace text",
         AdvancedSearchTab::GoToLine => "Go to line",
     };
-    let subtitle = if go_to {
-        "Jump to a line in the current document."
-    } else if open_scope(dialog.active_tab) {
-        "Search across your open tabs, including unsaved documents."
-    } else {
-        "Search within the document selected in the editor."
-    };
-    let header = column![
-        row![
-            utility::heading(title),
-            space::horizontal(),
-            utility::badge(scope_label(dialog.active_tab))
-        ]
-        .align_y(Center)
-        .spacing(12),
-        utility::description(subtitle),
+    let header = row![
+        utility::heading(title),
+        space::horizontal(),
+        utility::badge(scope_label(dialog.active_tab)),
     ]
-    .spacing(6);
+    .align_y(Center)
+    .spacing(12);
 
     let body: Element<'_, Message> = if go_to {
         column![
@@ -49,7 +38,6 @@ pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
                             .style(styles::input)
                             .into()
                     ),
-                    utility::description("Line numbers start at 1."),
                     row![
                         space::horizontal(),
                         action(
@@ -128,8 +116,6 @@ fn navigation(active: AdvancedSearchTab) -> Element<'static, Message> {
     };
     container(
         column![
-            utility::eyebrow("FIND & REPLACE"),
-            space::vertical().height(14),
             utility::eyebrow("CURRENT DOCUMENT"),
             nav("Find", AdvancedSearchTab::Find),
             nav("Replace", AdvancedSearchTab::Replace),
@@ -138,10 +124,8 @@ fn navigation(active: AdvancedSearchTab) -> Element<'static, Message> {
             nav("Find all", AdvancedSearchTab::FindInFiles),
             nav("Replace all", AdvancedSearchTab::ReplaceInFiles),
             space::vertical().height(14),
-            utility::eyebrow("NAVIGATE"),
             nav("Go to line", AdvancedSearchTab::GoToLine),
             space::vertical(),
-            utility::description("Keep this window open while you work."),
         ]
         .spacing(6)
         .height(Fill),
@@ -228,9 +212,11 @@ fn options(dialog: &SearchDialogState) -> Element<'_, Message> {
         )
     });
     let hint = match dialog.mode {
-        SearchMode::Normal => "Treat the query as plain text.",
-        SearchMode::Extended => r"Use escapes such as \n for a new line and \t for a tab.",
-        SearchMode::Regex => "Search with a regular expression; use $1 in replacements.",
+        SearchMode::Extended => Some(r"Escapes: \n, \t, \r."),
+        SearchMode::Regex if replace_mode(dialog.active_tab) => {
+            Some("Use $1, $2, … for captured groups.")
+        }
+        _ => None,
     };
     let mut flags = row![
         checkbox(dialog.case_sensitive)
@@ -255,15 +241,11 @@ fn options(dialog: &SearchDialogState) -> Element<'_, Message> {
                 .on_toggle(Message::AdvancedSearchWrapAroundToggled),
         );
     }
-    column![
-        row![text("Match using").size(12), modes]
-            .spacing(12)
-            .align_y(Center),
-        utility::description(hint),
-        flags,
-    ]
-    .spacing(10)
-    .into()
+    let mut options = column![modes, flags].spacing(10);
+    if let Some(hint) = hint {
+        options = options.push(utility::description(hint));
+    }
+    options.into()
 }
 
 fn commands(dialog: &SearchDialogState) -> Element<'_, Message> {
@@ -310,40 +292,20 @@ fn results(dialog: &SearchDialogState) -> Element<'_, Message> {
     let header = row![
         text("Results").size(14).font(utility::semibold()),
         utility::badge(count.to_string()),
-        space::horizontal(),
-        utility::description("Select a match to jump to it"),
     ]
     .spacing(10)
     .align_y(Center);
     let body: Element<'_, Message> = if count == 0 {
-        let (title, hint) = if dialog.query.is_empty() {
-            (
-                "Start with a search",
-                "Enter text above, then choose Find all to see matches here.",
-            )
-        } else if dialog.status.starts_with("No matches") || dialog.status.starts_with("0 matches")
-        {
-            (
-                "No matches found",
-                "Try a shorter query or adjust the matching options.",
-            )
-        } else {
-            (
-                "Your matches appear here",
-                "Choose Find all to collect matches in the selected scope.",
-            )
-        };
-        container(
-            column![
-                text(title).size(16).font(utility::semibold()),
-                utility::description(hint),
-            ]
-            .spacing(8)
-            .align_x(Center),
-        )
-        .padding(16)
-        .center(Fill)
-        .into()
+        let label =
+            if dialog.status.starts_with("No matches") || dialog.status.starts_with("0 matches") {
+                "No matches"
+            } else {
+                "No results yet"
+            };
+        container(utility::description(label))
+            .padding(16)
+            .center(Fill)
+            .into()
     } else {
         let mut rows = column![].spacing(2);
         let mut previous = None;
