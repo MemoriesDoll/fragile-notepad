@@ -1,4 +1,4 @@
-use crate::Buffer;
+use crate::buffer::Cached;
 use crate::graphics::color;
 use crate::quad::{self, Quad};
 
@@ -18,13 +18,13 @@ pub struct Solid {
 
 #[derive(Debug)]
 pub struct Layer {
-    instances: Buffer<Solid>,
+    instances: Cached<Solid>,
     instance_count: usize,
 }
 
 impl Layer {
     pub fn new(device: &wgpu::Device, initial_count: usize) -> Self {
-        let instances = Buffer::new(
+        let instances = Cached::new(
             device,
             "iced_wgpu.quad.solid.buffer",
             initial_count,

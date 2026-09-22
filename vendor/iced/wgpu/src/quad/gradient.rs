@@ -1,4 +1,4 @@
-use crate::Buffer;
+use crate::buffer::Cached;
 use crate::graphics::gradient;
 use crate::quad::{self, Quad};
 
@@ -24,13 +24,13 @@ unsafe impl Zeroable for Gradient {}
 
 #[derive(Debug)]
 pub struct Layer {
-    instances: Buffer<Gradient>,
+    instances: Cached<Gradient>,
     instance_count: usize,
 }
 
 impl Layer {
     pub fn new(device: &wgpu::Device, initial_count: usize) -> Self {
-        let instances = Buffer::new(
+        let instances = Cached::new(
             device,
             "iced_wgpu.quad.gradient.buffer",
             initial_count,

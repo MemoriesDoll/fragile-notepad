@@ -23,5 +23,7 @@ Invoke-CiCommand python scripts/test_profile_vulkan_live.py
 Invoke-CiCommand python scripts/test_vulkan_handoff_evidence.py
 Invoke-CiCommand cargo check
 Invoke-CiCommand cargo test
+Invoke-CiCommand cargo test --locked --package iced_wgpu --lib
+Invoke-CiCommand cargo test --locked --package cryoglyph --lib
 Invoke-CiCommand cargo check --no-default-features
 Invoke-CiCommand cargo check --examples

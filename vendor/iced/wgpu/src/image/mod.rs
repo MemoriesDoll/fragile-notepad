@@ -9,7 +9,7 @@ mod raster;
 #[cfg(feature = "svg")]
 mod vector;
 
-use crate::Buffer;
+use crate::buffer::Cached;
 use crate::core::border;
 use crate::core::{Rectangle, Size, Transformation};
 use crate::graphics::Shell;
@@ -407,7 +407,7 @@ impl State {
 struct Layer {
     uniforms: Option<wgpu::Buffer>,
     parameters: Uniforms,
-    instances: Buffer<Instance>,
+    instances: Cached<Instance>,
     nearest: Vec<Group>,
     nearest_layout: wgpu::BindGroup,
     nearest_total: usize,
@@ -433,7 +433,7 @@ impl Layer {
             })
         });
 
-        let instances = Buffer::new(
+        let instances = Cached::new(
             device,
             "iced_wgpu::image instance buffer",
             Instance::INITIAL,

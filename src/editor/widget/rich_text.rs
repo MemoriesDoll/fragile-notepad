@@ -4,7 +4,8 @@ use std::ops::Range;
 
 use crate::editor::decoration::DecorationModel;
 use crate::editor::layout::{
-    EditorMetrics, byte_column_for, visual_column_for, visual_width_with_tab_width,
+    EditorMetrics, byte_column_for, byte_column_for_with_offset, visual_column_for,
+    visual_column_for_with_offset, visual_width_with_tab_width,
 };
 use crate::editor::render::RowRenderPlan;
 
@@ -55,6 +56,36 @@ pub(super) fn draw_row_text<Renderer>(
             clip_bounds,
             style.syntax_fallback_text,
             draw_plain_text,
+        );
+        return;
+    }
+
+    if (row.syntax_spans.is_empty() || row.syntax_spans.len() > MAX_SYNTAX_SPANS_PER_ROW)
+        && let Some((text, offset)) = visible_expanded_tabs(
+            &row.text,
+            decorations.settings.indent_width,
+            row.start_visual_column,
+            text_origin_x,
+            metrics,
+            clip_bounds,
+        )
+    {
+        let width = visual_column_for(&text, text.len(), 1);
+        draw_plain_text(
+            renderer,
+            text,
+            Point::new(
+                text_origin_x + offset as f32 * metrics.character_width,
+                baseline_y,
+            ),
+            Size::new(
+                (width as f32 * metrics.character_width).max(metrics.character_width),
+                metrics.line_height,
+            ),
+            style.syntax_fallback_text,
+            text::Alignment::Left,
+            metrics,
+            clip_bounds,
         );
         return;
     }
@@ -463,6 +494,77 @@ struct ExpandedTabs {
     byte_offsets: Vec<usize>,
 }
 
+// Plain text needs no syntax byte map. Expand only the visible fragment, using
+// the logical column at its start so wrapped rows preserve their tab stops.
+fn visible_expanded_tabs(
+    text: &str,
+    tab_width: usize,
+    start_visual_column: usize,
+    text_origin_x: f32,
+    metrics: EditorMetrics,
+    clip_bounds: Rectangle,
+) -> Option<(String, usize)> {
+    if !text.contains('\t') || metrics.character_width <= 0.0 {
+        return None;
+    }
+    let first = ((clip_bounds.x - text_origin_x) / metrics.character_width)
+        .floor()
+        .max(0.0) as usize;
+    let last = ((clip_bounds.x + clip_bounds.width - text_origin_x) / metrics.character_width)
+        .ceil()
+        .max(0.0) as usize;
+    let start = byte_column_for_with_offset(
+        text,
+        start_visual_column.saturating_add(first.saturating_sub(LONG_LINE_VISIBLE_MARGIN_COLUMNS)),
+        tab_width,
+        start_visual_column,
+    );
+    let end = byte_column_for_with_offset(
+        text,
+        start_visual_column
+            .saturating_add(last)
+            .saturating_add(LONG_LINE_VISIBLE_MARGIN_COLUMNS + 1),
+        tab_width,
+        start_visual_column,
+    )
+    .max(start);
+    // The right edge can land inside a tab. Include that character so its
+    // expanded spaces remain available to the final pixel clipping step.
+    let end = end + text[end..].chars().next().map_or(0, char::len_utf8);
+    let mut column = visual_column_for_with_offset(text, start, tab_width, start_visual_column);
+    let offset = column - start_visual_column;
+    let mut expanded = String::with_capacity(end - start);
+    for ch in text[start..end].chars() {
+        let width = visual_width_with_tab_width(ch, column, tab_width);
+        if ch == '\t' {
+            expanded.extend(std::iter::repeat_n(' ', width));
+        } else {
+            expanded.push(ch);
+        }
+        column += width;
+    }
+    // Clip in visual columns relative to the original origin. Applying a new
+    // floating-point origin before clipping can round a fractional cell twice.
+    let start = byte_column_for(
+        &expanded,
+        first
+            .saturating_sub(LONG_LINE_VISIBLE_MARGIN_COLUMNS)
+            .saturating_sub(offset),
+        1,
+    );
+    let end = byte_column_for(
+        &expanded,
+        last.saturating_add(LONG_LINE_VISIBLE_MARGIN_COLUMNS)
+            .saturating_sub(offset),
+        1,
+    )
+    .max(start);
+    let column = offset + visual_column_for(&expanded, start, 1);
+    expanded.truncate(end);
+    drop(expanded.drain(..start));
+    Some((expanded, column))
+}
+
 #[cfg(test)]
 fn expand_tabs_for_rendering(text: &str, tab_width: usize) -> Option<ExpandedTabs> {
     expand_tabs_for_rendering_with_offset(text, tab_width, 0)
@@ -529,6 +631,58 @@ fn remap_syntax_spans(
 mod tests {
     use super::*;
     use crate::editor::render::SyntaxRenderSpan;
+
+    #[test]
+    fn clipped_tab_expansion_matches_full_line_at_scroll_and_wrap_boundaries() {
+        let long = "a\tb\tend\t".repeat(300);
+        for character_width in [7.2, 8.35, 9.25, 13.6] {
+            let metrics = EditorMetrics {
+                character_width,
+                ..EditorMetrics::default()
+            };
+            for source in ["a\tb\tend", "\t中e\u{301}\t🐇 cafe\t", long.as_str()] {
+                for tab_width in [1, 4, 8] {
+                    for start_column in [0, 3, 9] {
+                        let full =
+                            expand_tabs_for_rendering_with_offset(source, tab_width, start_column)
+                                .unwrap()
+                                .text;
+                        for scroll in [0.0, 3.5, 9.25, 81.0, 790.0, 4000.0] {
+                            for width in [1.0, 25.0, 132.0] {
+                                let clip = Rectangle {
+                                    x: 37.0,
+                                    y: 0.0,
+                                    width,
+                                    height: 20.0,
+                                };
+                                let origin = 37.0 - scroll;
+                                let (visible, offset) = visible_expanded_tabs(
+                                    source,
+                                    tab_width,
+                                    start_column,
+                                    origin,
+                                    metrics,
+                                    clip,
+                                )
+                                .unwrap();
+                                let expected = visible_text_range(&full, origin, metrics, clip);
+                                assert_eq!(
+                                    visible,
+                                    full[expected.clone()],
+                                    "cell={character_width}, tab={tab_width}, start={start_column}, scroll={scroll}, width={width}"
+                                );
+                                assert_eq!(offset, visual_column_for(&full, expected.start, 1));
+                                assert!(
+                                    visible.len() <= 256,
+                                    "offscreen tail must not be expanded"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn syntax_span_keys_merge_adjacent_equal_styles() {

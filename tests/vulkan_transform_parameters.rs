@@ -22,10 +22,17 @@ fn record(renderer: &mut iced_wgpu::Renderer, image: &image::Handle, phase: u32)
                         * Transformation::scale(0.9 + phase as f32 * 0.02),
                     |renderer| {
                         let fill = if layer % 2 == 0 {
-                            iced::Background::Color(Color::from_rgb(0.3, 0.6, 0.8))
+                            iced::Background::Color(Color::from_rgb(
+                                0.3 + phase as f32 * 0.1,
+                                0.6,
+                                0.8,
+                            ))
                         } else {
                             iced::gradient::Linear::new(iced::Radians(0.7))
-                                .add_stop(0.0, Color::from_rgba(1.0, 0.0, 0.0, 0.8))
+                                .add_stop(
+                                    0.0,
+                                    Color::from_rgba(1.0, 0.0, 0.0, 0.8 - phase as f32 * 0.1),
+                                )
                                 .add_stop(1.0, Color::from_rgb(0.0, 0.0, 1.0))
                                 .into()
                         };
@@ -85,7 +92,8 @@ fn vulkan_transform_parameters_match_uniforms_at_each_device_limit() {
     });
     let adapter =
         futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
+            power_preference:
+                wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
             ..Default::default()
         }))
         .unwrap();
@@ -138,10 +146,21 @@ fn vulkan_transform_parameters_match_uniforms_at_each_device_limit() {
             );
             record(&mut idle, &image, 4);
             let idle_pixels = idle.screenshot(&viewport, Color::BLACK);
-            for phase in 0..3 {
+            for phase in [0, 0, 1, 2, 2, 0] {
                 record(&mut active, &image, phase);
                 let frame = active.screenshot(&viewport, Color::BLACK);
                 assert!(frame.chunks_exact(4).any(|p| p[..3] != [0, 0, 0]));
+                // A new renderer has no previous instance data to reuse. Match
+                // every pixel after unchanged, changed, and reverted frames.
+                let mut fresh =
+                    iced_wgpu::Renderer::new(engine.clone(), renderer::Settings::default());
+                let _lease = fresh.load_image(&image).unwrap();
+                record(&mut fresh, &image, phase);
+                assert_eq!(
+                    frame,
+                    fresh.screenshot(&viewport, Color::BLACK),
+                    "retained instances differ at phase {phase}, scale {scale}, limit {limit}"
+                );
                 pixels.push(frame);
                 assert_eq!(
                     idle.screenshot(&viewport, Color::BLACK),
@@ -159,7 +178,7 @@ fn vulkan_transform_parameters_match_uniforms_at_each_device_limit() {
             );
         }
         assert_ne!(
-            pixels[0], pixels[1],
+            pixels[0], pixels[2],
             "changed transforms must affect pixels"
         );
         if let Some(reference) = &reference {

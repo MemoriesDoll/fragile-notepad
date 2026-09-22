@@ -6,11 +6,14 @@ prepare/warm/commit/first-present rollback contract. This work is incomplete.
 
 ## Status (2026-09-23)
 
-Optimization is paused at the user's request after implementation and validation.
+Paused at the user's request after the broader optimization phase.
 Transform pixel/resource tests pass on NVIDIA, AMD, SwiftShader, and Linux
 Lavapipe. About/editor offscreen scenarios pass. Windows local CI passes build,
-formatting, example, and software-only checks, plus 725 Rust and 12 Python tests.
-Log: `target/vulkan-transform-windows-ci.log`.
+formatting, example, and software-only checks, plus 736 Rust and 13 Python tests.
+Log: `target/vulkan-broad-final-windows-ci-serial.log` (`RUST_TEST_THREADS=1`).
+The default parallel run failed during Vulkan instance initialization in the
+existing image-resource test (`active_backends: Backends(0x0)`); rendering checks
+had not started in that test. Log: `target/vulkan-broad-final-windows-ci.log`.
 
 Linux validation uses WSL2. Native macOS testing is deferred at the user's
 request because no Apple hardware is available. Native Linux GPU results also
@@ -18,15 +21,17 @@ remain unavailable; WSL2 currently uses Lavapipe.
 
 ### Current live validation
 
-Release handoff checks pass all nine scenarios on NVIDIA, AMD 610M, SwiftShader,
-and WSL2 Weston 14/Lavapipe (36 total), including requested resizing and rollback
+Release handoff checks pass all nine scenarios on NVIDIA and WSL2 Weston
+14/Lavapipe (18 total), including requested resizing and rollback
 after first-present failure. Captures are under
-`target/vulkan-resume-{handoff,amd-handoff,swiftshader-handoff,wayland}/`.
+`target/vulkan-broad-{handoff,wayland}/`.
 
 NVIDIA About rendering at 150% scale sustained 60.00 fps over 600 measured frames;
-CPU redraw median/p95 was 0.454/0.684 ms. Two editor windows sustained 24.00 fps
-each over 432 frames, with median redraw costs of 0.557 and 0.848 ms. Captures:
-`target/vulkan-resume-live/about-3k9mi_ji` and `editor-4yu4noll`.
+CPU redraw median/p95 was 0.428/0.694 ms. Two editor windows sustained 24.00 fps
+each over 480 total frames, with median redraw costs of 0.599 and 0.816 ms.
+Neither workload exceeded its interval budget. Captures:
+`target/vulkan-broad-live/about-degqqldq` and `editor-f_gp2itk`.
+The isolated Wayland About/editor workloads also pass.
 
 The live analyzer now uses a 1.5-frame interval budget for each workload: 25 ms
 for About's 60 Hz animation and 62.5 ms for 24 Hz editor scrolling. Focus events
@@ -45,9 +50,10 @@ is unchanged. Captures: `target/vulkan-resume-wayland/run-624sjo0d` and
 default compositor configuration.
 
 Twenty Windows startup samples with isolated settings/cache directories retained
-software-first presentation. First-view median/p95 was 27.983/31.431 ms;
-first-frame probe completion was 125.568/139.457 ms. This does not flush OS file
-or driver caches. Capture: `target/vulkan-resume-startup/run-7lvwoapw`.
+software-first presentation. First-view median/p95 was 30.319/36.929 ms;
+first-frame probe completion was 140.015/151.741 ms. These are fresh-process
+samples without flushing OS file or driver caches. Capture:
+`target/vulkan-broad-startup/run-f9kifwc3`.
 
 ## Completion requirements
 
@@ -626,16 +632,94 @@ workloads also passed. Logs: `target/vulkan-upload-lifetime-windows-ci-fixed.log
 `target/vulkan-upload-lifetime-linux-vendor.log`, and
 `target/vulkan-upload-lifetime-wayland.log`.
 
+## Retain unchanged quad and image instances
+
+Quad and image buffers now skip identical writes and upload only the aligned
+span between changed bytes. Each buffer keeps a CPU copy of previously written
+data; replacing its GPU allocation invalidates that copy. The staging chunk
+size and GPU allocation counts are unchanged.
+
+In 240 About frames, solid-quad copies fall from 240 to zero (192,000 bytes
+removed), and image-instance bytes fall from 80,640 to 50,992. In 156 scrolling
+editor frames, solid-quad copies fall from 445 to 289; combined quad/image
+instance bytes fall from 950,064 to 843,176 (11.3%). Glyph uploads and image
+texture transfers are unchanged. Traces and summaries:
+`target/vulkan-retained-instances-{before,after}{,-editor}.json`.
+
+The profiler now advances About at 60 Hz and editor scrolling at 24 Hz. Both
+comparison binaries use this correction. Three alternating 2,400-frame runs
+show similar GPU medians: About 24.90–25.22 microseconds and editor
+19.84–20.06 microseconds. CPU preparation varied between runs; this establishes
+reduced transfer work, not a frame-latency improvement. Timing logs:
+`target/vulkan-retained-instances-{before,after}-{about,editor}-long-*.log`.
+
+The four renderer unit tests and pixel comparison pass on NVIDIA, AMD 610M,
+SwiftShader, and WSL2 Lavapipe. The pixel comparison uses fresh renderers as a
+reference for repeated, changed, and reverted frames at scales 1/1.5/2 and
+immediate limits 0/16/64/80. Linux resource-reuse tests also pass. Both local CI
+scripts now run the renderer unit suite.
+
+## Broader workloads and glyph uploads
+
+Cryoglyph is now a local dependency. Text preparation reuses its existing vertex
+vector and uploads only changed glyph ranges, while continuing to mark atlas
+entries in use. Atlas-full failures invalidate the cached draw. Buffer growth
+preserves resources referenced by pending draws; the regression reproduces a
+destroyed-buffer validation error with the old lifetime behavior.
+
+The 240-frame About trace removes all 480 glyph-vertex copies (1,585,920 bytes).
+Renderer and image-cache staging pools now start at 4 KiB and grow on demand.
+Steady mapped staging ranges fall from 27,525,120 to 983,040 bytes across the
+same frames; image texture transfers are unchanged. Captures:
+`target/vulkan-glyph-{before,after}.json` and `target/vulkan-staging-after.json`.
+
+The profiler now covers selection changes, editing, long tabbed lines, Unicode,
+and idle editor redraws, as well as About and plain/Rust scrolling. Editing uses
+the application's deferred-analysis policy; background analysis itself is not
+timed. `--resize` cycles viewport sizes, and `--in-flight=3` measures bounded
+offscreen throughput without per-frame timestamp readback. Throughput includes
+widget update/layout and draw work, with a final GPU drain. It is not display fps.
+
+Plain tabbed rows now expand only the visible fragment, preserving logical tab
+stops and the existing clipping margin. Hidden EOL markers no longer trigger a
+full-line width calculation. Three alternating 252-frame runs reduce CPU
+draw-recording median from 4.22–4.29 ms to 1.63–1.67 ms (about 61%). GPU medians
+remain near 39 microseconds. Tests compare the fragment with full-line expansion
+across tab widths, wrapping offsets, scrolling, Unicode, and fractional character
+widths. Logs: `target/vulkan-long-lines-{original,final}-*.log`.
+
+All eight workloads pass with one/two windows, scales 1/1.5/2, and periodic
+resizing: 48 scenarios of 252 frames. The AMD editor resize matrix also passes.
+Logs: `target/vulkan-broad-matrix-*.log` and `target/vulkan-broad-amd-editor.log`.
+
+Three alternating About comparisons with three submissions in flight show:
+
+| Adapter | Frames per run | Before offscreen fps | After offscreen fps |
+| --- | --- | --- | --- |
+| NVIDIA RTX 5070 Laptop | 120,000 | 7,234–7,516 | 7,478–7,663 |
+| AMD 610M | 12,000 | 1,646–1,686 | 1,649–1,674 |
+
+NVIDIA whole-device average power was 31.14–33.30 W before and 33.15–33.47 W
+after; these measurements include desktop activity and process startup and do
+not demonstrate energy savings. AMD throughput is broadly unchanged, while
+median CPU preparation falls from roughly 28–30 to 20 microseconds. AMD power
+was not measured. Evidence: `target/vulkan-broad-power.json` and
+`target/vulkan-broad-amd-{before,after}-*.log`.
+
+Cryoglyph regressions pass on NVIDIA, AMD, SwiftShader, and WSL2 Lavapipe. Linux
+renderer, resource-reuse, pixel-parity, editor model, and wrapping tests also
+pass. Logs: `target/vulkan-glyph-unit.log`,
+`target/vulkan-glyph-{amd,swiftshader}-final.log`, and
+`target/vulkan-broad-linux-*.log`. Both local CI entry points include Cryoglyph
+and renderer unit tests.
+
 ## Still required before completing the objective
 
 Native macOS package/loader/driver verification and native Linux GPU testing
-are deferred. Remaining local work includes broader editor workloads, cold
-startup distributions, and integrated GPU power/throughput measurements.
-
-Sustained live About/editor cadence and CPU redraw/presentation-call costs are
-now measured separately from the existing offscreen GPU timestamps. Longer
-captures, broader editor workloads, resizing, and maximum-throughput/power
-measurements remain; the live timestamps cannot establish display scanout latency.
+are deferred. Remaining local work includes per-pass AMD GPU bottleneck
+investigation, OS/driver-cold startup distributions, and AMD power telemetry.
+Longer live captures remain useful; current redraw/presentation-call timestamps
+do not establish display scanout latency.
 
 Requested texture-array exhaustion is now covered by a constrained real-Vulkan
 device regression. Actual driver allocation failure/device loss and physical

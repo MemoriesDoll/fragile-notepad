@@ -2,6 +2,8 @@
 //! cargo run --release --features wgpu/counters --example profile_vulkan_resources
 //! Add `-- --editor` to scroll the actual document editor over a Rust fixture.
 //! Add `-- --plain-text` for a text document without syntax/fold decorations.
+//! `--workload=selection|edit|long-lines|unicode|idle` exercises additional editor paths.
+//! `--resize` changes the viewport; `--in-flight=3` measures bounded offscreen throughput.
 //! Use `--features gpu-profiling -- --single-scene --frames=240 --trace-dir=target/gpu-trace`
 //! to inspect API uploads separately from timing runs (tracing adds overhead).
 
@@ -25,6 +27,29 @@ mod profile {
     use iced::{Color, Event, Rectangle, Renderer, Size, Theme, window};
     use iced_wgpu::graphics::{Shell as GraphicsShell, Viewport};
     use std::time::{Duration, Instant};
+
+    fn target(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        size: Size<u32>,
+    ) -> wgpu::TextureView {
+        device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("Profile target"),
+                size: wgpu::Extent3d {
+                    width: size.width,
+                    height: size.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&Default::default())
+    }
 
     fn report(instance: &wgpu::Instance, device: &wgpu::Device, stage: &str) {
         let hal = device.get_internal_counters().hal;
@@ -63,6 +88,13 @@ mod profile {
             .map(|value| value.parse().expect("--frames must be an integer"))
             .unwrap_or(120);
         assert!(frames > 12, "--frames must exceed the 12 warm-up frames");
+        let in_flight: u32 = arguments
+            .iter()
+            .find_map(|arg| arg.strip_prefix("--in-flight="))
+            .map(|value| value.parse().expect("--in-flight must be an integer"))
+            .unwrap_or(1);
+        assert!((1..=8).contains(&in_flight), "--in-flight must be 1..=8");
+        let resize = arguments.iter().any(|arg| arg == "--resize");
         let trace_path = arguments
             .iter()
             .find_map(|arg| arg.strip_prefix("--trace-dir="));
@@ -79,10 +111,42 @@ mod profile {
             );
             wgpu::Trace::Off
         };
-        let plain_text = arguments.iter().any(|arg| arg == "--plain-text");
-        let editor_mode = plain_text || arguments.iter().any(|arg| arg == "--editor");
+        let workload = arguments
+            .iter()
+            .find_map(|arg| arg.strip_prefix("--workload="))
+            .unwrap_or_else(|| {
+                if arguments.iter().any(|arg| arg == "--plain-text") {
+                    "plain-scroll"
+                } else if arguments.iter().any(|arg| arg == "--editor") {
+                    "rust-scroll"
+                } else {
+                    "about"
+                }
+            });
+        assert!(
+            [
+                "about",
+                "rust-scroll",
+                "plain-scroll",
+                "selection",
+                "edit",
+                "long-lines",
+                "unicode",
+                "idle"
+            ]
+            .contains(&workload),
+            "unknown workload"
+        );
+        let plain_text = workload != "rust-scroll" && workload != "about";
+        let editor_mode = workload != "about";
+        let frame_interval =
+            Duration::from_nanos(if editor_mode { 41_666_667 } else { 16_666_667 });
         let source = editor_mode.then(|| {
-            if plain_text {
+            if workload == "long-lines" {
+                format!("{}\n", "long line with tabs\tand columns | ".repeat(500)).repeat(128)
+            } else if workload == "unicode" {
+                "中文 日本語 한국어 café e\u{301} Ελληνικά العربية עברית 👩‍💻 🐇\n".repeat(12_000)
+            } else if plain_text {
                 "A plain text document with enough content for scrolling and glyph uploads.\n"
                     .repeat(12_000)
             } else {
@@ -90,16 +154,7 @@ mod profile {
             }
         });
         let settings = fragile_notepad::core::EditorSettings::default();
-        println!(
-            "VULKAN_WORKLOAD {}",
-            if plain_text {
-                "plain_text_scroll"
-            } else if editor_mode {
-                "editor_scroll"
-            } else {
-                "about_animation"
-            }
-        );
+        println!("VULKAN_WORKLOAD {workload} in_flight={in_flight} resize={resize}");
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -117,7 +172,7 @@ mod profile {
         println!("VULKAN_ADAPTER {:?}", adapter.get_info());
         let timestamps =
             wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
-        let supported = adapter.features().contains(timestamps);
+        let supported = in_flight == 1 && adapter.features().contains(timestamps);
         let immediate_size = if !arguments.iter().any(|arg| arg == "--uniforms")
             && adapter.features().contains(wgpu::Features::IMMEDIATES)
         {
@@ -191,7 +246,7 @@ mod profile {
                         renderer::Settings::default(),
                     ));
                     let document = source.as_ref().map(|source| {
-                        fragile_notepad::core::Document::from_path(
+                        let mut document = fragile_notepad::core::Document::from_path(
                             fragile_notepad::core::DocumentId::new(index as u64 + 1),
                             if plain_text {
                                 "profile.txt"
@@ -199,7 +254,10 @@ mod profile {
                                 "profile.rs"
                             },
                             source,
-                        )
+                        );
+                        // Loaded application documents defer analysis to workers.
+                        document.defer_analysis = true;
+                        document
                     });
                     (renderer, Tree::empty(), document)
                 })
@@ -211,33 +269,65 @@ mod profile {
                 &[1.0, 1.5, 2.0]
             };
             for (scale_index, &scale) in scales.iter().enumerate() {
-                let size = Size::new(900.0, 640.0);
-                let bounds = Rectangle::with_size(size);
+                let mut size = Size::new(900.0, 640.0);
+                let mut bounds = Rectangle::with_size(size);
                 let physical = Size::new((size.width * scale) as u32, (size.height * scale) as u32);
-                let viewport = Viewport::with_physical_size(physical, scale);
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("Profile target"),
-                    size: wgpu::Extent3d {
-                        width: physical.width,
-                        height: physical.height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    view_formats: &[],
-                });
-                let target = texture.create_view(&Default::default());
+                let mut viewport = Viewport::with_physical_size(physical, scale);
+                let mut target_view = target(&device, format, physical);
                 let mut recording = Vec::new();
                 let mut encoding = Vec::new();
                 let mut rendering = Vec::new();
+                let mut measured_start = Instant::now();
                 for frame in 0..frames {
+                    if frame == 12 {
+                        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                        measured_start = Instant::now();
+                    }
+                    if resize && frame % 60 == 0 {
+                        size = match (frame / 60) % 3 {
+                            0 => Size::new(900.0, 640.0),
+                            1 => Size::new(740.0, 480.0),
+                            _ => Size::new(1080.0, 720.0),
+                        };
+                        bounds = Rectangle::with_size(size);
+                        let physical =
+                            Size::new((size.width * scale) as u32, (size.height * scale) as u32);
+                        viewport = Viewport::with_physical_size(physical, scale);
+                        target_view = target(&device, format, physical);
+                    }
                     for (index, (renderer, tree, document)) in scenes.iter_mut().enumerate() {
                         let mut content = if let Some(document) = document {
-                            document.scroll.first_visible_row =
-                                (frame as usize + scale_index * frames as usize) * 3;
+                            use fragile_notepad::editor::{
+                                EditorPosition, EditorRange, EditorSelection,
+                            };
+                            match workload {
+                                "idle" => {}
+                                "selection" => document.set_main_selection(EditorSelection::new(
+                                    EditorPosition::new(2, 3),
+                                    EditorPosition::new(3 + (frame as usize % 18), 25),
+                                )),
+                                "edit" => {
+                                    let position = EditorPosition::new(4, 0);
+                                    let _ = document.buffer.replace_range(
+                                        EditorRange::new(position, EditorPosition::new(4, 1)),
+                                        if frame % 2 == 0 { "A" } else { "B" },
+                                    );
+                                    document.refresh_text_lines(4, 4);
+                                }
+                                "long-lines" => {
+                                    document.scroll.first_visible_row = frame as usize % 80;
+                                    document.scroll.horizontal_px = (frame % 160) as f32 * 9.0;
+                                }
+                                _ => {
+                                    document.scroll.first_visible_row =
+                                        ((frame as usize + scale_index * frames as usize) * 3)
+                                            % document
+                                                .viewport
+                                                .visible_row_count()
+                                                .saturating_sub(40)
+                                                .max(1)
+                                }
+                            }
                             fragile_notepad::ui::editor::view(document, &settings)
                         } else {
                             about_dialog::view(
@@ -264,9 +354,7 @@ mod profile {
                         content.as_widget_mut().update(
                             tree,
                             &Event::Window(window::Event::RedrawRequested(
-                                start
-                                    + Duration::from_nanos(41_666_667)
-                                        * (frame + frames * scale_index as u32),
+                                start + frame_interval * (frame + frames * scale_index as u32),
                             )),
                             Layout::new(&node),
                             mouse::Cursor::Unavailable,
@@ -301,7 +389,7 @@ mod profile {
                             before.write_timestamp(queries, 0);
                         }
                         let encode_start = Instant::now();
-                        let commands = renderer.draw(Some(Color::WHITE), &target, &viewport);
+                        let commands = renderer.draw(Some(Color::WHITE), &target_view, &viewport);
                         let encode_us = encode_start.elapsed().as_secs_f64() * 1e6;
                         let mut after = device.create_command_encoder(&Default::default());
                         if let Some(queries) = &queries {
@@ -331,7 +419,11 @@ mod profile {
                             readback.unmap();
                             elapsed
                         } else {
-                            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                            if ((frame as usize * windows + index + 1) as u32)
+                                .is_multiple_of(in_flight)
+                            {
+                                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                            }
                             f64::NAN
                         };
                         if frame >= 12 {
@@ -348,6 +440,13 @@ mod profile {
                         );
                     }
                 }
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                let seconds = measured_start.elapsed().as_secs_f64();
+                println!(
+                    "VULKAN_THROUGHPUT windows={windows} scale={scale} in_flight={in_flight} frames={} seconds={seconds:.6} fps={:.2}",
+                    (frames - 12) as usize * windows,
+                    (frames - 12) as f64 * windows as f64 / seconds
+                );
                 recording.sort_by(f64::total_cmp);
                 encoding.sort_by(f64::total_cmp);
                 rendering.sort_by(f64::total_cmp);

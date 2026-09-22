@@ -41,7 +41,10 @@ impl Cache {
             raster: Raster {
                 cache: crate::image::raster::Cache::default(),
                 pending: HashMap::new(),
-                belt: wgpu::util::StagingBelt::new(device.clone(), 2 * 1024 * 1024),
+                belt: wgpu::util::StagingBelt::new(
+                    device.clone(),
+                    crate::buffer::STAGING_CHUNK_SIZE,
+                ),
             },
             #[cfg(feature = "svg")]
             vector: crate::image::vector::Cache::default(),
@@ -420,7 +423,10 @@ mod worker {
                 backend,
                 texture_layout,
                 shell: shell.clone(),
-                belt: wgpu::util::StagingBelt::new(device.clone(), 4 * 1024 * 1024),
+                belt: wgpu::util::StagingBelt::new(
+                    device.clone(),
+                    crate::buffer::STAGING_CHUNK_SIZE,
+                ),
                 jobs: jobs_receiver,
                 output: work_sender,
                 quit: quit_receiver,

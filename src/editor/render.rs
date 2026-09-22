@@ -892,7 +892,7 @@ fn eol_plan(
     decorations
         .settings
         .show_end_of_line_markers
-        .then_some(EolRenderPlan {
+        .then(|| EolRenderPlan {
             line,
             x: x_for_visual_column(
                 visual_column_for_with_offset(

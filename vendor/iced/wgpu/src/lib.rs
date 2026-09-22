@@ -152,12 +152,11 @@ impl Renderer {
             #[cfg(any(feature = "svg", feature = "image"))]
             image_cache: std::cell::OnceCell::new(),
 
-            // TODO: Resize belt smartly (?)
-            // It would be great if the `StagingBelt` API exposed methods
-            // for introspection to detect when a resize may be worth it.
+            // Small instance updates use a small chunk. The belt allocates
+            // larger chunks on demand for writes up to MAX_WRITE_SIZE.
             staging_belt: wgpu::util::StagingBelt::new(
                 engine.device.clone(),
-                buffer::MAX_WRITE_SIZE as u64,
+                buffer::STAGING_CHUNK_SIZE,
             ),
             offscreen_warm_up: None,
 

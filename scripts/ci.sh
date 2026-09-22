@@ -17,5 +17,8 @@ else
     cargo test
 fi
 
+cargo test --locked -p iced_wgpu --lib
+cargo test --locked -p cryoglyph --lib
+
 cargo check --no-default-features
 cargo check --examples

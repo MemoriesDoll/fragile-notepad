@@ -149,11 +149,21 @@ icons; the measured About scene is unchanged. Mixed scenes can use both pools.
 The resource regression covers repeated small-image growth/eviction alongside
 retained large images and independent worker uploads.
 
-Image uploads larger than the 100 KiB staging chunk use a temporary mapped
+Image uploads larger than the 100 KiB pooled-upload limit use a temporary mapped
 buffer. The command submission retains it until GPU completion, then releases
 it. Small uploads remain pooled. This saves 2.73 MiB of retained buffer memory
 per measured About window. The atlas regression checks delayed submission,
 padding, fragmentation, atlas growth, and release after completion.
+
+Renderer and image-cache staging belts now start with 4 KiB chunks and grow to
+fit actual writes, replacing the fixed 100 KiB, 2 MiB, and 4 MiB defaults.
+Cryoglyph is maintained in `../cryoglyph` for glyph upload/lifetime control.
+
+Quad and image instance buffers retain a CPU copy of their uploaded bytes.
+Unchanged draws skip the copy; changed draws upload one aligned span excluding
+unchanged leading/trailing bytes. Buffer growth invalidates the retained copy.
+Pixel regressions compare reused renderers with fresh renderers across repeated,
+changed, and reverted frames, both parameter paths, and fractional scaling.
 
 Atlas growth now respects requested device layer/dimension limits. Fragmented
 allocation is transactional: failure frees its reservations before upload.
