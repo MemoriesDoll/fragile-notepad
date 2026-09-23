@@ -119,6 +119,7 @@ pub struct Document {
     pub analysis_pending: bool,
     revision: u64,
     metadata_dirty: bool,
+    metadata_revision: u64,
     syntax_token_source: SyntaxTokenSource,
 }
 
@@ -252,6 +253,7 @@ impl Document {
             analysis_pending: false,
             revision: 0,
             metadata_dirty: false,
+            metadata_revision: 0,
             syntax_token_source,
         }
     }
@@ -279,6 +281,9 @@ impl Document {
                 self.syntax_token = syntax_token;
                 self.refresh_after_syntax_change();
             }
+        }
+        if self.path.as_ref() != Some(&path) {
+            self.metadata_revision = self.metadata_revision.wrapping_add(1);
         }
         self.path = Some(path);
     }
@@ -467,6 +472,10 @@ impl Document {
 
     pub fn text(&self) -> String {
         self.buffer.text()
+    }
+
+    pub(crate) fn metadata_revision(&self) -> u64 {
+        self.metadata_revision
     }
 
     pub fn revision(&self) -> u64 {

@@ -1,3 +1,4 @@
+use crate::message::SearchMessage;
 use iced::Task;
 use iced::widget::operation;
 
@@ -20,10 +21,16 @@ pub(super) struct PendingSearch {
 }
 
 impl App {
-    pub(super) fn update_search(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn refresh_loading_find(&mut self) -> Task<Message> {
+        self.loading_find_scheduled = false;
+        self.refresh_find_matches();
+        Task::none()
+    }
+
+    pub(super) fn update_search(&mut self, message: SearchMessage) -> Task<Message> {
         // Editing the request or starting a new search cancels its queued work.
         // Loading already requested documents may finish, but cannot mutate text.
-        if !matches!(message, Message::AdvancedSearchResultSelected(_, _)) {
+        if !matches!(message, SearchMessage::AdvancedSearchResultSelected(_, _)) {
             if self.pending_search.is_some() {
                 self.search_dialog.status = String::from("Search canceled.");
             }
@@ -34,128 +41,132 @@ impl App {
         }
 
         match message {
-            Message::FindQueryChanged(query) => {
+            SearchMessage::FindQueryChanged(query) => {
                 self.find.set_query(query);
                 self.refresh_find_matches();
                 Task::none()
             }
-            Message::FindReplacementChanged(replacement) => {
+            SearchMessage::FindReplacementChanged(replacement) => {
                 self.find.set_replacement(replacement);
                 Task::none()
             }
-            Message::FindCaseSensitiveToggled(case_sensitive) => {
+            SearchMessage::FindCaseSensitiveToggled(case_sensitive) => {
                 self.find.set_case_sensitive(case_sensitive);
                 self.refresh_find_matches();
                 Task::none()
             }
-            Message::FindWholeWordToggled(whole_word) => {
+            SearchMessage::FindWholeWordToggled(whole_word) => {
                 self.find.set_whole_word(whole_word);
                 self.refresh_find_matches();
                 Task::none()
             }
-            Message::ToggleInlineReplace => {
+            SearchMessage::ToggleInlineReplace => {
                 self.is_inline_replace_visible = !self.is_inline_replace_visible;
                 self.chrome_animation
                     .inline_replace
                     .set_visible(self.is_inline_replace_visible);
                 Task::none()
             }
-            Message::ShowInlineReplace => {
+            SearchMessage::ShowInlineReplace => {
                 self.is_find_visible = true;
                 self.is_inline_replace_visible = true;
                 self.chrome_animation.find.set_visible(true);
                 self.chrome_animation.inline_replace.set_visible(true);
                 operation::focus(FIND_INPUT_ID)
             }
-            Message::ToggleFind => self.toggle_find_panel(),
-            Message::HideFind => {
+            SearchMessage::ToggleFind => self.toggle_find_panel(),
+            SearchMessage::HideFind => {
                 self.is_find_visible = false;
                 self.chrome_animation.find.set_visible(false);
                 operation::focus(crate::ui::editor::EDITOR_ID)
             }
-            Message::FindNext => {
-                self.active_menu = None;
+            SearchMessage::FindNext => {
+                self.menu.close();
                 let text_match = self.find.next();
                 self.select_active_match(text_match);
                 Task::none()
             }
-            Message::FindPrevious => {
-                self.active_menu = None;
+            SearchMessage::FindPrevious => {
+                self.menu.close();
                 let text_match = self.find.previous();
                 self.select_active_match(text_match);
                 Task::none()
             }
-            Message::SelectAndFindNext => {
+            SearchMessage::SelectAndFindNext => {
                 self.select_text_for_find(true, true);
                 Task::none()
             }
-            Message::SelectAndFindPrevious => {
+            SearchMessage::SelectAndFindPrevious => {
                 self.select_text_for_find(true, false);
                 Task::none()
             }
-            Message::VolatileFindNext => {
+            SearchMessage::VolatileFindNext => {
                 self.select_text_for_find(false, true);
                 Task::none()
             }
-            Message::VolatileFindPrevious => {
+            SearchMessage::VolatileFindPrevious => {
                 self.select_text_for_find(false, false);
                 Task::none()
             }
-            Message::ReplaceCurrent => self.replace_current(),
-            Message::ReplaceAll => self.replace_all(),
-            Message::ToggleAdvancedSearch(tab) => self.toggle_advanced_search_window(tab),
-            Message::AdvancedSearchTabSelected(tab) => {
+            SearchMessage::ReplaceCurrent => self.replace_current(),
+            SearchMessage::ReplaceAll => self.replace_all(),
+            SearchMessage::ToggleAdvancedSearch(tab) => self.toggle_advanced_search_window(tab),
+            SearchMessage::AdvancedSearchTabSelected(tab) => {
                 self.search_dialog.set_active_tab(tab);
                 self.refresh_search_results();
                 operation::focus(QUERY_INPUT_ID)
             }
-            Message::AdvancedSearchQueryChanged(query) => {
+            SearchMessage::AdvancedSearchQueryChanged(query) => {
                 self.search_dialog.set_query(query);
                 Task::none()
             }
-            Message::AdvancedSearchReplacementChanged(replacement) => {
+            SearchMessage::AdvancedSearchReplacementChanged(replacement) => {
                 self.search_dialog.set_replacement(replacement);
                 Task::none()
             }
-            Message::AdvancedSearchCaseSensitiveToggled(case_sensitive) => {
+            SearchMessage::AdvancedSearchCaseSensitiveToggled(case_sensitive) => {
                 self.search_dialog.set_case_sensitive(case_sensitive);
                 Task::none()
             }
-            Message::AdvancedSearchWholeWordToggled(whole_word) => {
+            SearchMessage::AdvancedSearchWholeWordToggled(whole_word) => {
                 self.search_dialog.set_whole_word(whole_word);
                 Task::none()
             }
-            Message::AdvancedSearchWrapAroundToggled(wrap_around) => {
+            SearchMessage::AdvancedSearchWrapAroundToggled(wrap_around) => {
                 self.search_dialog.set_wrap_around(wrap_around);
                 Task::none()
             }
-            Message::AdvancedSearchModeSelected(mode) => {
+            SearchMessage::AdvancedSearchModeSelected(mode) => {
                 self.search_dialog.set_mode(mode);
                 self.refresh_search_results();
                 Task::none()
             }
-            Message::AdvancedSearchIncludeChanged(include_pattern) => {
+            SearchMessage::AdvancedSearchIncludeChanged(include_pattern) => {
                 self.search_dialog.set_include_pattern(include_pattern);
                 Task::none()
             }
-            Message::AdvancedSearchRun | Message::AdvancedCountRun => {
+            SearchMessage::AdvancedSearchRun | SearchMessage::AdvancedCountRun => {
                 self.begin_pending_search(self.dialog_scope(), false)
             }
-            Message::AdvancedFindNextRun => {
+            SearchMessage::AdvancedFindNextRun => {
                 self.advanced_find_next();
                 Task::none()
             }
-            Message::AdvancedFindAllCurrentRun => {
+            SearchMessage::AdvancedFindAllCurrentRun => {
                 self.begin_pending_search(SearchScope::Current, false)
             }
-            Message::AdvancedFindAllOpenRun => {
+            SearchMessage::AdvancedFindAllOpenRun => {
                 self.begin_pending_search(SearchScope::OpenDocuments, false)
             }
-            Message::AdvancedReplaceRun => self.advanced_replace_current(),
-            Message::AdvancedReplaceAllRun => self.advanced_replace_all(),
-            Message::AdvancedReplaceAllCurrentRun => self.replace_all_in(SearchScope::Current),
-            Message::AdvancedReplaceAllOpenRun => self.replace_all_in(SearchScope::OpenDocuments),
-            Message::AdvancedSearchResultSelected(document_id, selection) => {
+            SearchMessage::AdvancedReplaceRun => self.advanced_replace_current(),
+            SearchMessage::AdvancedReplaceAllRun => self.advanced_replace_all(),
+            SearchMessage::AdvancedReplaceAllCurrentRun => {
+                self.replace_all_in(SearchScope::Current)
+            }
+            SearchMessage::AdvancedReplaceAllOpenRun => {
+                self.replace_all_in(SearchScope::OpenDocuments)
+            }
+            SearchMessage::AdvancedSearchResultSelected(document_id, selection) => {
                 if self.workspace.select(document_id) {
                     self.refresh_find_matches();
                     let _ = self.update_editor(
@@ -169,13 +180,12 @@ impl App {
                 }
                 Task::none()
             }
-            Message::AdvancedSearchClosed => self.close_advanced_search_window(),
-            _ => unreachable!("search handler received non-search message"),
+            SearchMessage::AdvancedSearchClosed => self.close_advanced_search_window(),
         }
     }
 
     fn toggle_find_panel(&mut self) -> Task<Message> {
-        self.active_menu = None;
+        self.menu.close();
         self.is_find_visible = !self.is_find_visible;
         self.chrome_animation.find.set_visible(self.is_find_visible);
 
@@ -190,7 +200,7 @@ impl App {
     }
 
     fn toggle_advanced_search_window(&mut self, tab: AdvancedSearchTab) -> Task<Message> {
-        self.active_menu = None;
+        self.menu.close();
         self.search_dialog.set_active_tab(tab);
         self.search_dialog.query = self.find.query.clone();
         self.search_dialog.replacement = self.find.replacement.clone();
@@ -217,15 +227,13 @@ impl App {
 
         if self.replace_active_match(&text, text_match.start, text_match.end) {
             self.refresh_find_matches();
-            return self.schedule_outline_parse(self.workspace.active_document_id);
         }
 
         Task::none()
     }
 
     fn select_text_for_find(&mut self, persist_query: bool, forward: bool) {
-        self.active_menu = None;
-
+        self.menu.close();
         let Some(query) = self.active_find_text() else {
             return;
         };
@@ -285,7 +293,7 @@ impl App {
         let Some(end_position) = document.buffer.position_for_byte_offset(text_match.end) else {
             return;
         };
-        let document_id = self.workspace.active_document_id;
+        let document_id = self.workspace.active_document_id();
 
         let _ = self.update_editor(
             document_id,
@@ -339,10 +347,6 @@ impl App {
         }
 
         self.refresh_find_matches();
-        if changed {
-            return self.schedule_outline_parse(self.workspace.active_document_id);
-        }
-
         Task::none()
     }
 
@@ -384,7 +388,6 @@ impl App {
             search.replacement_for_match(&text, text_match, &self.search_dialog.replacement);
         if self.replace_active_range_with(&text, text_match.start, text_match.end, replacement) {
             self.refresh_search_results();
-            return self.schedule_outline_parse(self.workspace.active_document_id);
         }
 
         Task::none()
@@ -442,103 +445,12 @@ impl App {
             documents,
             replace,
         });
-        let mut tasks = deferred
+        let tasks = deferred
             .into_iter()
             .map(|id| self.activate_document(id))
             .collect::<Vec<_>>();
-        tasks.push(self.resume_pending_search());
+        self.events.publish(super::events::Event::SearchRequested);
         Task::batch(tasks)
-    }
-
-    pub(super) fn resume_pending_search(&mut self) -> Task<Message> {
-        let Some(pending) = self.pending_search.as_ref() else {
-            return Task::none();
-        };
-        if pending.documents.iter().any(|id| {
-            self.workspace.document(*id).is_none_or(|document| {
-                matches!(
-                    document.load_state,
-                    crate::core::document::DocumentLoadState::Failed { .. }
-                )
-            })
-        }) {
-            self.pending_search = None;
-            self.search_dialog.results.clear();
-            self.search_dialog.status = String::from(
-                "Search canceled: a target document was closed or could not be loaded. No replacements were made.",
-            );
-            return Task::none();
-        }
-        let waiting = pending
-            .documents
-            .iter()
-            .filter(|id| {
-                self.workspace
-                    .document(**id)
-                    .is_some_and(|document| !document.has_complete_text_index())
-            })
-            .count();
-        if waiting > 0 {
-            self.search_dialog.results.clear();
-            self.search_dialog.status = format!("Loading {waiting} documents for search...");
-            return Task::none();
-        }
-        let pending = self.pending_search.take().expect("ready search");
-        let mut changed_documents = Vec::new();
-        let active_id = self.workspace.active_document_id;
-        if pending.replace {
-            for document_id in &pending.documents {
-                let Some(document) = self.workspace.document_mut(*document_id) else {
-                    continue;
-                };
-                if !document.has_complete_text_index() {
-                    continue;
-                }
-                let text = document.text();
-                let matches = pending.search.matches(&text);
-                let replacements = matches
-                    .into_iter()
-                    .filter_map(|found| {
-                        Some((
-                            EditorRange::new(
-                                document.buffer.position_for_byte_offset(found.start)?,
-                                document.buffer.position_for_byte_offset(found.end)?,
-                            ),
-                            pending.search.replacement_for_match(
-                                &text,
-                                found,
-                                &pending.dialog.replacement,
-                            ),
-                        ))
-                    })
-                    .collect();
-                let document_changed =
-                    super::editor_ops::replace_ranges_for_search(document, replacements);
-
-                if document_changed {
-                    if *document_id == active_id {
-                        document.ensure_caret_visible();
-                    }
-                    changed_documents.push(*document_id);
-                }
-            }
-        }
-        self.refresh_find_matches();
-        let mut completed = pending.dialog;
-        completed.refresh_from_documents(
-            pending
-                .documents
-                .iter()
-                .filter_map(|id| self.workspace.document(*id)),
-        );
-        self.search_dialog.results = completed.results;
-        self.search_dialog.status = completed.status;
-
-        Task::batch(
-            changed_documents
-                .into_iter()
-                .map(|document_id| self.schedule_outline_parse(document_id)),
-        )
     }
 
     fn refresh_search_results(&mut self) {
@@ -609,7 +521,7 @@ impl App {
 
     fn document_ids_for_scope(&self, scope: SearchScope) -> Vec<crate::core::DocumentId> {
         match scope {
-            SearchScope::Current => vec![self.workspace.active_document_id],
+            SearchScope::Current => vec![self.workspace.active_document_id()],
             SearchScope::OpenDocuments => self
                 .workspace
                 .documents()
@@ -633,7 +545,7 @@ impl App {
         replacement: String,
     ) -> bool {
         self.replace_document_range_with(
-            self.workspace.active_document_id,
+            self.workspace.active_document_id(),
             text,
             start,
             end,
@@ -663,7 +575,7 @@ impl App {
         document.set_main_selection(EditorSelection::new(start_position, end_position));
         let changed = super::editor_ops::replace_selection_for_search(document, &replacement);
 
-        if changed && document_id == self.workspace.active_document_id {
+        if changed && document_id == self.workspace.active_document_id() {
             self.refresh_find_matches();
         }
 
@@ -716,4 +628,159 @@ fn next_match_after_selection(
         .iter()
         .copied()
         .find(|text_match| text_match.start >= cursor)
+}
+
+impl App {
+    pub(super) fn refresh_find_matches(&mut self) {
+        refresh_matches(&mut self.find, &self.workspace);
+    }
+}
+
+/// Search reactions cannot access file, session, settings, or window state.
+pub(super) struct SearchSubscriber<'a> {
+    pub(super) workspace: &'a mut crate::core::Workspace,
+    pub(super) pending: &'a mut Option<PendingSearch>,
+    pub(super) find: &'a mut crate::core::FindState,
+    pub(super) dialog: &'a mut crate::search_dialog::SearchDialogState,
+}
+impl SearchSubscriber<'_> {
+    pub(super) fn resume(&mut self) -> Task<Message> {
+        let Some(pending) = self.pending.as_ref() else {
+            return Task::none();
+        };
+        if pending.documents.iter().any(|id| {
+            self.workspace.document(*id).is_none_or(|document| {
+                matches!(
+                    document.load_state,
+                    crate::core::document::DocumentLoadState::Failed { .. }
+                )
+            })
+        }) {
+            *self.pending = None;
+            self.dialog.results.clear();
+            self.dialog.status = String::from(
+                "Search canceled: a target document was closed or could not be loaded. No replacements were made.",
+            );
+            return Task::none();
+        }
+        let waiting = pending
+            .documents
+            .iter()
+            .filter(|id| {
+                self.workspace
+                    .document(**id)
+                    .is_some_and(|document| !document.has_complete_text_index())
+            })
+            .count();
+        if waiting > 0 {
+            self.dialog.results.clear();
+            self.dialog.status = format!("Loading {waiting} documents for search...");
+            return Task::none();
+        }
+        let pending = self.pending.take().expect("ready search");
+        let active_id = self.workspace.active_document_id();
+        if pending.replace {
+            for document_id in &pending.documents {
+                let Some(document) = self.workspace.document_mut(*document_id) else {
+                    continue;
+                };
+                if !document.has_complete_text_index() {
+                    continue;
+                }
+                let text = document.text();
+                let matches = pending.search.matches(&text);
+                let replacements = matches
+                    .into_iter()
+                    .filter_map(|found| {
+                        Some((
+                            EditorRange::new(
+                                document.buffer.position_for_byte_offset(found.start)?,
+                                document.buffer.position_for_byte_offset(found.end)?,
+                            ),
+                            pending.search.replacement_for_match(
+                                &text,
+                                found,
+                                &pending.dialog.replacement,
+                            ),
+                        ))
+                    })
+                    .collect();
+                let document_changed =
+                    super::editor_ops::replace_ranges_for_search(document, replacements);
+
+                if document_changed {
+                    if *document_id == active_id {
+                        document.ensure_caret_visible();
+                    }
+                }
+            }
+        }
+        refresh_matches(self.find, self.workspace);
+        let mut completed = pending.dialog;
+        completed.refresh_from_documents(
+            pending
+                .documents
+                .iter()
+                .filter_map(|id| self.workspace.document(*id)),
+        );
+        self.dialog.results = completed.results;
+        self.dialog.status = completed.status;
+
+        Task::none()
+    }
+}
+
+pub(super) fn refresh_matches(
+    find: &mut crate::core::FindState,
+    workspace: &crate::core::Workspace,
+) {
+    if find.query.is_empty() {
+        find.refresh_matches("");
+        return;
+    }
+    if let Some(document) = workspace.active_document() {
+        find.refresh_matches_in_chunks(document.buffer.chunks());
+    } else {
+        find.refresh_matches("");
+    }
+}
+
+pub(super) fn observe(
+    event: super::events::Event,
+    active: crate::core::DocumentId,
+    work: &mut super::events::PendingWork,
+) {
+    use super::events::{Event, Work, WorkspaceEvent as W};
+    match event {
+        Event::SearchRequested => work.request(Work::Search),
+        Event::Started | Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => {
+            work.request(Work::Find)
+        }
+        Event::Workspace(W::ContentChanged(id)) if id == active => work.request(Work::Find),
+        Event::Workspace(W::PreviewChanged(id)) if id == active => work.request(Work::LoadingFind),
+        Event::Workspace(W::LoadStateChanged(id)) => {
+            work.request(Work::Search);
+            if id == active {
+                work.request(Work::Find);
+            }
+        }
+        Event::Workspace(W::DocumentClosed(_)) => work.request(Work::Search),
+        _ => {}
+    }
+}
+
+pub(super) fn schedule_loading_find(
+    find: &crate::core::FindState,
+    scheduled: &mut bool,
+) -> Task<Message> {
+    if find.query.is_empty() || *scheduled {
+        return Task::none();
+    }
+    *scheduled = true;
+    Task::perform(
+        async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        },
+        |_| Message::RefreshLoadingFind,
+    )
 }

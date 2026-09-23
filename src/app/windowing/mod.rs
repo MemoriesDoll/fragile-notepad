@@ -1,3 +1,4 @@
+use crate::message::WindowMessage;
 use iced::{Task, window};
 
 use super::App;
@@ -27,23 +28,16 @@ pub(super) fn custom_chrome(mut settings: window::Settings) -> window::Settings 
 }
 
 impl App {
-    pub(super) fn update_window(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update_window(&mut self, message: WindowMessage) -> Task<Message> {
         match message {
-            Message::WindowOpened(id) => {
-                // All app windows open restored. Native focus/resize events
-                // reconcile subsequent window-manager changes.
-                if self.owns_window(id) {
-                    self.maximized_windows.entry(id).or_insert(false);
-                }
-                Task::none()
-            }
-            Message::WindowMaximized(id, maximized) => {
+            WindowMessage::WindowOpened(id) => self.window_opened(id),
+            WindowMessage::WindowMaximized(id, maximized) => {
                 if self.owns_window(id) {
                     self.maximized_windows.insert(id, maximized);
                 }
                 Task::none()
             }
-            Message::WindowChrome(id, action) => {
+            WindowMessage::WindowChrome(id, action) => {
                 use crate::ui::title_bar::Action;
                 if !self.owns_window(id) {
                     return Task::none();
@@ -55,11 +49,11 @@ impl App {
                     Action::ToggleMaximize => {
                         window::toggle_maximize(id).chain(self.refresh_window_state(id))
                     }
-                    Action::Close => self.update_window(Message::WindowCloseRequested(id)),
+                    Action::Close => self.update_window(WindowMessage::WindowCloseRequested(id)),
                     Action::SystemMenu => window::show_system_menu(id),
                 }
             }
-            Message::WindowCloseRequested(id) => {
+            WindowMessage::WindowCloseRequested(id) => {
                 if let Some(settings_window) = &self.settings_window
                     && settings_window.is(id)
                 {
@@ -74,7 +68,7 @@ impl App {
                     Task::none()
                 }
             }
-            Message::WindowClosed(id) => {
+            WindowMessage::WindowClosed(id) => {
                 self.maximized_windows.remove(&id);
                 if self.focused_window_id == Some(id) {
                     self.focused_window_id = None;
@@ -101,8 +95,14 @@ impl App {
                     Task::none()
                 }
             }
-            _ => unreachable!("window handler received non-window message"),
         }
+    }
+
+    pub(super) fn register_opened_window(&mut self, id: window::Id) -> Task<Message> {
+        if self.owns_window(id) {
+            self.maximized_windows.entry(id).or_insert(false);
+        }
+        Task::none()
     }
 
     fn owns_window(&self, id: window::Id) -> bool {
@@ -122,8 +122,7 @@ impl App {
     }
 
     pub(super) fn show_main_window(&mut self, request: ActivationRequest) -> Task<Message> {
-        self.active_menu = None;
-        self.active_menu_path.clear();
+        self.menu.close();
 
         let Some(main_window_id) = self.main_window_id else {
             return Task::none();
@@ -139,8 +138,7 @@ impl App {
     }
 
     pub(super) fn toggle_settings_window(&mut self) -> Task<Message> {
-        self.active_menu = None;
-
+        self.menu.close();
         if let Some(settings_window) = self.settings_window {
             return iced::window::gain_focus(settings_window.id());
         }
@@ -198,8 +196,8 @@ impl App {
     }
 
     pub(super) fn focus_window(&mut self, target: WindowTarget) -> Task<Message> {
-        self.active_menu = None;
-        self.active_menu_path.clear();
+        self.menu.close();
+
         self.is_window_list_visible = false;
 
         let Some(id) = self.window_id(target) else {
@@ -211,8 +209,7 @@ impl App {
     }
 
     pub(super) fn focus_adjacent_window(&mut self, direction: isize) -> Task<Message> {
-        self.active_menu = None;
-        self.active_menu_path.clear();
+        self.menu.close();
 
         let targets = self.open_window_targets();
         if targets.len() < 2 {

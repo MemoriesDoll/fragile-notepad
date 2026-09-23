@@ -3,7 +3,7 @@ use super::test_support::*;
 #[test]
 fn drag_move_updates_search_and_undo_through_app_messages() {
     let (mut app, _) = App::new();
-    let id = app.workspace.active_document_id;
+    let id = app.workspace.active_document_id();
     set_active_document_text(
         &mut app,
         "one two three",
@@ -38,7 +38,7 @@ fn drag_move_updates_search_and_undo_through_app_messages() {
 #[test]
 fn navigation_keeps_caret_visible_without_scrolling_visible_moves() {
     let (mut app, _) = App::new();
-    let id = app.workspace.active_document_id;
+    let id = app.workspace.active_document_id();
     let text = (0..100).map(|_| "line").collect::<Vec<_>>().join("\n");
     set_active_document_text(
         &mut app,
@@ -89,7 +89,7 @@ fn navigation_keeps_caret_visible_without_scrolling_visible_moves() {
 #[test]
 fn vertical_navigation_preserves_visual_columns_across_utf8_and_tabs() {
     let (mut app, _) = App::new();
-    let id = app.workspace.active_document_id;
+    let id = app.workspace.active_document_id();
     set_active_document_text(
         &mut app,
         "éé\nabcd\n\tend\nabcdef",
@@ -119,7 +119,7 @@ fn vertical_navigation_preserves_visual_columns_across_utf8_and_tabs() {
 fn indent_shortcut_and_editor_action_preserve_multiline_selection() {
     for shortcut in [false, true] {
         let (mut app, _) = App::new();
-        let id = app.workspace.active_document_id;
+        let id = app.workspace.active_document_id();
         app.settings.indentation = IndentationMode::Spaces(2);
         set_active_document_text(
             &mut app,
@@ -143,7 +143,7 @@ fn indent_shortcut_and_editor_action_preserve_multiline_selection() {
 #[test]
 fn editor_tab_action_inserts_configured_indentation() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.settings.indentation = crate::core::IndentationMode::Spaces(2);
     let _ = app.update(Message::EditorAction(document_id, EditorAction::Indent));
@@ -158,7 +158,7 @@ fn editor_tab_action_inserts_configured_indentation() {
 #[test]
 fn editor_unindent_caret_removes_configured_width_leading_spaces_from_current_line() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.settings.indentation = IndentationMode::Spaces(2);
     set_active_document_text(
@@ -181,7 +181,7 @@ fn editor_unindent_caret_removes_configured_width_leading_spaces_from_current_li
 #[test]
 fn editor_unindent_selection_excludes_final_line_when_selection_ends_at_column_zero() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.settings.indentation = IndentationMode::Spaces(2);
     set_active_document_text(
@@ -203,7 +203,7 @@ fn editor_unindent_selection_excludes_final_line_when_selection_ends_at_column_z
 #[test]
 fn editor_unindent_full_selection_includes_final_touched_line() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.settings.indentation = IndentationMode::Spaces(2);
     set_active_document_text(
@@ -225,7 +225,7 @@ fn editor_unindent_full_selection_includes_final_touched_line() {
 #[test]
 fn editor_unindent_removes_leading_tab() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.settings.indentation = IndentationMode::Spaces(4);
     set_active_document_text(
@@ -247,7 +247,7 @@ fn editor_unindent_removes_leading_tab() {
 #[test]
 fn editor_unindent_reversed_selection_preserves_anchor_and_cursor_direction() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.settings.indentation = IndentationMode::Spaces(4);
     set_active_document_text(
@@ -269,7 +269,7 @@ fn editor_unindent_reversed_selection_preserves_anchor_and_cursor_direction() {
 #[test]
 fn editor_unindent_is_one_undoable_edit_restoring_text_and_selection() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let original_text = "  one\n  two\nplain";
     let original_selection =
         EditorSelection::new(EditorPosition::new(0, 2), EditorPosition::new(1, 5));
@@ -316,7 +316,7 @@ fn applying_indentation_settings_updates_document_decoration_width() {
 #[test]
 fn backspace_deletes_previous_utf8_character() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app
@@ -343,7 +343,7 @@ fn backspace_deletes_previous_utf8_character() {
 #[test]
 fn delete_removes_next_utf8_character() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app
@@ -370,7 +370,7 @@ fn delete_removes_next_utf8_character() {
 #[test]
 fn backspace_deletes_previous_grapheme_cluster() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let text = "a\u{0065}\u{0301}b";
     let cursor = "a\u{0065}\u{0301}".len();
 
@@ -401,7 +401,7 @@ fn backspace_deletes_previous_grapheme_cluster() {
 #[test]
 fn delete_removes_next_grapheme_cluster() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app
@@ -445,7 +445,7 @@ fn new_file_applies_current_decoration_settings_immediately() {
 #[test]
 fn copy_action_does_not_mutate_active_document() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app
@@ -486,15 +486,18 @@ fn edit_menu_clipboard_messages_route_to_active_editor() {
         document.mark_clean();
     }
 
-    app.active_menu = Some(Menu::Edit);
-    app.active_menu_path = vec![String::from("clipboard")];
+    let _ = app.update(Message::MenuToggled(Menu::Edit));
+    let _ = app.update(Message::MenuPathHovered(crate::message::MenuPath {
+        depth: 0,
+        segments: vec![String::from("clipboard")],
+    }));
     let _ = app.update(Message::Cut);
 
     let document = app.workspace.active_document().expect("active document");
     assert_eq!(document.text(), " me");
     assert!(document.is_dirty);
-    assert_eq!(app.active_menu, None);
-    assert!(app.active_menu_path.is_empty());
+    assert_eq!(app.menu.active(), None);
+    assert!(app.menu.path().is_empty());
 
     let _ = app.update(Message::Undo);
     let _ = app.update(Message::Copy);
@@ -531,7 +534,7 @@ fn edit_delete_menu_message_deletes_selection() {
 #[test]
 fn cut_action_deletes_selection_as_one_undoable_edit() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app
@@ -569,7 +572,7 @@ fn cut_action_deletes_selection_as_one_undoable_edit() {
 #[test]
 fn clipboard_read_replaces_selection_and_refreshes_find_matches() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.find.set_query("paste");
     {
@@ -620,7 +623,7 @@ fn clipboard_read_replaces_selection_and_refreshes_find_matches() {
 #[test]
 fn clipboard_read_replaces_original_paste_selection_after_caret_moves() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app
@@ -672,7 +675,7 @@ fn clipboard_read_replaces_original_paste_selection_after_caret_moves() {
 #[test]
 fn clipboard_read_is_ignored_after_document_changes() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app
@@ -725,7 +728,7 @@ fn clipboard_read_is_ignored_after_document_changes() {
 #[test]
 fn collapsing_fold_moves_hidden_selection_to_fold_header() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app

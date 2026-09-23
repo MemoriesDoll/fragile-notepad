@@ -167,7 +167,10 @@ fn fold_current_command_collapses_fold_from_header() {
     let _ = app.update(Message::MenuToggled(Menu::View));
     let _ = app.update(Message::FoldCurrent);
 
-    assert_debug_contains(&format!("{app:#?}"), "active_menu: None");
+    assert_debug_contains(
+        &format!("{app:#?}"),
+        "menu: MenuState { active: None, path: [], }",
+    );
     let debug = active_document_debug(&app);
     assert_debug_contains(
         &debug,
@@ -532,20 +535,23 @@ fn toggle_function_list_flips_visibility_and_closes_menu() {
 
     let _ = app.update(Message::MenuToggled(Menu::View));
     let before_toggle = format!("{app:#?}");
-    assert_debug_contains(&before_toggle, "active_menu: Some(\n        View,\n    )");
+    assert_debug_contains(
+        &before_toggle,
+        "menu: MenuState { active: Some(View,), path: [], }",
+    );
     assert_debug_contains(&before_toggle, "is_function_list_visible: false");
 
     let _ = app.update(Message::ToggleFunctionList);
 
     let after_open = format!("{app:#?}");
-    assert_debug_contains(&after_open, "active_menu: None");
+    assert_debug_contains(&after_open, "menu: MenuState { active: None, path: [], }");
     assert_debug_contains(&after_open, "is_function_list_visible: true");
 
     let _ = app.update(Message::MenuToggled(Menu::View));
     let _ = app.update(Message::ToggleFunctionList);
 
     let after_close = format!("{app:#?}");
-    assert_debug_contains(&after_close, "active_menu: None");
+    assert_debug_contains(&after_close, "menu: MenuState { active: None, path: [], }");
     assert_debug_contains(&after_close, "is_function_list_visible: false");
 }
 

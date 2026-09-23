@@ -1,3 +1,7 @@
+use crate::message::FileMessage;
+use crate::message::GoToLineMessage;
+use crate::message::SearchMessage;
+use crate::message::SettingsMessage;
 use iced::event::{Event, Status};
 use iced::{Task, keyboard, mouse, window};
 
@@ -25,7 +29,7 @@ impl App {
         }
 
         if let Event::Window(window::Event::FileDropped(path)) = event {
-            return self.update_file(Message::FileDropped(window_id, path));
+            return self.update_file(FileMessage::FileDropped(window_id, path));
         }
 
         if matches!(event, Event::Window(window::Event::Focused)) {
@@ -56,10 +60,10 @@ impl App {
             if let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = &event {
                 return match key {
                     keyboard::Key::Named(keyboard::key::Named::Escape) => {
-                        self.update_go_to_line(Message::GoToLineClosed)
+                        self.update_go_to_line(GoToLineMessage::GoToLineClosed)
                     }
                     keyboard::Key::Named(keyboard::key::Named::Enter) => {
-                        self.update_go_to_line(Message::GoToLineSubmitted)
+                        self.update_go_to_line(GoToLineMessage::GoToLineSubmitted)
                     }
                     keyboard::Key::Named(keyboard::key::Named::Tab) => {
                         iced::widget::operation::focus(crate::ui::go_to_line_prompt::INPUT_ID)
@@ -78,7 +82,7 @@ impl App {
         }
 
         if let Some(command) = self.shortcut_capture_for_event(&event) {
-            return self.update_settings(Message::ShortcutCaptured(command.0, command.1));
+            return self.update_settings(SettingsMessage::ShortcutCaptured(command.0, command.1));
         }
 
         if let Some(command) = self.shortcut_for_key_event(&event) {
@@ -97,40 +101,30 @@ impl App {
     }
 
     pub(super) fn update_shortcut(&mut self, shortcut: ShortcutCommand) -> Task<Message> {
-        self.active_menu = None;
-
+        self.menu.close();
         if let Some(action) = EditorAction::from_shortcut(shortcut) {
             return Task::batch([
-                self.update_editor(self.workspace.active_document_id, action),
+                self.update_editor(self.workspace.active_document_id(), action),
                 iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
             ]);
         }
 
         match shortcut {
-            ShortcutCommand::ZoomIn => {
-                self.settings.zoom_in();
-                self.persist_settings()
-            }
-            ShortcutCommand::ZoomOut => {
-                self.settings.zoom_out();
-                self.persist_settings()
-            }
-            ShortcutCommand::ZoomReset => {
-                self.settings.reset_zoom();
-                self.persist_settings()
-            }
-            ShortcutCommand::NewFile => self.update_file(Message::NewFile),
-            ShortcutCommand::OpenFile => self.update_file(Message::OpenFile),
-            ShortcutCommand::SaveFile => self.update_file(Message::SaveFile),
-            ShortcutCommand::SaveFileAs => self.update_file(Message::SaveFileAs),
-            ShortcutCommand::GoToLine => self.update_go_to_line(Message::GoToLineOpened),
-            ShortcutCommand::ToggleFind => self.update_search(Message::ToggleFind),
-            ShortcutCommand::AdvancedFind => self.update_search(Message::ToggleAdvancedSearch(
-                crate::message::AdvancedSearchTab::Find,
-            )),
-            ShortcutCommand::AdvancedReplace => self.update_search(Message::ToggleAdvancedSearch(
-                crate::message::AdvancedSearchTab::Replace,
-            )),
+            ShortcutCommand::ZoomIn => self.update_settings(SettingsMessage::ZoomIn),
+            ShortcutCommand::ZoomOut => self.update_settings(SettingsMessage::ZoomOut),
+            ShortcutCommand::ZoomReset => self.update_settings(SettingsMessage::ZoomReset),
+            ShortcutCommand::NewFile => self.update_file(FileMessage::NewFile),
+            ShortcutCommand::OpenFile => self.update_file(FileMessage::OpenFile),
+            ShortcutCommand::SaveFile => self.update_file(FileMessage::SaveFile),
+            ShortcutCommand::SaveFileAs => self.update_file(FileMessage::SaveFileAs),
+            ShortcutCommand::GoToLine => self.update_go_to_line(GoToLineMessage::GoToLineOpened),
+            ShortcutCommand::ToggleFind => self.update_search(SearchMessage::ToggleFind),
+            ShortcutCommand::AdvancedFind => self.update_search(
+                SearchMessage::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::Find),
+            ),
+            ShortcutCommand::AdvancedReplace => self.update_search(
+                SearchMessage::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::Replace),
+            ),
             _ => unreachable!("editor shortcuts are dispatched through EditorAction"),
         }
     }

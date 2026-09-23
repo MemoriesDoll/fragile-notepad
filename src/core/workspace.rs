@@ -1,12 +1,16 @@
+pub mod changes;
 use crate::core::document::{Document, DocumentId, DocumentLoadGeneration};
 use crate::core::encoding::DecodedText;
+use changes::{ChangeJournal, WorkspaceEvent};
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Workspace {
-    pub documents: Vec<Document>,
-    pub active_document_id: DocumentId,
+    documents: Vec<Document>,
+    changes: ChangeJournal,
+    indices: HashMap<DocumentId, usize>,
+    active_document_id: DocumentId,
     next_document_id: u64,
 }
 
@@ -18,11 +22,51 @@ impl Workspace {
             documents: vec![Document::untitled(first_id)],
             active_document_id: first_id,
             next_document_id: 2,
+            changes: ChangeJournal::default(),
+            indices: HashMap::from([(first_id, 0)]),
         }
+    }
+
+    pub fn active_document_id(&self) -> DocumentId {
+        self.active_document_id
     }
 
     pub fn documents(&self) -> &[Document] {
         &self.documents
+    }
+
+    /// Apply a bulk edit while preserving tab order and recording touched documents.
+    /// As with `document_mut`, edits must preserve each document's ID.
+    pub fn edit_documents(&mut self, mut edit: impl FnMut(&mut Document)) {
+        for document in &mut self.documents {
+            self.changes.touch(document);
+            edit(document);
+        }
+    }
+
+    pub fn push_document(&mut self, document: Document) {
+        assert!(
+            !self.indices.contains_key(&document.id),
+            "document IDs must be unique"
+        );
+        self.next_document_id = self.next_document_id.max(document.id.get() + 1);
+        self.indices.insert(document.id, self.documents.len());
+        self.changes
+            .push(WorkspaceEvent::DocumentOpened(document.id));
+        self.documents.push(document);
+    }
+
+    pub fn clear_documents(&mut self) {
+        self.indices.clear();
+        for document in self.documents.drain(..) {
+            self.changes
+                .push(WorkspaceEvent::DocumentClosed(document.id));
+        }
+    }
+
+    /// Drain structural facts and coalesced document invalidations at an update boundary.
+    pub fn publish_changes(&mut self, emit: impl FnMut(WorkspaceEvent)) {
+        self.changes.publish(&self.documents, &self.indices, emit);
     }
 
     pub fn next_document_id(&self) -> DocumentId {
@@ -37,15 +81,15 @@ impl Workspace {
 
     pub fn create_untitled(&mut self) -> DocumentId {
         let id = self.generate_document_id();
-        self.documents.push(Document::untitled(id));
-        self.active_document_id = id;
+        self.push_document(Document::untitled(id));
+        self.select(id);
         id
     }
 
     pub fn insert_loaded_file(&mut self, path: impl Into<PathBuf>, text: &str) -> DocumentId {
         let id = self.generate_document_id();
-        self.documents.push(Document::from_path(id, path, text));
-        self.active_document_id = id;
+        self.push_document(Document::from_path(id, path, text));
+        self.select(id);
         id
     }
 
@@ -55,9 +99,8 @@ impl Workspace {
         decoded: DecodedText,
     ) -> DocumentId {
         let id = self.generate_document_id();
-        self.documents
-            .push(Document::from_decoded(id, path, decoded));
-        self.active_document_id = id;
+        self.push_document(Document::from_decoded(id, path, decoded));
+        self.select(id);
         id
     }
 
@@ -67,8 +110,8 @@ impl Workspace {
     ) -> (DocumentId, DocumentLoadGeneration) {
         let id = self.generate_document_id();
         let generation = DocumentLoadGeneration::next();
-        self.documents.push(Document::loading(id, path, generation));
-        self.active_document_id = id;
+        self.push_document(Document::loading(id, path, generation));
+        self.select(id);
         (id, generation)
     }
 
@@ -81,16 +124,24 @@ impl Workspace {
     }
 
     pub fn document(&self, id: DocumentId) -> Option<&Document> {
-        self.documents.iter().find(|document| document.id == id)
+        self.indices
+            .get(&id)
+            .and_then(|index| self.documents.get(*index))
     }
 
     pub fn document_mut(&mut self, id: DocumentId) -> Option<&mut Document> {
-        self.documents.iter_mut().find(|document| document.id == id)
+        let index = self.index_of(id)?;
+        let document = &mut self.documents[index];
+        self.changes.touch(document);
+        Some(document)
     }
 
     pub fn select(&mut self, id: DocumentId) -> bool {
         if self.document(id).is_some() {
-            self.active_document_id = id;
+            if self.active_document_id != id {
+                self.active_document_id = id;
+                self.changes.push(WorkspaceEvent::ActiveDocumentChanged(id));
+            }
             true
         } else {
             false
@@ -100,17 +151,19 @@ impl Workspace {
     pub fn close(&mut self, id: DocumentId) -> Option<Document> {
         let index = self.index_of(id)?;
         let removed = self.documents.remove(index);
+        self.reindex();
+        self.changes.push(WorkspaceEvent::DocumentClosed(id));
 
         if self.documents.is_empty() {
             let replacement_id = self.generate_document_id();
-            self.documents.push(Document::untitled(replacement_id));
-            self.active_document_id = replacement_id;
+            self.push_document(Document::untitled(replacement_id));
+            self.select(replacement_id);
             return Some(removed);
         }
 
         if self.active_document_id == id {
             let next_index = index.saturating_sub(1).min(self.documents.len() - 1);
-            self.active_document_id = self.documents[next_index].id;
+            self.select(self.documents[next_index].id);
         }
 
         Some(removed)
@@ -169,6 +222,8 @@ impl Workspace {
         };
 
         self.documents.insert(insert_index, document);
+        self.reindex();
+        self.changes.push(WorkspaceEvent::OrderChanged);
         true
     }
 
@@ -190,6 +245,8 @@ impl Workspace {
 
         let document = self.documents.remove(from_index);
         self.documents.insert(to_index, document);
+        self.reindex();
+        self.changes.push(WorkspaceEvent::OrderChanged);
         true
     }
 
@@ -204,8 +261,18 @@ impl Workspace {
             .count()
     }
 
+    fn reindex(&mut self) {
+        self.indices.clear();
+        self.indices.extend(
+            self.documents
+                .iter()
+                .enumerate()
+                .map(|(index, document)| (document.id, index)),
+        );
+    }
+
     fn index_of(&self, id: DocumentId) -> Option<usize> {
-        self.documents.iter().position(|document| document.id == id)
+        self.indices.get(&id).copied()
     }
 
     fn document_ids_matching(&self, predicate: impl Fn(&Document) -> bool) -> Vec<DocumentId> {

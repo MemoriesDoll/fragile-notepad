@@ -15,7 +15,7 @@ fn loading_file_is_inserted_before_chunks_finish() {
     assert_eq!(document.path, Some(std::path::absolute(path).unwrap()));
     assert!(document.is_loading_or_indexing());
     assert_eq!(document.buffer.text(), "");
-    assert!(app.is_loading);
+    assert!(app.files.is_loading());
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn stale_load_completion_does_not_clear_active_loading_state() {
     let mut app = App::new().0;
     let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
     let stale_generation = crate::core::DocumentLoadGeneration::next();
-    app.is_loading = true;
+    app.files.set_loading(true);
 
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
         document_id,
@@ -126,14 +126,14 @@ fn stale_load_completion_does_not_clear_active_loading_state() {
     assert_eq!(document.load_generation(), Some(generation));
     assert_eq!(document.buffer.text(), "");
     assert!(document.is_loading_or_indexing());
-    assert!(app.is_loading);
+    assert!(app.files.is_loading());
 }
 
 #[test]
 fn load_completion_for_closed_document_is_ignored_and_refreshes_loading_state() {
     let mut app = App::new().0;
     let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
-    app.is_loading = true;
+    app.files.set_loading(true);
 
     let _ = app.workspace.close(document_id);
     let _ = app.update(Message::FileLoadFinished(Ok(FileLoadFinished {
@@ -148,7 +148,7 @@ fn load_completion_for_closed_document_is_ignored_and_refreshes_loading_state() 
     })));
 
     assert!(app.workspace.document(document_id).is_none());
-    assert!(!app.is_loading);
+    assert!(!app.files.is_loading());
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn completion_from_closed_then_reopened_path_cannot_mutate_new_generation() {
     let mut app = App::new().0;
     let path = PathBuf::from("loading.txt");
     let (closed_id, closed_generation) = app.workspace.insert_loading_file(path.clone());
-    app.is_loading = true;
+    app.files.set_loading(true);
 
     let _ = app.workspace.close(closed_id);
     let (new_id, new_generation) = app.workspace.insert_loading_file(path.clone());
@@ -184,14 +184,14 @@ fn completion_from_closed_then_reopened_path_cannot_mutate_new_generation() {
     let document = app.workspace.document(new_id).expect("new document");
     assert_eq!(document.text(), "new preview");
     assert_eq!(document.load_generation(), Some(new_generation));
-    assert!(app.is_loading);
+    assert!(app.files.is_loading());
 }
 
 #[test]
 fn load_completion_applies_matching_generation_and_clears_indexing_state() {
     let mut app = App::new().0;
     let (document_id, generation) = app.workspace.insert_loading_file("loaded.txt");
-    app.is_loading = true;
+    app.files.set_loading(true);
 
     let _ = app.update(Message::FileLoadChunk(FileLoadChunk {
         document_id,
@@ -216,7 +216,7 @@ fn load_completion_applies_matching_generation_and_clears_indexing_state() {
     let document = app.workspace.document(document_id).expect("document");
     assert_eq!(document.buffer.text(), "loaded body");
     assert!(!document.is_loading_or_indexing());
-    assert!(!app.is_loading);
+    assert!(!app.files.is_loading());
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn reload_from_disk_requires_saved_clean_non_loading_document() {
         Some("Reload from disk requires a saved file.")
     );
 
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     {
         let document = app.workspace.document_mut(document_id).expect("document");
         document.set_path("note.txt");
@@ -262,7 +262,7 @@ fn reload_from_disk_requires_saved_clean_non_loading_document() {
 #[test]
 fn reload_from_disk_reuses_active_document_and_chunked_completion() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let path = PathBuf::from("note.txt");
 
     {
@@ -281,8 +281,8 @@ fn reload_from_disk_reuses_active_document_and_chunked_completion() {
         .load_generation()
         .expect("reload generation");
 
-    assert_eq!(app.workspace.active_document_id, document_id);
-    assert!(app.is_loading);
+    assert_eq!(app.workspace.active_document_id(), document_id);
+    assert!(app.files.is_loading());
     assert_eq!(
         app.workspace
             .document(document_id)
@@ -315,14 +315,14 @@ fn reload_from_disk_reuses_active_document_and_chunked_completion() {
     assert_eq!(document.path.as_deref(), Some(path.as_path()));
     assert_eq!(document.text(), "new body");
     assert!(!document.is_dirty);
-    assert!(!app.is_loading);
+    assert!(!app.files.is_loading());
 }
 
 #[test]
 fn failed_load_sets_status_without_leaving_document_indexing() {
     let mut app = App::new().0;
     let (document_id, generation) = app.workspace.insert_loading_file("missing.txt");
-    app.is_loading = true;
+    app.files.set_loading(true);
 
     let _ = app.update(Message::FileLoadFinished(Err(FileLoadFailure {
         document_id,
@@ -334,13 +334,13 @@ fn failed_load_sets_status_without_leaving_document_indexing() {
     let document = app.workspace.document(document_id).expect("document");
     assert!(!document.is_loading_or_indexing());
     assert_eq!(app.file_status.as_deref(), Some("Open failed: I/O error"));
-    assert!(!app.is_loading);
+    assert!(!app.files.is_loading());
 }
 
 #[test]
 fn failed_reload_preserves_original_text_history_and_save_snapshot() {
     let mut app = App::new().0;
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let path = PathBuf::from("reload.txt");
     let _ = app.update(Message::EditorAction(
         document_id,
@@ -384,7 +384,7 @@ fn failed_reload_preserves_original_text_history_and_save_snapshot() {
     assert_eq!(document.bytes_for_save().unwrap(), original_bytes);
     assert!(!document.is_loading_or_indexing());
     assert!(!document.is_dirty);
-    assert!(app.pending_reloads.is_empty());
+    assert!(app.files.pending_reloads().is_empty());
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn failed_initial_load_blocks_save_and_save_copy() {
     })));
     for message in [Message::SaveFile, Message::SaveFileAs, Message::SaveCopyAs] {
         let _ = app.update(message);
-        assert!(app.pending_save.is_none());
+        assert!(app.files.pending_save().is_none());
         assert_eq!(
             app.file_status.as_deref(),
             Some("Reload the file successfully before saving.")
@@ -420,7 +420,7 @@ fn failed_initial_load_blocks_save_and_save_copy() {
 #[test]
 fn undo_during_save_cannot_keep_the_previous_clean_checkpoint() {
     let mut app = App::new().0;
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let path = PathBuf::from("save-race.txt");
     let _ = app.update(Message::EditorAction(
         document_id,
@@ -434,7 +434,7 @@ fn undo_during_save_cannot_keep_the_previous_clean_checkpoint() {
         crate::editor::EditorAction::InsertText("b".to_owned()),
     ));
     let _ = app.update(Message::SaveFile);
-    let request = app.pending_save.clone().expect("pending save");
+    let request = app.files.pending_save().cloned().expect("pending save");
     let _ = app.update(Message::Undo);
     assert!(!app.workspace.document(document_id).unwrap().is_dirty);
     let _ = app.update(Message::CloseFile);
@@ -457,7 +457,7 @@ fn dropped_file_completion_opens_document_through_existing_open_path() {
     let contents = Arc::new(crate::core::decode_bytes(b"dropped body"));
 
     let _ = app.update(Message::FileDropped(main_window, path.clone()));
-    assert!(app.is_loading);
+    assert!(app.files.is_loading());
 
     let _ = app.update(Message::FileOpened(Ok(OpenedFile {
         path: path.clone(),
@@ -471,13 +471,13 @@ fn dropped_file_completion_opens_document_through_existing_open_path() {
 
     assert_eq!(document.path, Some(std::path::absolute(path).unwrap()));
     assert_eq!(document.buffer.text(), "dropped body");
-    assert!(!app.is_loading);
+    assert!(!app.files.is_loading());
 }
 
 #[test]
 fn dropped_files_on_non_main_windows_are_ignored() {
     let (mut app, _) = App::new();
-    let original_document_id = app.workspace.active_document_id;
+    let original_document_id = app.workspace.active_document_id();
     let secondary_window = iced::window::Id::unique();
 
     let _ = app.update(Message::FileDropped(
@@ -485,9 +485,9 @@ fn dropped_files_on_non_main_windows_are_ignored() {
         PathBuf::from("ignored.txt"),
     ));
 
-    assert_eq!(app.workspace.active_document_id, original_document_id);
+    assert_eq!(app.workspace.active_document_id(), original_document_id);
     assert_eq!(app.workspace.documents().len(), 1);
-    assert!(!app.is_loading);
+    assert!(!app.files.is_loading());
 }
 
 #[test]
@@ -496,21 +496,21 @@ fn dropped_files_still_schedule_while_a_previous_drop_is_loading() {
     let main_window = app.main_window_id.expect("main window id");
 
     app.file_status = Some("stale status".to_owned());
-    app.is_loading = true;
+    app.files.set_loading(true);
 
     let _ = app.update(Message::FileDropped(
         main_window,
         PathBuf::from("second-drop.txt"),
     ));
 
-    assert!(app.is_loading);
+    assert!(app.files.is_loading());
     assert_eq!(app.file_status, None);
 }
 
 #[test]
 fn manual_non_plain_language_selection_survives_save_as() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     let _ = app.update(Message::LanguageSelected("rs".to_owned()));
     let revision = app
@@ -536,7 +536,7 @@ fn manual_non_plain_language_selection_survives_save_as() {
 #[test]
 fn plain_text_language_selection_returns_to_auto_detection_on_save_as() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     let _ = app.update(Message::LanguageSelected("txt".to_owned()));
     let revision = app
@@ -576,7 +576,7 @@ fn save_file_is_blocked_while_document_is_loading() {
     }));
     let _ = app.update(Message::SaveFile);
 
-    assert!(app.pending_save.is_none());
+    assert!(app.files.pending_save().is_none());
     assert_eq!(
         app.file_status.as_deref(),
         Some("Finish loading before saving.")
@@ -588,7 +588,7 @@ fn editor_mutation_is_blocked_while_document_is_loading() {
     let mut app = App::new().0;
     let (document_id, generation) = app.workspace.insert_loading_file("loading.txt");
     app.workspace.select(document_id);
-    app.is_loading = true;
+    app.files.set_loading(true);
 
     let _ = app.update(Message::EditorAction(
         document_id,
@@ -630,7 +630,7 @@ fn editor_mutation_is_blocked_while_document_is_loading() {
 #[test]
 fn save_completion_does_not_mark_clean_after_document_changes() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let path = PathBuf::from("note.txt");
 
     {
@@ -670,7 +670,7 @@ fn save_completion_does_not_mark_clean_after_document_changes() {
 #[test]
 fn save_completion_does_not_mark_clean_after_encoding_changes() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let path = PathBuf::from("note.txt");
 
     {
@@ -709,7 +709,7 @@ fn save_completion_does_not_mark_clean_after_encoding_changes() {
 #[test]
 fn save_copy_as_starts_pending_snapshot_without_changing_document() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let original_path = PathBuf::from("note.txt");
 
     {
@@ -723,8 +723,8 @@ fn save_copy_as_starts_pending_snapshot_without_changing_document() {
     let _ = app.update(Message::SaveCopyAs);
 
     let request = app
-        .pending_save
-        .as_ref()
+        .files
+        .pending_save()
         .expect("save copy should create pending request");
     assert_eq!(request.document_id, document_id);
     assert_eq!(request.snapshot.as_ref().as_slice(), b"copy body\n");
@@ -737,7 +737,7 @@ fn save_copy_as_starts_pending_snapshot_without_changing_document() {
 #[test]
 fn save_copy_completion_preserves_document_path_and_dirty_state() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let original_path = PathBuf::from("note.txt");
 
     {
@@ -757,7 +757,7 @@ fn save_copy_completion_preserves_document_path_and_dirty_state() {
             snapshot: Arc::new(document.bytes_for_save().expect("snapshot")),
         })
         .expect("document");
-    app.pending_save = Some(request.clone());
+    app.files.set_pending_save(request.clone());
 
     let _ = app.update(Message::FileCopySaved(
         request,
@@ -767,14 +767,14 @@ fn save_copy_completion_preserves_document_path_and_dirty_state() {
     let document = app.workspace.document(document_id).expect("document");
     assert_eq!(document.path.as_deref(), Some(original_path.as_path()));
     assert!(document.is_dirty);
-    assert!(app.pending_save.is_none());
+    assert!(app.files.pending_save().is_none());
     assert_eq!(app.file_status.as_deref(), Some("Saved copy: copy.txt"));
 }
 
 #[test]
 fn dirty_close_discard_closes_document() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.workspace
         .active_document_mut()
@@ -786,14 +786,14 @@ fn dirty_close_discard_closes_document() {
         DirtyCloseDecision::Discard,
     ));
 
-    assert_ne!(app.workspace.active_document_id, document_id);
+    assert_ne!(app.workspace.active_document_id(), document_id);
     assert!(app.workspace.document(document_id).is_none());
 }
 
 #[test]
 fn dirty_close_cancel_keeps_document_open() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.workspace
         .active_document_mut()
@@ -806,14 +806,14 @@ fn dirty_close_cancel_keeps_document_open() {
     ));
 
     assert!(app.workspace.document(document_id).is_some());
-    assert_eq!(app.workspace.active_document_id, document_id);
+    assert_eq!(app.workspace.active_document_id(), document_id);
     assert_eq!(app.close_prompt.document(), None);
 }
 
 #[test]
 fn closing_dirty_document_opens_in_app_prompt() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     app.workspace
         .active_document_mut()
@@ -829,7 +829,7 @@ fn closing_dirty_document_opens_in_app_prompt() {
 #[test]
 fn dirty_close_save_closes_after_successful_save() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let path = PathBuf::from("note.txt");
 
     {
@@ -847,8 +847,9 @@ fn dirty_close_save_closes_after_successful_save() {
     ));
 
     let request = app
-        .pending_save
-        .clone()
+        .files
+        .pending_save()
+        .cloned()
         .expect("dirty close save should start a save");
     let _ = app.update(Message::FileSaved(request, Ok(path)));
 
@@ -858,7 +859,7 @@ fn dirty_close_save_closes_after_successful_save() {
 #[test]
 fn dirty_close_save_encoding_failure_keeps_document_open_and_clears_pending_close() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     {
         let document = app
@@ -874,9 +875,9 @@ fn dirty_close_save_encoding_failure_keeps_document_open_and_clears_pending_clos
         DirtyCloseDecision::Save,
     ));
 
-    assert!(app.pending_save.is_none());
-    assert_eq!(app.pending_close_after_save, None);
-    assert!(app.pending_close_documents.is_empty());
+    assert!(app.files.pending_save().is_none());
+    assert_eq!(app.files.pending_close_after_save(), None);
+    assert!(app.files.pending_close_documents().is_empty());
     assert!(app.workspace.document(document_id).is_some());
     assert_eq!(
         app.file_status.as_deref(),
@@ -893,13 +894,13 @@ fn file_open_error_sets_visible_status() {
     ))));
 
     assert_eq!(app.file_status.as_deref(), Some("Open failed: I/O error"));
-    assert!(!app.is_loading);
+    assert!(!app.files.is_loading());
 }
 
 #[test]
 fn save_all_queues_dirty_documents_and_skips_clean_documents() {
     let (mut app, _) = App::new();
-    let first = app.workspace.active_document_id;
+    let first = app.workspace.active_document_id();
     let second = app.workspace.create_untitled();
     let third = app.workspace.create_untitled();
 
@@ -921,31 +922,39 @@ fn save_all_queues_dirty_documents_and_skips_clean_documents() {
     let _ = app.update(Message::SaveAllFiles);
 
     assert_eq!(
-        app.pending_save.as_ref().map(|request| request.document_id),
+        app.files.pending_save().map(|request| request.document_id),
         Some(first)
     );
     assert_eq!(pending_save_all_ids(&app), vec![first, third]);
 
-    let first_request = app.pending_save.clone().expect("first save request");
+    let first_request = app
+        .files
+        .pending_save()
+        .cloned()
+        .expect("first save request");
     let _ = app.update(Message::FileSaved(
         first_request,
         Ok(PathBuf::from("first.txt")),
     ));
 
     assert_eq!(
-        app.pending_save.as_ref().map(|request| request.document_id),
+        app.files.pending_save().map(|request| request.document_id),
         Some(third)
     );
     assert_eq!(pending_save_all_ids(&app), vec![third]);
 
-    let third_request = app.pending_save.clone().expect("third save request");
+    let third_request = app
+        .files
+        .pending_save()
+        .cloned()
+        .expect("third save request");
     let _ = app.update(Message::FileSaved(
         third_request,
         Ok(PathBuf::from("third.txt")),
     ));
 
-    assert!(app.pending_save.is_none());
-    assert!(app.pending_save_all.is_empty());
+    assert!(app.files.pending_save().is_none());
+    assert!(app.files.pending_save_all().is_empty());
     assert!(!app.workspace.document(first).expect("first").is_dirty);
     assert!(!app.workspace.document(second).expect("second").is_dirty);
     assert!(!app.workspace.document(third).expect("third").is_dirty);
@@ -954,7 +963,7 @@ fn save_all_queues_dirty_documents_and_skips_clean_documents() {
 #[test]
 fn save_all_stops_after_failed_save() {
     let (mut app, _) = App::new();
-    let first = app.workspace.active_document_id;
+    let first = app.workspace.active_document_id();
     let second = app.workspace.create_untitled();
 
     {
@@ -970,14 +979,18 @@ fn save_all_stops_after_failed_save() {
 
     let _ = app.update(Message::SaveAllFiles);
 
-    let first_request = app.pending_save.clone().expect("first save request");
+    let first_request = app
+        .files
+        .pending_save()
+        .cloned()
+        .expect("first save request");
     let _ = app.update(Message::FileSaved(
         first_request,
         Err(crate::message::FileError::Io(std::io::ErrorKind::Other)),
     ));
 
-    assert!(app.pending_save.is_none());
-    assert!(app.pending_save_all.is_empty());
+    assert!(app.files.pending_save().is_none());
+    assert!(app.files.pending_save_all().is_empty());
     assert!(app.workspace.document(first).expect("first").is_dirty);
     assert!(app.workspace.document(second).expect("second").is_dirty);
 }
@@ -985,7 +998,7 @@ fn save_all_stops_after_failed_save() {
 #[test]
 fn close_all_but_active_keeps_active_document_and_closes_clean_neighbors() {
     let (mut app, _) = App::new();
-    let first = app.workspace.active_document_id;
+    let first = app.workspace.active_document_id();
     let second = app.workspace.create_untitled();
     let third = app.workspace.create_untitled();
 
@@ -996,13 +1009,13 @@ fn close_all_but_active_keeps_active_document_and_closes_clean_neighbors() {
     assert!(app.workspace.document(first).is_none());
     assert!(app.workspace.document(third).is_none());
     assert!(app.workspace.document(second).is_some());
-    assert_eq!(app.workspace.active_document_id, second);
+    assert_eq!(app.workspace.active_document_id(), second);
 }
 
 #[test]
 fn close_all_but_pinned_keeps_pinned_documents_open() {
     let (mut app, _) = App::new();
-    let first = app.workspace.active_document_id;
+    let first = app.workspace.active_document_id();
     let second = app.workspace.create_untitled();
     let third = app.workspace.create_untitled();
 
@@ -1019,7 +1032,7 @@ fn close_all_but_pinned_keeps_pinned_documents_open() {
 #[test]
 fn close_all_to_left_prompts_for_first_dirty_left_document() {
     let (mut app, _) = App::new();
-    let first = app.workspace.active_document_id;
+    let first = app.workspace.active_document_id();
     let second = app.workspace.create_untitled();
     let third = app.workspace.create_untitled();
 
@@ -1033,7 +1046,8 @@ fn close_all_to_left_prompts_for_first_dirty_left_document() {
 
     assert_eq!(app.close_prompt.document(), Some(first));
     assert_eq!(
-        app.pending_close_documents
+        app.files
+            .pending_close_documents()
             .iter()
             .copied()
             .collect::<Vec<_>>(),
@@ -1047,7 +1061,7 @@ fn close_all_to_left_prompts_for_first_dirty_left_document() {
 #[test]
 fn dirty_close_discard_continues_pending_close_queue() {
     let (mut app, _) = App::new();
-    let first = app.workspace.active_document_id;
+    let first = app.workspace.active_document_id();
     let second = app.workspace.create_untitled();
     let third = app.workspace.create_untitled();
 
@@ -1066,13 +1080,13 @@ fn dirty_close_discard_continues_pending_close_queue() {
     assert!(app.workspace.document(first).is_none());
     assert!(app.workspace.document(second).is_none());
     assert!(app.workspace.document(third).is_some());
-    assert!(app.pending_close_documents.is_empty());
+    assert!(app.files.pending_close_documents().is_empty());
 }
 
 #[test]
 fn close_all_unchanged_keeps_dirty_documents_open() {
     let (mut app, _) = App::new();
-    let first = app.workspace.active_document_id;
+    let first = app.workspace.active_document_id();
     let second = app.workspace.create_untitled();
     let third = app.workspace.create_untitled();
 

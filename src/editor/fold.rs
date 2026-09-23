@@ -37,6 +37,7 @@ pub trait FoldProvider {
 pub struct FoldModel {
     ranges: Vec<FoldRange>,
     collapsed: HashSet<FoldRange>,
+    visibility_revision: u64,
 }
 
 impl FoldModel {
@@ -52,12 +53,24 @@ impl FoldModel {
             .filter(|range| available.contains(range))
             .collect();
 
-        Self { ranges, collapsed }
+        Self {
+            ranges,
+            collapsed,
+            visibility_revision: 0,
+        }
     }
 
     pub fn recompute(&mut self, ranges: Vec<FoldRange>) {
+        let revision = self.visibility_revision;
+        let previous_count = self.collapsed.len();
         let collapsed = std::mem::take(&mut self.collapsed);
         *self = Self::with_collapsed(ranges, collapsed);
+        self.visibility_revision =
+            revision.wrapping_add(u64::from(previous_count != self.collapsed.len()));
+    }
+
+    pub(crate) fn visibility_revision(&self) -> u64 {
+        self.visibility_revision
     }
 
     pub fn ranges(&self) -> &[FoldRange] {
@@ -92,11 +105,13 @@ impl FoldModel {
             return false;
         }
 
-        if collapsed {
+        let changed = if collapsed {
             self.collapsed.insert(range)
         } else {
             self.collapsed.remove(&range)
-        }
+        };
+        self.visibility_revision = self.visibility_revision.wrapping_add(u64::from(changed));
+        changed
     }
 
     pub fn toggle(&mut self, range: FoldRange) -> bool {
@@ -116,12 +131,14 @@ impl FoldModel {
 
             if changed {
                 self.collapsed = self.ranges.iter().copied().collect();
+                self.visibility_revision = self.visibility_revision.wrapping_add(1);
             }
 
             changed
         } else {
             let changed = !self.collapsed.is_empty();
             self.collapsed.clear();
+            self.visibility_revision = self.visibility_revision.wrapping_add(u64::from(changed));
             changed
         }
     }

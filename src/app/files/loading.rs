@@ -17,28 +17,19 @@ impl App {
             Ok(opened) => {
                 self.file_status = None;
                 let opened_path = opened.path.clone();
-                let document_id =
-                    if let Some(document_id) = self.loading_document_id_for_path(&opened.path) {
-                        if let Some(document) = self.workspace.document_mut(document_id)
-                            && let Some(generation) = document.load_generation()
-                        {
-                            document.complete_loading(generation, opened.contents.as_ref().clone());
-                        }
-                        self.workspace.select(document_id);
-                        document_id
-                    } else {
-                        self.workspace
-                            .insert_decoded_file(opened.path, opened.contents.as_ref().clone())
-                    };
-                if let Some(document) = self.workspace.document_mut(document_id) {
-                    document.set_decoration_settings(self.settings.decoration_settings());
-                    document.set_word_wrap(self.settings.word_wrap);
-                }
-                self.refresh_find_matches();
-                Task::batch([
-                    self.schedule_outline_parse(document_id),
-                    self.record_open_history(opened_path),
-                ])
+                if let Some(document_id) = self.loading_document_id_for_path(&opened.path) {
+                    if let Some(document) = self.workspace.document_mut(document_id)
+                        && let Some(generation) = document.load_generation()
+                    {
+                        document.complete_loading(generation, opened.contents.as_ref().clone());
+                    }
+                    self.workspace.select(document_id);
+                } else {
+                    self.workspace
+                        .insert_decoded_file(opened.path, opened.contents.as_ref().clone());
+                };
+
+                self.record_open_history(opened_path)
             }
             Err(error) => {
                 self.file_status = Some(format!("Open failed: {}", error.summary()));
@@ -70,20 +61,19 @@ impl App {
             return Task::none();
         }
 
-        self.active_menu = None;
-
+        self.menu.close();
         self.start_loading_file(path)
     }
 
     pub(in crate::app) fn start_loading_file(&mut self, path: PathBuf) -> Task<Message> {
-        if self.session.enabled && !self.session.initialized {
-            self.session.paths.push(path);
+        if self.session.waiting_for_startup() {
+            self.session.queue_paths([path]);
             return Task::none();
         }
         let path = std::path::absolute(&path).unwrap_or(path);
         if let Some(id) = self
             .workspace
-            .documents
+            .documents()
             .iter()
             .find(|doc| {
                 doc.path
@@ -95,16 +85,13 @@ impl App {
             self.workspace.select(id);
             return self.activate_document(id);
         }
-        self.is_loading = true;
+        self.files.is_loading = true;
         self.file_status = None;
 
         let (document_id, generation) = self.workspace.insert_loading_file(path.clone());
         if let Some(document) = self.workspace.document_mut(document_id) {
             document.defer_analysis = true;
-            document.set_decoration_settings(self.settings.decoration_settings());
-            document.set_word_wrap(self.settings.word_wrap);
         }
-        self.refresh_find_matches();
 
         self.start_load_request(FileLoadRequest {
             document_id,
@@ -115,7 +102,7 @@ impl App {
     }
 
     pub(super) fn reload_active_from_disk(&mut self) -> Task<Message> {
-        let document_id = self.workspace.active_document_id;
+        let document_id = self.workspace.active_document_id();
         let Some(document) = self.workspace.document(document_id) else {
             return Task::none();
         };
@@ -144,12 +131,11 @@ impl App {
             };
             document.index_state = DocumentIndexState::Pending { generation };
             let staged = crate::core::Document::loading(document_id, path.clone(), generation);
-            self.pending_reloads.insert(document_id, staged);
+            self.files.pending_reloads.insert(document_id, staged);
         }
 
-        self.is_loading = true;
+        self.files.is_loading = true;
         self.file_status = None;
-        self.refresh_find_matches();
 
         self.start_load_request(FileLoadRequest {
             document_id,
@@ -173,7 +159,7 @@ impl App {
     }
 
     pub(super) fn load_chunk(&mut self, chunk: FileLoadChunk) -> Task<Message> {
-        if let Some(staged) = self.pending_reloads.get_mut(&chunk.document_id) {
+        if let Some(staged) = self.files.pending_reloads.get_mut(&chunk.document_id) {
             staged.replace_loading_preview(
                 chunk.generation,
                 chunk.text.as_ref(),
@@ -194,25 +180,13 @@ impl App {
             return Task::none();
         };
 
-        if document.replace_loading_preview(
+        document.replace_loading_preview(
             chunk.generation,
             chunk.text.as_ref(),
             chunk.reset,
             chunk.bytes_read,
             chunk.total_bytes,
-        ) {
-            if self.workspace.active_document_id == chunk.document_id {
-                if !self.find.query.is_empty() && !self.loading_find_scheduled {
-                    self.loading_find_scheduled = true;
-                    return Task::perform(
-                        async {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        },
-                        |_| Message::RefreshLoadingFind,
-                    );
-                }
-            }
-        }
+        );
 
         Task::none()
     }
@@ -230,13 +204,13 @@ impl App {
             .document(id)
             .is_some_and(|doc| doc.has_active_load(generation))
         {
-            self.load_handles.remove(&id);
+            self.files.load_handles.remove(&id);
         }
         let task = match result {
             Ok(finished) => {
                 let opened_path = finished.path.clone();
                 let Some(document) = self.workspace.document_mut(finished.document_id) else {
-                    self.pending_reloads.remove(&finished.document_id);
+                    self.files.pending_reloads.remove(&finished.document_id);
                     self.refresh_file_loading_state();
                     return Task::none();
                 };
@@ -246,7 +220,7 @@ impl App {
                     return Task::none();
                 }
                 // Only publish a reload after every chunk has arrived successfully.
-                if let Some(staged) = self.pending_reloads.remove(&finished.document_id) {
+                if let Some(staged) = self.files.pending_reloads.remove(&finished.document_id) {
                     document.set_selection_set(staged.selection_set().clone());
                     document.buffer = staged.buffer;
                 }
@@ -265,14 +239,7 @@ impl App {
                 self.file_status = finished.had_errors.then(|| {
                     String::from("Opened with decoding errors; check the text before saving.")
                 });
-                self.apply_session_metadata(finished.document_id);
-                if finished.document_id == self.workspace.active_document_id {
-                    self.refresh_find_matches();
-                }
-                Task::batch([
-                    self.schedule_outline_parse(finished.document_id),
-                    self.record_open_history(opened_path),
-                ])
+                self.record_open_history(opened_path)
             }
             Err(failure) => self.load_failed(failure),
         };
@@ -287,7 +254,12 @@ impl App {
         };
 
         if document.fail_loading(failure.generation) {
-            if self.pending_reloads.remove(&failure.document_id).is_some() {
+            if self
+                .files
+                .pending_reloads
+                .remove(&failure.document_id)
+                .is_some()
+            {
                 document.load_state = DocumentLoadState::Complete;
                 document.index_state = DocumentIndexState::Complete;
             }
@@ -298,11 +270,7 @@ impl App {
     }
 
     pub(super) fn refresh_file_loading_state(&mut self) {
-        self.is_loading = self
-            .workspace
-            .documents()
-            .iter()
-            .any(|document| document.is_loading());
+        self.files.refresh_loading_state(&self.workspace);
     }
 
     pub(super) fn loading_document_id_for_path(
@@ -327,7 +295,7 @@ impl App {
         let id = request.document_id;
         let (task, handle) =
             Task::run(services::load_file_chunks(request), Message::from).abortable();
-        if let Some(previous) = self.load_handles.insert(id, handle) {
+        if let Some(previous) = self.files.load_handles.insert(id, handle) {
             previous.abort();
         }
         task

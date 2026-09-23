@@ -8,7 +8,7 @@ fn custom_caption_close_preserves_dirty_document_and_settings_cancel_behavior() 
     use crate::ui::title_bar::Action;
     let (mut app, _) = App::new();
     let main = app.main_window_id.unwrap();
-    let document = app.workspace.active_document_id;
+    let document = app.workspace.active_document_id();
     app.workspace.active_document_mut().unwrap().mark_dirty();
     let _ = app.update(Message::WindowChrome(main, Action::Close));
     assert_eq!(app.close_prompt.document(), Some(document));
@@ -17,7 +17,7 @@ fn custom_caption_close_preserves_dirty_document_and_settings_cancel_behavior() 
         document,
         DirtyCloseDecision::Cancel,
     ));
-    assert_eq!(app.close_goal, CloseGoal::KeepOpen);
+    assert_eq!(app.files.close_goal(), CloseGoal::KeepOpen);
 
     let _ = app.update(Message::ToggleSettingsPanel);
     let settings = app.settings_window.unwrap().id();
@@ -25,7 +25,7 @@ fn custom_caption_close_preserves_dirty_document_and_settings_cancel_behavior() 
     let _ = app.update(Message::DraftWordWrapToggled(!saved_wrap));
     let _ = app.update(Message::WindowChrome(settings, Action::Close));
     assert_eq!(app.settings_dialog.draft.word_wrap, saved_wrap);
-    assert_eq!(app.close_goal, CloseGoal::KeepOpen);
+    assert_eq!(app.files.close_goal(), CloseGoal::KeepOpen);
     assert!(app.workspace.document(document).is_some());
 }
 
@@ -60,15 +60,13 @@ fn caption_preview_toggle_does_not_modify_settings_or_recovery() {
     let (mut app, _) = App::new();
     let settings = app.settings.clone();
     let style = app.title_bar_style;
-    app.session.enabled = true;
-    assert!(!app.session_should_track(&Message::ToggleTitleBarStyle));
-    assert!(
-        !app.session_should_track(&Message::WindowMaximized(app.main_window_id.unwrap(), true))
-    );
+    app.session.set_enabled(true);
+    let _ = app.update(Message::WindowMaximized(app.main_window_id.unwrap(), true));
+    assert!(!app.session.is_dirty());
     let _ = app.update(Message::ToggleTitleBarStyle);
     assert_ne!(app.title_bar_style, style);
     assert_eq!(app.settings, settings);
-    assert!(!app.session.dirty);
+    assert!(!app.session.is_dirty());
     let _ = app.update(Message::ToggleTitleBarStyle);
     assert_eq!(app.title_bar_style, style);
 }
@@ -116,7 +114,7 @@ fn strict_handoff_success() -> backend::StrictHandoffOutcome {
 #[test]
 fn runtime_left_button_release_clears_tab_drag() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     let _ = app.update(Message::TabDragStarted(document_id));
     assert_eq!(app.dragged_tab, Some(document_id));
@@ -186,12 +184,12 @@ fn default_startup_stays_software_first_until_loaded_settings_request_boost() {
         app.settings.hardware_acceleration,
         HardwareAccelerationMode::Lazy
     );
-    assert!(!app.pending_startup_gpu_boost);
+    assert!(!app.lifecycle.pending_startup_gpu_boost);
 
     let task = app.update(Message::WindowOpened(main_window));
 
     assert_eq!(task.units(), 0);
-    assert!(!app.pending_startup_gpu_boost);
+    assert!(!app.lifecycle.pending_startup_gpu_boost);
     assert_eq!(
         app.rendering,
         crate::app::rendering::RenderingState::Software
@@ -203,11 +201,11 @@ fn secondary_window_open_does_not_consume_startup_gpu_boost() {
     let (mut app, _) = App::new();
     let secondary_window = iced::window::Id::unique();
 
-    app.pending_startup_gpu_boost = true;
+    app.lifecycle.pending_startup_gpu_boost = true;
     let task = app.update(Message::WindowOpened(secondary_window));
 
     assert_eq!(task.units(), 0);
-    assert!(app.pending_startup_gpu_boost);
+    assert!(app.lifecycle.pending_startup_gpu_boost);
     assert_eq!(
         app.rendering,
         crate::app::rendering::RenderingState::Software
@@ -216,6 +214,7 @@ fn secondary_window_open_does_not_consume_startup_gpu_boost() {
 
 #[test]
 fn main_window_open_consumes_startup_gpu_boost() {
+    let _env = RenderBackendEnvGuard::new(None);
     let (mut app, _) = App::new();
     let main_window = app
         .main_window_id
@@ -224,10 +223,10 @@ fn main_window_open_consumes_startup_gpu_boost() {
     app.settings.hardware_acceleration = HardwareAccelerationMode::Lazy;
     // Simulates an explicit startup boost queued after persisted settings load
     // or a diagnostic override, not the App::new default.
-    app.pending_startup_gpu_boost = true;
+    app.lifecycle.pending_startup_gpu_boost = true;
     let _ = app.update(Message::WindowOpened(main_window));
 
-    assert!(!app.pending_startup_gpu_boost);
+    assert!(!app.lifecycle.pending_startup_gpu_boost);
     assert_eq!(
         app.rendering,
         crate::app::rendering::RenderingState::PreparingHardware
@@ -236,6 +235,7 @@ fn main_window_open_consumes_startup_gpu_boost() {
 
 #[test]
 fn manual_gpu_boost_request_still_starts_immediately() {
+    let _env = RenderBackendEnvGuard::new(None);
     let (mut app, _) = App::new();
 
     app.settings.hardware_acceleration = HardwareAccelerationMode::Lazy;
@@ -540,7 +540,7 @@ fn close_clean_exits() {
 #[test]
 fn close_dirty_prompts() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let main_window = app
         .main_window_id
         .expect("main window should be tracked after boot");
@@ -554,14 +554,14 @@ fn close_dirty_prompts() {
 
     assert_eq!(task.units(), 0);
     assert_eq!(app.close_prompt.document(), Some(document_id));
-    assert_eq!(app.close_goal, crate::app::CloseGoal::ExitApp);
+    assert_eq!(app.files.close_goal(), crate::app::CloseGoal::ExitApp);
     assert!(app.workspace.document(document_id).is_some());
 }
 
 #[test]
 fn cancel_exit_keeps_app_open() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let main_window = app
         .main_window_id
         .expect("main window should be tracked after boot");
@@ -578,14 +578,14 @@ fn cancel_exit_keeps_app_open() {
     ));
 
     assert_eq!(task.units(), 0);
-    assert_eq!(app.close_goal, CloseGoal::KeepOpen);
+    assert_eq!(app.files.close_goal(), CloseGoal::KeepOpen);
     assert!(app.workspace.document(document_id).is_some());
 }
 
 #[test]
 fn save_cancel_keeps_app_open() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let main_window = app
         .main_window_id
         .expect("main window should be tracked after boot");
@@ -601,8 +601,9 @@ fn save_cancel_keeps_app_open() {
         DirtyCloseDecision::Save,
     ));
     let request = app
-        .pending_save
-        .clone()
+        .files
+        .pending_save()
+        .cloned()
         .expect("dirty close save should start a save");
     let task = app.update(Message::FileSaved(
         request,
@@ -610,7 +611,7 @@ fn save_cancel_keeps_app_open() {
     ));
 
     assert_eq!(task.units(), 0);
-    assert_eq!(app.close_goal, CloseGoal::KeepOpen);
+    assert_eq!(app.files.close_goal(), CloseGoal::KeepOpen);
     assert!(app.workspace.document(document_id).is_some());
 }
 
@@ -632,14 +633,17 @@ fn settings_persist_error_sets_visible_status() {
 fn about_dialog_opens_switches_tabs_and_closes() {
     let (mut app, _) = App::new();
 
-    app.active_menu = Some(Menu::Help);
-    app.active_menu_path = vec![String::from("about")];
+    let _ = app.update(Message::MenuToggled(Menu::Help));
+    let _ = app.update(Message::MenuPathHovered(crate::message::MenuPath {
+        depth: 0,
+        segments: vec![String::from("about")],
+    }));
     let _ = app.update(Message::AboutOpened);
 
     assert!(app.is_about_visible);
     assert_eq!(app.about_tab, AboutTab::About);
-    assert_eq!(app.active_menu, None);
-    assert!(app.active_menu_path.is_empty());
+    assert_eq!(app.menu.active(), None);
+    assert!(app.menu.path().is_empty());
 
     let _ = app.update(Message::AboutTabSelected(AboutTab::Licenses));
     assert_eq!(app.about_tab, AboutTab::Licenses);
@@ -663,7 +667,7 @@ fn about_requests_hardware_once_and_preserves_fade_lifecycle() {
         app.rendering = rendering;
         app.settings.hardware_acceleration = HardwareAccelerationMode::Lazy;
 
-        let task = app.update_inner(Message::AboutOpened);
+        let task = app.update(Message::AboutOpened);
         let requests_hardware =
             cfg!(feature = "hybrid-rendering") && rendering == RenderingState::Software;
         let expected = if requests_hardware {
@@ -679,22 +683,22 @@ fn about_requests_hardware_once_and_preserves_fade_lifecycle() {
         assert!(app.chrome_animation_info().about_interactive);
         assert_eq!(app.chrome_animation_info().about_progress, 0.0);
         assert_eq!(task.units() > 0, requests_hardware);
-        assert_eq!(app.update_inner(Message::AboutOpened).units(), 0);
+        assert_eq!(app.update(Message::AboutOpened).units(), 0);
 
         let first = std::time::Instant::now();
         let settled = first + std::time::Duration::from_millis(140);
-        let _ = app.update_inner(Message::ChromeAnimationFrame(first));
-        let _ = app.update_inner(Message::ChromeAnimationFrame(settled));
+        let _ = app.update(Message::ChromeAnimationFrame(first));
+        let _ = app.update(Message::ChromeAnimationFrame(settled));
         assert_eq!(app.chrome_animation_info().about_progress, 1.0);
         assert!(!app.needs_animation_frames());
 
-        let _ = app.update_inner(Message::AboutClosed);
+        let _ = app.update(Message::AboutClosed);
         assert!(!app.is_about_visible);
         assert!(!app.chrome_animation_info().about_interactive);
         assert!(app.chrome_animation_info().about_rendered_visible);
         assert!(app.needs_animation_frames());
-        let _ = app.update_inner(Message::ChromeAnimationFrame(settled));
-        let _ = app.update_inner(Message::ChromeAnimationFrame(
+        let _ = app.update(Message::ChromeAnimationFrame(settled));
+        let _ = app.update(Message::ChromeAnimationFrame(
             settled + std::time::Duration::from_millis(140),
         ));
         assert_eq!(app.chrome_animation_info().about_progress, 0.0);
@@ -714,7 +718,7 @@ fn about_respects_software_setting_and_environment_override() {
         let (mut app, _) = App::new();
         app.settings.hardware_acceleration = mode;
         app.file_status = Some(String::from("Saved notes.txt"));
-        let task = app.update_inner(Message::AboutOpened);
+        let task = app.update(Message::AboutOpened);
         assert!(app.is_about_visible);
         assert_eq!(
             app.rendering,
@@ -730,35 +734,35 @@ fn about_tabs_keep_fade_progress_and_reopening_reverses_exit_without_a_jump() {
     let (mut app, _) = App::new();
     let first = std::time::Instant::now();
     let middle = first + std::time::Duration::from_millis(70);
-    let _ = app.update_inner(Message::AboutOpened);
-    let _ = app.update_inner(Message::ChromeAnimationFrame(first));
-    let _ = app.update_inner(Message::ChromeAnimationFrame(middle));
+    let _ = app.update(Message::AboutOpened);
+    let _ = app.update(Message::ChromeAnimationFrame(first));
+    let _ = app.update(Message::ChromeAnimationFrame(middle));
     let opening = app.chrome_animation_info().about_progress;
     assert!(opening > 0.0 && opening < 1.0);
 
-    let _ = app.update_inner(Message::AboutTabSelected(AboutTab::Licenses));
+    let _ = app.update(Message::AboutTabSelected(AboutTab::Licenses));
     assert_eq!(app.chrome_animation_info().about_progress, opening);
-    let _ = app.update_inner(Message::ChromeAnimationFrame(
+    let _ = app.update(Message::ChromeAnimationFrame(
         first + std::time::Duration::from_millis(140),
     ));
     assert_eq!(app.chrome_animation_info().about_progress, 1.0);
     assert!(!app.needs_animation_frames());
 
-    let _ = app.update_inner(Message::AboutClosed);
+    let _ = app.update(Message::AboutClosed);
     let close_start = first + std::time::Duration::from_millis(150);
     let reverse_at = close_start + std::time::Duration::from_millis(70);
-    let _ = app.update_inner(Message::ChromeAnimationFrame(close_start));
-    let _ = app.update_inner(Message::ChromeAnimationFrame(reverse_at));
+    let _ = app.update(Message::ChromeAnimationFrame(close_start));
+    let _ = app.update(Message::ChromeAnimationFrame(reverse_at));
     let closing = app.chrome_animation_info().about_progress;
     assert!(closing > 0.0 && closing < 1.0);
     assert!(!app.chrome_animation_info().about_interactive);
 
-    let _ = app.update_inner(Message::AboutOpened);
+    let _ = app.update(Message::AboutOpened);
     assert_eq!(app.chrome_animation_info().about_progress, closing);
     assert_eq!(app.about_tab, AboutTab::Licenses);
     assert!(app.chrome_animation_info().about_interactive);
-    let _ = app.update_inner(Message::ChromeAnimationFrame(reverse_at));
-    let _ = app.update_inner(Message::ChromeAnimationFrame(
+    let _ = app.update(Message::ChromeAnimationFrame(reverse_at));
+    let _ = app.update(Message::ChromeAnimationFrame(
         reverse_at + std::time::Duration::from_millis(140),
     ));
     assert_eq!(app.chrome_animation_info().about_progress, 1.0);
@@ -768,8 +772,8 @@ fn about_tabs_keep_fade_progress_and_reopening_reverses_exit_without_a_jump() {
 #[test]
 fn about_closed_before_first_frame_does_not_leave_an_invisible_modal() {
     let (mut app, _) = App::new();
-    let _ = app.update_inner(Message::AboutOpened);
-    let _ = app.update_inner(Message::AboutClosed);
+    let _ = app.update(Message::AboutOpened);
+    let _ = app.update(Message::AboutClosed);
     assert!(!app.is_about_visible);
     assert!(!app.chrome_animation_info().about_rendered_visible);
     assert_eq!(app.chrome_animation_info().about_progress, 0.0);
@@ -971,7 +975,7 @@ fn chrome_function_list_reveal_tracks_panel_visibility() {
     let _ = app.update(Message::ToggleFunctionList);
 
     let opening = app.chrome_animation_info();
-    assert_eq!(app.active_menu, None);
+    assert_eq!(app.menu.active(), None);
     assert!(app.is_function_list_visible);
     assert!(opening.function_list_rendered_visible);
     assert_eq!(opening.function_list_progress, 0.0);
@@ -1008,7 +1012,7 @@ fn chrome_function_list_reveal_tracks_panel_visibility() {
 fn language_selection_updates_active_document_without_dirtying_it() {
     let (mut app, _) = App::new();
 
-    app.active_menu = Some(Menu::Language);
+    let _ = app.update(Message::MenuToggled(Menu::Language));
     let _ = app.update(Message::LanguageSelected("rs".to_owned()));
 
     let document = app
@@ -1018,7 +1022,7 @@ fn language_selection_updates_active_document_without_dirtying_it() {
 
     assert_eq!(document.syntax_token, "rs");
     assert!(!document.is_dirty);
-    assert_eq!(app.active_menu, None);
+    assert_eq!(app.menu.active(), None);
 }
 
 #[test]
@@ -1031,13 +1035,13 @@ fn menu_path_tracks_generic_flyout_state_and_resets_on_menu_change() {
         segments: vec!["character-sets".to_owned()],
     }));
 
-    assert_eq!(app.active_menu, Some(Menu::Encoding));
-    assert_eq!(app.active_menu_path, vec!["character-sets"]);
+    assert_eq!(app.menu.active(), Some(Menu::Encoding));
+    assert_eq!(app.menu.path(), vec!["character-sets"]);
 
     let _ = app.update(Message::MenuHovered(Menu::File));
 
-    assert_eq!(app.active_menu, Some(Menu::File));
-    assert!(app.active_menu_path.is_empty());
+    assert_eq!(app.menu.active(), Some(Menu::File));
+    assert!(app.menu.path().is_empty());
 }
 
 #[test]
@@ -1050,17 +1054,14 @@ fn menu_path_can_collapse_to_parent_and_ignores_closed_menu_hover() {
         segments: vec!["character-sets".to_owned(), "western-european".to_owned()],
     }));
 
-    assert_eq!(
-        app.active_menu_path,
-        vec!["character-sets", "western-european"]
-    );
+    assert_eq!(app.menu.path(), vec!["character-sets", "western-european"]);
 
     let _ = app.update(Message::MenuPathHovered(crate::message::MenuPath {
         depth: 1,
         segments: vec!["character-sets".to_owned()],
     }));
 
-    assert_eq!(app.active_menu_path, vec!["character-sets"]);
+    assert_eq!(app.menu.path(), vec!["character-sets"]);
 
     let _ = app.update(Message::MenuClosed);
     let _ = app.update(Message::MenuPathHovered(crate::message::MenuPath {
@@ -1068,8 +1069,8 @@ fn menu_path_can_collapse_to_parent_and_ignores_closed_menu_hover() {
         segments: vec!["character-sets".to_owned()],
     }));
 
-    assert_eq!(app.active_menu, None);
-    assert!(app.active_menu_path.is_empty());
+    assert_eq!(app.menu.active(), None);
+    assert!(app.menu.path().is_empty());
 }
 
 #[test]
@@ -1102,7 +1103,7 @@ fn opening_rust_file_defers_syntax_parsing_to_worker() {
 #[test]
 fn undo_and_redo_commands_update_active_document() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
 
     let _ = app.update(Message::EditorAction(
         document_id,

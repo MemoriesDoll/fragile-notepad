@@ -346,7 +346,7 @@ fn wrapped_local_edits_reflow_the_whole_multi_caret_span() {
 #[test]
 fn wrapped_settings_and_pointer_affinity_reach_the_active_document() {
     let (mut app, _) = super::App::new();
-    let id = app.workspace.active_document_id;
+    let id = app.workspace.active_document_id();
     let active = app.workspace.active_document_mut().unwrap();
     active.buffer = crate::editor::EditorBuffer::from_text("abcdefghijkl");
     active.refresh_after_text_change();
@@ -522,7 +522,7 @@ fn cut_and_delete_line_actions_remove_all_caret_lines_through_unterminated_eof()
         EditorAction::DeleteLine,
     ] {
         let (mut app, _) = super::App::new();
-        let document_id = app.workspace.active_document_id;
+        let document_id = app.workspace.active_document_id();
         let document = app
             .workspace
             .active_document_mut()

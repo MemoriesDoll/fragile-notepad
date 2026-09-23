@@ -2,6 +2,10 @@
 
 use std::collections::HashMap;
 
+use super::App;
+use crate::editor::EditorSelection;
+use crate::message::Message;
+
 use iced::Task;
 
 use crate::core::{Document, DocumentId};
@@ -106,11 +110,70 @@ impl OutlineParsing {
             handle.abort();
         }
     }
+}
 
-    pub(super) fn clear(&mut self) {
-        for (_, handle) in self.handles.drain() {
-            handle.abort();
+impl App {
+    pub(super) fn active_outline_state(&self) -> Option<&OutlineState> {
+        self.workspace
+            .active_document()
+            .and_then(|document| self.outline_parsing.state_for(document))
+    }
+
+    pub(super) fn complete_outline_parse(&mut self, result: OutlineParseResult) -> Task<Message> {
+        self.outline_parsing
+            .complete(self.workspace.document(result.document_id), result);
+        Task::none()
+    }
+
+    pub(super) fn toggle_function_list(&mut self) -> Task<Message> {
+        self.menu.close();
+
+        self.is_function_list_visible = !self.is_function_list_visible;
+        self.chrome_animation
+            .function_list
+            .set_visible(self.is_function_list_visible);
+
+        Task::none()
+    }
+
+    pub(super) fn select_function_list_entry(
+        &mut self,
+        position: crate::editor::EditorPosition,
+    ) -> Task<Message> {
+        self.menu.close();
+
+        let Some(document) = self.workspace.active_document_mut() else {
+            return Task::none();
+        };
+
+        let position = document.buffer.clamp_position(position);
+        document.set_main_selection(EditorSelection::new(position, position));
+        document.preferred_vertical_column = None;
+        document.reveal_position(position);
+
+        Task::none()
+    }
+}
+
+impl OutlineParsing {
+    pub(super) fn observe(
+        &mut self,
+        event: super::events::Event,
+        active: DocumentId,
+        work: &mut super::events::PendingWork,
+    ) {
+        use super::events::{Event, Work, WorkspaceEvent as W};
+        if let Event::Workspace(W::DocumentClosed(id)) = event {
+            self.remove(id);
         }
-        self.states.clear();
+        let needed = match event {
+            Event::Started | Event::SettingsChanged => true,
+            Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,
+            Event::Workspace(W::ContentChanged(id) | W::LoadStateChanged(id)) => id == active,
+            _ => false,
+        };
+        if needed {
+            work.request(Work::Outline);
+        }
     }
 }

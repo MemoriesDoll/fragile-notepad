@@ -1,3 +1,4 @@
+use crate::message::GoToLineMessage;
 use iced::{Task, widget::operation};
 
 use super::{App, animation::RevealAnimation};
@@ -27,9 +28,9 @@ impl App {
         Task::none()
     }
 
-    pub(super) fn update_go_to_line(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update_go_to_line(&mut self, message: GoToLineMessage) -> Task<Message> {
         match message {
-            Message::GoToLineOpened => {
+            GoToLineMessage::GoToLineOpened => {
                 if self.go_to_line_prompt.is_some()
                     || self.close_prompt.document().is_some()
                     || self.is_about_visible
@@ -49,15 +50,15 @@ impl App {
                     error: None,
                     animation,
                 });
-                self.active_menu = None;
-                self.active_menu_path.clear();
+                self.menu.close();
+
                 self.main_window_id
                     .map(iced::window::gain_focus)
                     .unwrap_or_else(Task::none)
                     .chain(operation::focus(INPUT_ID))
                     .chain(operation::select_all(INPUT_ID))
             }
-            Message::GoToLineChanged(input) => {
+            GoToLineMessage::GoToLineChanged(input) => {
                 if let Some(prompt) = &mut self.go_to_line_prompt
                     && prompt.animation.target_visible()
                 {
@@ -66,7 +67,7 @@ impl App {
                 }
                 Task::none()
             }
-            Message::GoToLineSubmitted => {
+            GoToLineMessage::GoToLineSubmitted => {
                 let Some(prompt) = &mut self.go_to_line_prompt else {
                     return Task::none();
                 };
@@ -78,10 +79,10 @@ impl App {
                     return operation::focus(INPUT_ID);
                 };
                 let Some(document) = self.workspace.active_document_mut() else {
-                    return self.update_go_to_line(Message::GoToLineClosed);
+                    return self.update_go_to_line(GoToLineMessage::GoToLineClosed);
                 };
                 if document.id != prompt.document_id {
-                    return self.update_go_to_line(Message::GoToLineClosed);
+                    return self.update_go_to_line(GoToLineMessage::GoToLineClosed);
                 }
                 if !document.has_complete_text_index() {
                     prompt.error = Some("Wait for the document to finish loading.".into());
@@ -94,9 +95,9 @@ impl App {
                     .clamp_position(EditorPosition::new(target_line, 0));
                 document.set_main_selection(EditorSelection::new(position, position));
                 document.reveal_position(position);
-                self.update_go_to_line(Message::GoToLineClosed)
+                self.update_go_to_line(GoToLineMessage::GoToLineClosed)
             }
-            Message::GoToLineClosed => {
+            GoToLineMessage::GoToLineClosed => {
                 let Some(prompt) = &mut self.go_to_line_prompt else {
                     return Task::none();
                 };
@@ -110,7 +111,6 @@ impl App {
                 self.go_to_line_prompt = None;
                 operation::focus(crate::ui::editor::EDITOR_ID)
             }
-            _ => unreachable!("go-to-line handler received unrelated message"),
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::message::HistoryMessage;
 use iced::{Task, clipboard};
 
 use super::App;
@@ -25,7 +26,7 @@ impl App {
         action: EditorAction,
     ) -> Task<Message> {
         if action == EditorAction::Focus {
-            return if document_id == self.workspace.active_document_id {
+            return if document_id == self.workspace.active_document_id() {
                 iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
             } else {
                 Task::none()
@@ -48,20 +49,12 @@ impl App {
         .flatten();
         let reveal_caret = action.mutates_document()
             || matches!(action, EditorAction::MoveCaret(_) | EditorAction::Select(_));
-        let changed = self.apply_editor_action(document_id, action, entries.as_deref());
+        self.apply_editor_action(document_id, action, entries.as_deref());
         if reveal_caret && let Some(document) = self.workspace.document_mut(document_id) {
             document.ensure_caret_visible();
         }
 
-        if changed && document_id == self.workspace.active_document_id {
-            self.refresh_find_matches();
-        }
-
-        if changed {
-            Task::batch([clipboard_task, self.schedule_outline_parse(document_id)])
-        } else {
-            clipboard_task
-        }
+        clipboard_task
     }
 
     pub(super) fn update_clipboard_read(
@@ -87,39 +80,19 @@ impl App {
             document.ensure_caret_visible();
         }
 
-        if changed && document_id == self.workspace.active_document_id {
-            self.refresh_find_matches();
-        }
-
-        if changed {
-            self.schedule_outline_parse(document_id)
-        } else {
-            Task::none()
-        }
+        Task::none()
     }
 
     pub(super) fn update_language(&mut self, syntax_token: String) -> Task<Message> {
-        self.active_menu = None;
-
-        let document_id = self.workspace.active_document_id;
-        let changed = if let Some(document) = self.workspace.active_document_mut() {
-            let before = document.revision();
+        self.menu.close();
+        if let Some(document) = self.workspace.active_document_mut() {
             document.set_syntax_token(syntax_token);
-            document.revision() != before
-        } else {
-            false
-        };
-
-        if changed {
-            self.schedule_outline_parse(document_id)
-        } else {
-            Task::none()
         }
+        Task::none()
     }
 
-    pub(super) fn update_editor_command(&mut self, message: Message) -> Task<Message> {
-        self.active_menu = None;
-        self.active_menu_path.clear();
+    pub(super) fn update_editor_command(&mut self, message: HistoryMessage) -> Task<Message> {
+        self.menu.close();
 
         if self
             .workspace
@@ -131,27 +104,20 @@ impl App {
         }
 
         let changed = match message {
-            Message::Undo => self
+            HistoryMessage::Undo => self
                 .workspace
                 .active_document_mut()
                 .is_some_and(|document| document.undo()),
-            Message::Redo => self
+            HistoryMessage::Redo => self
                 .workspace
                 .active_document_mut()
                 .is_some_and(|document| document.redo()),
-            _ => unreachable!("editor command handler received non-editor message"),
         };
 
         if changed {
             if let Some(document) = self.workspace.active_document_mut() {
                 document.ensure_caret_visible();
             }
-            self.refresh_find_matches();
-            let document_id = self.workspace.active_document_id;
-            return Task::batch([
-                self.schedule_outline_parse(document_id),
-                iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
-            ]);
         }
 
         iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
@@ -163,7 +129,7 @@ impl App {
         end: EditorPosition,
         replacement: String,
     ) -> bool {
-        let document_id = self.workspace.active_document_id;
+        let document_id = self.workspace.active_document_id();
         let Some(document) = self.workspace.active_document_mut() else {
             return false;
         };
@@ -180,11 +146,7 @@ impl App {
             self.settings.indentation.width() as usize,
         );
 
-        if changed {
-            self.refresh_find_matches();
-        }
-
-        document_id == self.workspace.active_document_id && changed
+        document_id == self.workspace.active_document_id() && changed
     }
 
     fn cached_outline_entries(&self, document_id: DocumentId) -> Option<&[FunctionEntry]> {
@@ -507,3 +469,18 @@ impl App {
 #[cfg(test)]
 #[path = "editor_tests.rs"]
 mod tests;
+
+impl App {
+    pub(super) fn update_active_fold_command(&mut self, action: EditorAction) -> Task<Message> {
+        self.update_active_editor_command(action)
+    }
+
+    pub(super) fn update_active_editor_command(&mut self, action: EditorAction) -> Task<Message> {
+        self.menu.close();
+
+        Task::batch([
+            self.update_editor(self.workspace.active_document_id(), action),
+            iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
+        ])
+    }
+}

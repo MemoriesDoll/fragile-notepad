@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 impl App {
     pub(super) fn save_active(&mut self, force_save_as: bool) -> Task<Message> {
-        self.pending_save_all.clear();
-        self.save_one(self.workspace.active_document_id, force_save_as)
+        self.files.pending_save_all.clear();
+        self.save_one(self.workspace.active_document_id(), force_save_as)
     }
 
     pub(super) fn save_copy_active(&mut self) -> Task<Message> {
-        let id = self.workspace.active_document_id;
+        let id = self.workspace.active_document_id();
         if self
             .workspace
             .document(id)
@@ -30,7 +30,7 @@ impl App {
                 return load;
             }
         }
-        if self.pending_save.is_some() {
+        if self.files.pending_save.is_some() {
             return Task::none();
         }
 
@@ -61,7 +61,7 @@ impl App {
             revision: document.revision(),
             snapshot: Arc::new(snapshot),
         };
-        self.pending_save = Some(request.clone());
+        self.files.pending_save = Some(request.clone());
         let contents = request.snapshot.as_ref().clone();
 
         window::oldest()
@@ -77,11 +77,11 @@ impl App {
     }
 
     pub(super) fn save_all_documents(&mut self) -> Task<Message> {
-        if self.pending_save.is_some() {
+        if self.files.pending_save.is_some() {
             return Task::none();
         }
 
-        self.pending_save_all = self
+        self.files.pending_save_all = self
             .workspace
             .documents()
             .iter()
@@ -93,7 +93,7 @@ impl App {
     }
 
     pub(super) fn continue_save_all(&mut self) -> Task<Message> {
-        while let Some(document_id) = self.pending_save_all.front().copied() {
+        while let Some(document_id) = self.files.pending_save_all.front().copied() {
             if self
                 .workspace
                 .document(document_id)
@@ -102,7 +102,7 @@ impl App {
                 return self.save_one(document_id, false);
             }
 
-            self.pending_save_all.pop_front();
+            self.files.pending_save_all.pop_front();
         }
 
         Task::none()
@@ -127,7 +127,7 @@ impl App {
                 return load;
             }
         }
-        if self.pending_save.is_some() {
+        if self.files.pending_save.is_some() {
             return Task::none();
         }
 
@@ -156,7 +156,7 @@ impl App {
             snapshot: Arc::new(snapshot),
         };
         document.history.break_group();
-        self.pending_save = Some(request.clone());
+        self.files.pending_save = Some(request.clone());
 
         if !force_save_as {
             if let Some(path) = document.path.clone() {
@@ -185,7 +185,7 @@ impl App {
         request: SaveRequest,
         result: FileSaveResult,
     ) -> Task<Message> {
-        self.pending_save = None;
+        self.files.pending_save = None;
         let save_succeeded = result.is_ok();
         let mut tasks = Vec::new();
 
@@ -193,11 +193,8 @@ impl App {
             Ok(path) => {
                 self.file_status = None;
                 let saved_path = path.clone();
-                let mut syntax_changed = false;
                 if let Some(document) = self.workspace.document_mut(request.document_id) {
-                    let before_revision = document.revision();
                     document.set_path(path);
-                    syntax_changed = document.revision() != before_revision;
                     let saved_snapshot_is_current = document
                         .bytes_for_save()
                         .is_ok_and(|bytes| bytes == request.snapshot.as_ref().as_slice());
@@ -208,9 +205,6 @@ impl App {
                         document.invalidate_clean_checkpoint();
                     }
                 }
-                if syntax_changed {
-                    tasks.push(self.schedule_outline_parse(request.document_id));
-                }
                 tasks.push(self.record_open_history(saved_path));
             }
             Err(error) => {
@@ -218,18 +212,18 @@ impl App {
             }
         }
 
-        if self.pending_save_all.front() == Some(&request.document_id) {
+        if self.files.pending_save_all.front() == Some(&request.document_id) {
             if save_succeeded {
-                self.pending_save_all.pop_front();
+                self.files.pending_save_all.pop_front();
                 tasks.push(self.continue_save_all());
                 return Task::batch(tasks);
             }
 
-            self.pending_save_all.clear();
+            self.files.pending_save_all.clear();
         }
 
-        if self.pending_close_after_save == Some(request.document_id) {
-            self.pending_close_after_save = None;
+        if self.files.pending_close_after_save == Some(request.document_id) {
+            self.files.pending_close_after_save = None;
 
             if save_succeeded
                 && self
@@ -239,18 +233,18 @@ impl App {
             {
                 tasks.push(self.close_now(request.document_id));
 
-                if !self.pending_close_documents.is_empty() {
+                if !self.files.pending_close_documents.is_empty() {
                     tasks.push(self.continue_close());
                     return Task::batch(tasks);
                 }
 
                 if self.should_exit() {
-                    self.close_goal = CloseGoal::KeepOpen;
+                    self.files.close_goal = CloseGoal::KeepOpen;
                     tasks.push(self.exit_after_settings());
                 }
             } else {
                 self.clear_close();
-                self.close_goal = CloseGoal::KeepOpen;
+                self.files.close_goal = CloseGoal::KeepOpen;
             }
         }
 
@@ -262,7 +256,7 @@ impl App {
         _request: SaveRequest,
         result: FileSaveResult,
     ) -> Task<Message> {
-        self.pending_save = None;
+        self.files.pending_save = None;
 
         match result {
             Ok(path) => {
@@ -277,17 +271,17 @@ impl App {
     }
 
     pub(super) fn save_failed(&mut self, document_id: DocumentId, error: FileError) {
-        self.pending_save = None;
+        self.files.pending_save = None;
         self.file_status = Some(format!("Save failed: {}", error.summary()));
 
-        if self.pending_save_all.front() == Some(&document_id) {
-            self.pending_save_all.clear();
+        if self.files.pending_save_all.front() == Some(&document_id) {
+            self.files.pending_save_all.clear();
         }
 
-        if self.pending_close_after_save == Some(document_id) {
-            self.pending_close_after_save = None;
+        if self.files.pending_close_after_save == Some(document_id) {
+            self.files.pending_close_after_save = None;
             self.clear_close();
-            self.close_goal = CloseGoal::KeepOpen;
+            self.files.close_goal = CloseGoal::KeepOpen;
         }
     }
 }

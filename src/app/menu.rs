@@ -1,38 +1,46 @@
-use iced::Task;
+//! Menu interaction owns its active menu and submenu path together.
 
-use super::App;
-use crate::message::Message;
+use crate::message::{Menu, MenuMessage};
 
-impl App {
-    pub(super) fn update_menu(&mut self, message: Message) -> Task<Message> {
+#[derive(Debug, Default)]
+pub(super) struct MenuState {
+    active: Option<Menu>,
+    path: Vec<String>,
+}
+
+impl MenuState {
+    pub(super) fn active(&self) -> Option<Menu> {
+        self.active
+    }
+    pub(super) fn path(&self) -> &[String] {
+        &self.path
+    }
+    pub(super) fn close(&mut self) {
+        self.active = None;
+        self.path.clear();
+    }
+    pub(super) fn update(&mut self, message: MenuMessage) {
         match message {
-            Message::MenuToggled(menu) => {
-                if self.active_menu == Some(menu) {
-                    self.active_menu = None;
-                    self.active_menu_path.clear();
+            MenuMessage::MenuToggled(menu) => {
+                self.active = if self.active == Some(menu) {
+                    None
                 } else {
-                    self.active_menu = Some(menu);
-                    self.active_menu_path.clear();
+                    Some(menu)
+                };
+                self.path.clear();
+            }
+            MenuMessage::MenuHovered(menu) => {
+                if self.active.is_some() {
+                    self.active = Some(menu);
+                    self.path.clear();
                 }
             }
-            Message::MenuHovered(menu) => {
-                if self.active_menu.is_some() {
-                    self.active_menu = Some(menu);
-                    self.active_menu_path.clear();
+            MenuMessage::MenuPathHovered(path) => {
+                if self.active.is_some() {
+                    self.path = path.segments;
                 }
             }
-            Message::MenuPathHovered(path) => {
-                if self.active_menu.is_some() {
-                    self.active_menu_path = path.segments;
-                }
-            }
-            Message::MenuClosed => {
-                self.active_menu = None;
-                self.active_menu_path.clear();
-            }
-            _ => unreachable!("menu handler received non-menu message"),
+            MenuMessage::MenuClosed => self.close(),
         }
-
-        Task::none()
     }
 }

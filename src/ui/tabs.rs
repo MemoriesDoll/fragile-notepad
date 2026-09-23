@@ -55,7 +55,7 @@ pub fn view(
             .fold(row![].spacing(0).align_y(Center), |tabs, document| {
                 tabs.push(tab(
                     document,
-                    document.id == workspace.active_document_id,
+                    document.id == workspace.active_document_id(),
                     drag_visual(workspace, document, dragged_tab, hovered_drop_tab),
                 ))
             })

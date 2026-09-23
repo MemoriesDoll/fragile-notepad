@@ -11,7 +11,7 @@ mod test_support {
     pub(super) use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
     pub(super) fn pending_save_all_ids(app: &App) -> Vec<crate::core::DocumentId> {
-        app.pending_save_all.iter().copied().collect()
+        app.files.pending_save_all().iter().copied().collect()
     }
 
     pub(super) fn set_active_document_text(app: &mut App, text: &str, selection: EditorSelection) {
@@ -39,3 +39,9 @@ mod search;
 
 #[path = "app_tests/go_to_line.rs"]
 mod go_to_line;
+
+#[path = "app_tests/recovery.rs"]
+mod recovery;
+
+#[path = "app_tests/events.rs"]
+mod events;

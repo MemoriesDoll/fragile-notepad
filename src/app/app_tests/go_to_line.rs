@@ -101,7 +101,7 @@ fn go_to_line_shortcut_preserves_search_state_and_blocks_editor_shortcuts_until_
     );
     assert_eq!(app.go_to_line_prompt.as_ref().unwrap().input, "2");
     assert!(app.advanced_search_window.is_none());
-    let count = app.workspace.documents.len();
+    let count = app.workspace.documents().len();
     let _ = app.update_runtime_event(
         key_event(Key::Character("n".into()), primary),
         iced::event::Status::Ignored,
@@ -112,7 +112,7 @@ fn go_to_line_shortcut_preserves_search_state_and_blocks_editor_shortcuts_until_
         iced::event::Status::Ignored,
         main,
     );
-    assert_eq!(app.workspace.documents.len(), count);
+    assert_eq!(app.workspace.documents().len(), count);
     assert_eq!(
         app.workspace.active_document().unwrap().text(),
         "one\ntwo\nthree"
@@ -184,9 +184,9 @@ fn go_to_line_animation_keeps_the_barrier_until_dismissal_finishes() {
                 0.0
             );
             let start = Instant::now();
-            let _ = app.update_inner(Message::ChromeAnimationFrame(start));
+            let _ = app.update(Message::ChromeAnimationFrame(start));
             let close_start = start + Duration::from_millis(visible_for);
-            let _ = app.update_inner(Message::ChromeAnimationFrame(close_start));
+            let _ = app.update(Message::ChromeAnimationFrame(close_start));
             let visible_progress = app.go_to_line_prompt.as_ref().unwrap().animation.progress();
             assert!(visible_progress > 0.0);
             let _ = app.update(Message::GoToLineChanged("3".into()));
@@ -196,7 +196,7 @@ fn go_to_line_animation_keeps_the_barrier_until_dismissal_finishes() {
                 Message::GoToLineClosed
             };
             assert_eq!(
-                app.update_inner(dismissal).units(),
+                app.update(dismissal).units(),
                 0,
                 "focus stays in the prompt during closing"
             );
@@ -207,8 +207,8 @@ fn go_to_line_animation_keeps_the_barrier_until_dismissal_finishes() {
                     .animation
                     .target_visible()
             );
-            let _ = app.update_inner(Message::ChromeAnimationFrame(close_start));
-            let _ = app.update_inner(Message::ChromeAnimationFrame(
+            let _ = app.update(Message::ChromeAnimationFrame(close_start));
+            let _ = app.update(Message::ChromeAnimationFrame(
                 close_start + Duration::from_millis(70),
             ));
             let progress = app.go_to_line_prompt.as_ref().unwrap().animation.progress();
@@ -227,14 +227,14 @@ fn go_to_line_animation_keeps_the_barrier_until_dismissal_finishes() {
                     .line,
                 if submit { 2 } else { 0 }
             );
-            let _ = app.update_inner(Message::ChromeAnimationFrame(
+            let _ = app.update(Message::ChromeAnimationFrame(
                 close_start + Duration::from_micros(139_900),
             ));
             assert!(
                 app.needs_animation_frames(),
                 "rounded zero must still schedule final removal"
             );
-            let focus = app.update_inner(Message::ChromeAnimationFrame(
+            let focus = app.update(Message::ChromeAnimationFrame(
                 close_start + Duration::from_millis(140),
             ));
             assert!(focus.units() > 0, "restore editor focus after the fade");

@@ -1,0 +1,167 @@
+//! Application admission, startup window readiness, and coordinated shutdown.
+
+use super::App;
+use crate::message::{Message, ShutdownDelivery};
+use iced::{Task, window};
+use std::collections::VecDeque;
+use std::time::Duration;
+
+#[derive(Debug, Default)]
+pub(super) struct Lifecycle {
+    exiting: bool,
+    deferred: VecDeque<Message>,
+    pub(super) main_window_opened: bool,
+    pub(super) pending_startup_gpu_boost: bool,
+}
+
+impl Lifecycle {
+    pub(super) fn is_exiting(&self) -> bool {
+        self.exiting
+    }
+
+    pub(super) fn begin_shutdown(&mut self) {
+        self.exiting = true;
+    }
+
+    pub(super) fn resume(&mut self) -> VecDeque<Message> {
+        self.exiting = false;
+        std::mem::take(&mut self.deferred)
+    }
+
+    pub(super) fn admit(&mut self, message: Message) -> Option<Message> {
+        if !self.exiting {
+            return Some(message);
+        }
+        match message.shutdown_delivery() {
+            ShutdownDelivery::Defer => self.deferred.push_back(message),
+            ShutdownDelivery::Reject => {
+                if let Message::ForwardedFiles(_, _, receipt) = message {
+                    receipt.resolve(false);
+                }
+            }
+            ShutdownDelivery::Resolve => return Some(message),
+        }
+        None
+    }
+}
+
+impl App {
+    pub(super) fn startup_ready(&mut self) -> Task<Message> {
+        self.session.mark_startup_ready();
+        self.restore_startup()
+    }
+
+    pub(super) fn forward_files(
+        &mut self,
+        paths: Vec<std::path::PathBuf>,
+        request: crate::ipc::ActivationRequest,
+        receipt: crate::ipc::AdmissionReceipt,
+    ) -> Task<Message> {
+        if !receipt.try_accept() {
+            return Task::none();
+        }
+        Task::batch([self.open_paths(paths), self.show_main_window(request)])
+    }
+
+    pub(super) fn persist_before_exit(&mut self) -> Task<Message> {
+        if !self.settings_persistence.is_loaded() || !self.session.is_initialized() {
+            self.file_status = Some("Finish starting before closing.".into());
+            return Task::none();
+        }
+        if self.session.read_failed() {
+            if self.workspace.documents().iter().any(|doc| doc.is_dirty) {
+                self.file_status = Some("Save or close unsaved tabs before exiting; the unreadable previous session will be preserved.".into());
+                return Task::none();
+            }
+            return self.exit_after_settings();
+        }
+        self.lifecycle.begin_shutdown();
+        let settings = (!self.settings_persistence.read_failed())
+            .then(|| crate::services::save_settings(self.settings.clone()));
+        let session = crate::services::session_store::save_session(self.snapshot_session());
+        let preserve_settings = self.settings_persistence.read_failed();
+        Task::perform(
+            async move {
+                if let Some(settings) = settings {
+                    settings
+                        .await
+                        .map_err(|e| format!("settings: {}", e.summary()))?;
+                }
+                session.await?;
+                if preserve_settings {
+                    Ok(())
+                } else {
+                    crate::services::flush_settings()
+                        .await
+                        .map_err(|e| e.summary().to_owned())
+                }
+            },
+            Message::ShutdownPersisted,
+        )
+    }
+
+    pub(super) fn shutdown_persisted(&mut self, result: Result<(), String>) -> Task<Message> {
+        match result {
+            Ok(()) => {
+                self.lifecycle.deferred.clear();
+                iced::exit()
+            }
+            Err(error) => {
+                // Preserve event order, including streamed chunks before their
+                // completion and timers before subsequent save acknowledgments.
+                let deferred = self.lifecycle.resume();
+                let tasks = deferred
+                    .into_iter()
+                    .map(|message| self.update(message))
+                    .collect::<Vec<_>>();
+                self.file_status = Some(format!("Could not save session: {error}"));
+                Task::batch(tasks)
+            }
+        }
+    }
+
+    pub(super) fn exit_after_settings(&mut self) -> Task<Message> {
+        if !self.settings_persistence.is_loaded() || self.settings_persistence.read_failed() {
+            return iced::exit();
+        }
+        self.lifecycle.begin_shutdown();
+        let save = crate::services::save_settings(self.settings.clone());
+        Task::perform(
+            async move { save.await.map_err(|error| error.summary().to_owned()) },
+            Message::ShutdownPersisted,
+        )
+    }
+}
+
+impl App {
+    pub(super) fn window_opened(&mut self, id: window::Id) -> Task<Message> {
+        if self.main_window_id == Some(id) {
+            self.lifecycle.main_window_opened = true;
+        }
+
+        let startup_task = if self.main_window_id == Some(id) && (self.session.has_startup_work()) {
+            Task::perform(
+                async {
+                    tokio::time::sleep(Duration::from_millis(16)).await;
+                },
+                |_| Message::StartupReady,
+            )
+        } else {
+            Task::none()
+        };
+        let probe_task =
+            if self.main_window_id == Some(id) && crate::startup::startup_probe_enabled() {
+                window::screenshot(id).map(|_| Message::StartupFrameReady)
+            } else {
+                Task::none()
+            };
+        let window_task = Task::batch([self.register_opened_window(id), startup_task, probe_task]);
+
+        if self.main_window_id == Some(id) && self.lifecycle.pending_startup_gpu_boost {
+            self.lifecycle.pending_startup_gpu_boost = false;
+            Task::batch([window_task, self.request_gpu_boost()])
+        } else {
+            window_task
+        }
+    }
+}

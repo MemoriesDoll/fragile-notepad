@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{DecodedText, TextEncoding};
+use crate::core::{DecodedText, EditorSettings, TextEncoding};
 use crate::editor::EditorAction;
 use crate::message::{DirtyCloseDecision, FileLoadChunk, FileLoadFinished};
 use std::sync::Arc;
@@ -15,7 +15,7 @@ fn ready(saved: Session) -> App {
 #[test]
 fn wrapped_session_restores_logical_top_after_provisional_geometry_and_analysis() {
     let mut original = ready(Session::default());
-    let original_id = original.workspace.active_document_id;
+    let original_id = original.workspace.active_document_id();
     let document = original.workspace.document_mut(original_id).unwrap();
     document.buffer = EditorBuffer::from_text("x".repeat(12_000));
     document.refresh_after_text_change();
@@ -35,7 +35,7 @@ fn wrapped_session_restores_logical_top_after_provisional_geometry_and_analysis(
     assert_eq!(saved.documents[0].first_visible_position, Some((0, 2400)));
 
     let mut restored = ready(saved);
-    let id = restored.workspace.active_document_id;
+    let id = restored.workspace.active_document_id();
     assert_eq!(
         restored.snapshot_session().documents[0].first_visible_position,
         Some((0, 2400)),
@@ -119,7 +119,7 @@ fn streamed_session_restores_immediately_when_geometry_was_already_measured() {
         }],
         ..Default::default()
     });
-    let id = restored.workspace.active_document_id;
+    let id = restored.workspace.active_document_id();
     let _ = restored.update(Message::EditorAction(
         id,
         EditorAction::ViewportChanged {
@@ -138,7 +138,7 @@ fn streamed_session_restores_immediately_when_geometry_was_already_measured() {
         Some(6000),
     ));
     assert!(document.complete_streaming_load(generation, TextEncoding::Utf8));
-    restored.apply_session_metadata(id);
+    let _ = restored.update(Message::None);
     assert_eq!(
         restored
             .workspace
@@ -180,7 +180,7 @@ fn wrapped_session_keeps_exact_header_position_until_saved_folds_are_restored() 
         }],
         ..Default::default()
     });
-    let id = restored.workspace.active_document_id;
+    let id = restored.workspace.active_document_id();
     let _ = restored.update(Message::EditorAction(
         id,
         EditorAction::ViewportChanged {
@@ -226,10 +226,10 @@ fn restores_one_active_file_and_keeps_99_tabs_deferred() {
         ..Default::default()
     };
     let mut app = ready(saved.clone());
-    assert_eq!(app.workspace.documents.len(), 100);
+    assert_eq!(app.workspace.documents().len(), 100);
     assert_eq!(
         app.workspace
-            .documents
+            .documents()
             .iter()
             .filter(|doc| doc.is_loading())
             .count(),
@@ -237,20 +237,20 @@ fn restores_one_active_file_and_keeps_99_tabs_deferred() {
     );
     assert_eq!(
         app.workspace
-            .documents
+            .documents()
             .iter()
             .filter(|doc| matches!(doc.load_state, DocumentLoadState::Deferred { .. }))
             .count(),
         99
     );
     assert_eq!(app.snapshot_session(), saved);
-    let id = app.workspace.documents[4].id;
+    let id = app.workspace.documents()[4].id;
     let _ = app.update(Message::TabSelected(id));
     assert!(app.workspace.document(id).unwrap().is_loading());
-    assert_eq!(app.load_handles.len(), 2);
+    assert_eq!(app.files.load_handles().len(), 2);
     let _ = app.update(Message::TabClosed(id));
-    assert!(!app.load_handles.contains_key(&id));
-    assert_eq!(app.load_handles.len(), 2); // the newly active deferred neighbor starts loading
+    assert!(!app.files.load_handles().contains_key(&id));
+    assert_eq!(app.files.load_handles().len(), 2); // the newly active deferred neighbor starts loading
     assert!(!app.session.pending.contains_key(&id));
 }
 
@@ -279,7 +279,7 @@ fn preserves_inactive_unsaved_tabs_and_recovers_exact_text_on_selection() {
         ..Default::default()
     });
     assert_eq!(app.snapshot_session().documents[1], unsaved);
-    let id = app.workspace.documents[1].id;
+    let id = app.workspace.documents()[1].id;
     let _ = app.update(Message::TabSelected(id));
     let document = app.workspace.document(id).unwrap();
     assert_eq!(document.text(), "one\r\n二\r\n");
@@ -338,7 +338,7 @@ fn settings_initialization_merges_early_history_and_preferences() {
         app.settings.open_history,
         vec![PathBuf::from("new.txt"), PathBuf::from("old.txt")]
     );
-    assert!(app.settings_flush_scheduled);
+    assert!(app.settings_persistence.flush_scheduled());
 }
 
 #[test]
@@ -347,7 +347,7 @@ fn early_external_paths_are_opened_after_initialization_without_session() {
     let _ = app.update(Message::OpenPaths(vec![
         "forwarded-before-settings.txt".into(),
     ]));
-    assert_eq!(app.workspace.documents.len(), 1);
+    assert_eq!(app.workspace.documents().len(), 1);
     assert!(app.workspace.active_document().unwrap().path.is_none());
     let _ = app.update(Message::SettingsLoaded(Ok(None)));
     assert!(
@@ -441,12 +441,12 @@ fn streaming_completion_defers_analysis_and_rejects_stale_result() {
 #[test]
 fn duplicate_paths_select_existing_document() {
     let (mut app, _) = App::new();
-    app.settings_loaded = true;
+    let _ = app.update(Message::SettingsLoaded(Ok(None)));
     let _ = app.update(Message::OpenPaths(vec![
         "same.txt".into(),
         "same.txt".into(),
     ]));
-    assert_eq!(app.workspace.documents.len(), 1);
+    assert_eq!(app.workspace.documents().len(), 1);
 }
 
 #[test]
@@ -458,7 +458,7 @@ fn recovery_snapshot_contains_current_unsaved_edits_and_clean_file_paths_only() 
         }],
         ..Default::default()
     });
-    let id = app.workspace.active_document_id;
+    let id = app.workspace.active_document_id();
     let _ = app.update(Message::EditorAction(id, EditorAction::SelectAll));
     let _ = app.update(Message::EditorAction(
         id,
@@ -511,8 +511,8 @@ fn actual_tab_click_activates_deferred_recovery_and_close_activates_neighbor() {
             .collect(),
         ..Default::default()
     });
-    let first = app.workspace.documents[0].id;
-    let last = app.workspace.documents[2].id;
+    let first = app.workspace.documents()[0].id;
+    let last = app.workspace.documents()[2].id;
     let _ = app.update(Message::TabDragStarted(last));
     assert_eq!(app.workspace.active_document().unwrap().text(), "tab 2");
     let _ = app.update(Message::TabClosed(first));
@@ -536,9 +536,9 @@ fn failed_shutdown_keeps_current_unsaved_document_open() {
         }],
         ..Default::default()
     });
-    app.session.exiting = true;
+    app.lifecycle.begin_shutdown();
     let _ = app.update(Message::ShutdownPersisted(Err("disk full".into())));
-    assert!(!app.session.exiting);
+    assert!(!app.lifecycle.is_exiting());
     assert!(app.workspace.active_document().unwrap().is_dirty);
     assert_eq!(
         app.workspace.active_document().unwrap().text(),
@@ -617,7 +617,7 @@ fn deferred_pin_changes_survive_activation_and_another_session() {
             ],
             ..Default::default()
         });
-        let id = app.workspace.documents[1].id;
+        let id = app.workspace.documents()[1].id;
         let _ = app.update(Message::TabPinToggled(id));
         assert_eq!(
             app.workspace.document(id).unwrap().is_pinned,
@@ -684,7 +684,7 @@ fn legacy_sessions_infer_automatic_syntax_when_extension_matches() {
 #[test]
 fn forwarded_files_are_rejected_while_shutdown_is_persisting() {
     let mut app = ready(Session::default());
-    app.session.exiting = true;
+    app.lifecycle.begin_shutdown();
     let receipt = crate::ipc::AdmissionReceipt::new();
     let _ = app.update(Message::ForwardedFiles(
         vec!["shutdown-forward.txt".into()],
@@ -692,7 +692,7 @@ fn forwarded_files_are_rejected_while_shutdown_is_persisting() {
         receipt.clone(),
     ));
     assert!(!receipt.wait_for_acceptance());
-    assert_eq!(app.workspace.documents.len(), 1);
+    assert_eq!(app.workspace.documents().len(), 1);
     assert!(app.workspace.active_document().unwrap().path.is_none());
 }
 
@@ -719,7 +719,7 @@ fn rejected_forwarding_cannot_open_late_and_accepted_paths_enter_session() {
         app.snapshot_session().documents[0].path.as_ref(),
         Some(&path)
     );
-    assert!(!app.session.exiting);
+    assert!(!app.lifecycle.is_exiting());
 }
 
 #[test]
@@ -733,7 +733,7 @@ fn replace_all_and_background_analysis_keep_scrolling_within_document() {
             }],
             ..Default::default()
         });
-        let id = app.workspace.active_document_id;
+        let id = app.workspace.active_document_id();
         let _ = app.update(Message::EditorAction(id, EditorAction::ScrollToRow(80)));
         if advanced {
             app.search_dialog.query = "(?s).+".into();

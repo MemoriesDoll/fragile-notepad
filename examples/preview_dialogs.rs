@@ -92,8 +92,8 @@ fn main() {
                     dialog.query = "release".into();
                     dialog.replacement = "launch".into();
                     let mut workspace = Workspace::new();
-                    workspace.documents.push(Document::from_path(DocumentId::new(20), "release-notes.md", "# September release\nPrepare the release notes.\nReview the release checklist.\n"));
-                    workspace.documents.push(Document::from_path(
+                    workspace.push_document(Document::from_path(DocumentId::new(20), "release-notes.md", "# September release\nPrepare the release notes.\nReview the release checklist.\n"));
+                    workspace.push_document(Document::from_path(
                         DocumentId::new(21),
                         "src/main.rs",
                         "fn prepare_release() {}\n// Publish the release after review.",
@@ -104,7 +104,7 @@ fn main() {
                     ) {
                         dialog.refresh_from_workspace(&workspace);
                     } else {
-                        dialog.refresh_from_documents([&workspace.documents[1]]);
+                        dialog.refresh_from_documents([&workspace.documents()[1]]);
                     }
                 }
                 render(

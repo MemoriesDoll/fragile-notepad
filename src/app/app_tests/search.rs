@@ -34,8 +34,8 @@ fn deferred_search_document(
     let mut document = crate::core::Document::loading(id, path, generation);
     document.load_state = crate::core::DocumentLoadState::Deferred { generation };
     document.defer_analysis = true;
-    app.workspace.documents.push(document);
-    app.session.pending.insert(
+    app.workspace.push_document(document);
+    app.session.defer_document(
         id,
         crate::core::session::SessionDocument {
             path: Some(path.into()),
@@ -61,14 +61,13 @@ fn finish_search_document(
             had_errors: false,
         },
     );
-    app.apply_session_metadata(id);
-    let _ = app.resume_pending_search();
+    let _ = app.update(Message::None);
 }
 
 #[test]
 fn find_all_hydrates_deferred_disk_and_recovered_tabs_without_switching_tabs() {
     let (mut app, _) = App::new();
-    let active = app.workspace.active_document_id;
+    let active = app.workspace.active_document_id();
     set_active_document_text(
         &mut app,
         "needle",
@@ -79,7 +78,7 @@ fn find_all_hydrates_deferred_disk_and_recovered_tabs_without_switching_tabs() {
         deferred_search_document(&mut app, "recovered.txt", Some("needle recovered"));
     let order = app
         .workspace
-        .documents
+        .documents()
         .iter()
         .map(|document| document.id)
         .collect::<Vec<_>>();
@@ -96,7 +95,7 @@ fn find_all_hydrates_deferred_disk_and_recovered_tabs_without_switching_tabs() {
     finish_search_document(&mut app, disk, generation, "needle disk");
     assert!(app.pending_search.is_none());
     assert_eq!(app.search_dialog.results.len(), 3);
-    assert_eq!(app.workspace.active_document_id, active);
+    assert_eq!(app.workspace.active_document_id(), active);
     assert_eq!(
         app.workspace
             .active_document()
@@ -108,7 +107,7 @@ fn find_all_hydrates_deferred_disk_and_recovered_tabs_without_switching_tabs() {
     );
     assert_eq!(
         app.workspace
-            .documents
+            .documents()
             .iter()
             .map(|document| document.id)
             .collect::<Vec<_>>(),
@@ -124,7 +123,7 @@ fn deferred_replace_all_uses_captured_options_scope_and_replacement() {
         "old OLD",
         EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
     );
-    let original_active = app.workspace.active_document_id;
+    let original_active = app.workspace.active_document_id();
     let (disk, generation) = deferred_search_document(&mut app, "disk.txt", None);
     app.search_dialog.query = "old".into();
     app.search_dialog.replacement = "new".into();
@@ -158,7 +157,7 @@ fn deferred_replace_all_aborts_before_mutation_on_failed_or_closed_target() {
             "old",
             EditorSelection::new(EditorPosition::new(0, 0), EditorPosition::new(0, 0)),
         );
-        let active = app.workspace.active_document_id;
+        let active = app.workspace.active_document_id();
         let (disk, generation) = deferred_search_document(&mut app, "missing.txt", None);
         app.search_dialog.query = "old".into();
         app.search_dialog.replacement = "new".into();
@@ -171,7 +170,7 @@ fn deferred_replace_all_aborts_before_mutation_on_failed_or_closed_target() {
                 .unwrap()
                 .fail_loading(generation);
         }
-        let _ = app.resume_pending_search();
+        let _ = app.update(Message::None);
         assert!(app.pending_search.is_none());
         assert!(app.search_dialog.status.contains("canceled"));
         assert_eq!(app.workspace.document(active).unwrap().text(), "old");
@@ -212,7 +211,7 @@ fn new_find_operation_supersedes_deferred_replace_and_keeps_included_scope() {
 #[test]
 fn recovered_unsaved_document_is_included_in_replace_all() {
     let (mut app, _) = App::new();
-    let active = app.workspace.active_document_id;
+    let active = app.workspace.active_document_id();
     let (recovered, _) = deferred_search_document(&mut app, "recovered.txt", Some("old old"));
     app.search_dialog.query = "old".into();
     app.search_dialog.replacement = "new".into();
@@ -221,7 +220,7 @@ fn recovered_unsaved_document_is_included_in_replace_all() {
     assert_eq!(app.workspace.document(recovered).unwrap().text(), "new new");
     assert!(app.workspace.document_mut(recovered).unwrap().undo());
     assert_eq!(app.workspace.document(recovered).unwrap().text(), "old old");
-    assert_eq!(app.workspace.active_document_id, active);
+    assert_eq!(app.workspace.active_document_id(), active);
 }
 
 #[test]
@@ -289,7 +288,7 @@ fn replace_all_large_match_count_updates_document_once() {
 #[test]
 fn advanced_search_result_selection_scrolls_target_line_into_view() {
     let (mut app, _) = App::new();
-    let document_id = app.workspace.active_document_id;
+    let document_id = app.workspace.active_document_id();
     let contents = (0..120)
         .map(|line| format!("line {line}"))
         .collect::<Vec<_>>()

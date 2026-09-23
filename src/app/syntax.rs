@@ -1,5 +1,5 @@
 use super::App;
-use crate::core::DocumentId;
+use crate::core::{Document, DocumentId, Workspace};
 use crate::editor::EditorBuffer;
 use crate::editor::render::{SyntaxParseRequest, SyntaxParseResult};
 use crate::message::Message;
@@ -31,38 +31,63 @@ struct PendingParse {
 }
 
 impl App {
-    pub(super) fn schedule_syntax_parse(&mut self) -> Task<Message> {
-        let Some((id, request)) = self.next_syntax_request() else {
-            return Task::none();
-        };
-        Task::perform(
+    #[cfg(test)]
+    fn next_syntax_request(&mut self) -> Option<(u64, SyntaxParseRequest)> {
+        if self.lifecycle.is_exiting() {
+            return None;
+        }
+        self.syntax_parsing
+            .next_request(self.workspace.active_document(), self.settings.syntax_theme)
+    }
+
+    pub(super) fn complete_syntax_parse(
+        &mut self,
+        id: u64,
+        result: Result<SyntaxParseResult, String>,
+    ) -> Task<Message> {
+        self.syntax_parsing
+            .complete(&self.workspace, self.settings.syntax_theme, id, result);
+        self.events.publish(super::events::Event::SyntaxAvailable);
+        Task::none()
+    }
+}
+
+impl SyntaxParsing {
+    pub(super) fn schedule(
+        &mut self,
+        document: Option<&Document>,
+        theme: highlighter::Theme,
+    ) -> Option<Task<Message>> {
+        let (id, request) = self.next_request(document, theme)?;
+        Some(Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || request.parse())
                     .await
                     .map_err(|error| error.to_string())
             },
             move |result| Message::SyntaxParsed(id, result),
-        )
+        ))
     }
 
-    fn next_syntax_request(&mut self) -> Option<(u64, SyntaxParseRequest)> {
-        if self.session.exiting {
-            return None;
-        }
-        let document = self.workspace.active_document()?;
+    fn next_request(
+        &mut self,
+        document: Option<&Document>,
+        theme: highlighter::Theme,
+    ) -> Option<(u64, SyntaxParseRequest)> {
+        let document = document?;
         let settings = highlighter::Settings {
             token: document.render_syntax_token().to_owned(),
-            theme: self.settings.syntax_theme,
+            theme,
         };
         let mut cache = document.syntax_cache.borrow_mut();
         cache.configure(&settings);
         // At most one bounded worker batch is outstanding, even across tab
         // switches/edits. The next batch always uses the latest active viewport.
-        if self.syntax_parsing.in_flight.is_some() {
+        if self.in_flight.is_some() {
             return None;
         }
         if !document.has_complete_text_index() || settings.token == "txt" {
-            self.syntax_parsing.snapshot = None;
+            self.snapshot = None;
             return None;
         }
         let last_line = document.buffer.line_count().saturating_sub(1);
@@ -70,7 +95,7 @@ impl App {
             return None;
         }
         let revision = document.revision();
-        let snapshot = &mut self.syntax_parsing.snapshot;
+        let snapshot = &mut self.snapshot;
         if !snapshot.as_ref().is_some_and(|snapshot| {
             snapshot.document == document.id
                 && snapshot.revision == revision
@@ -97,9 +122,9 @@ impl App {
             .collect();
         let request =
             cache.parse_request(snapshot.as_ref().unwrap().buffer.clone(), &priority_lines);
-        self.syntax_parsing.next_id += 1;
-        let id = self.syntax_parsing.next_id;
-        self.syntax_parsing.in_flight = Some(PendingParse {
+        self.next_id += 1;
+        let id = self.next_id;
+        self.in_flight = Some(PendingParse {
             id,
             document: document.id,
             revision,
@@ -109,33 +134,34 @@ impl App {
         Some((id, request))
     }
 
-    pub(super) fn complete_syntax_parse(
+    fn complete(
         &mut self,
+        workspace: &Workspace,
+        theme: highlighter::Theme,
         id: u64,
         result: Result<SyntaxParseResult, String>,
-    ) -> Task<Message> {
+    ) {
         if !self
-            .syntax_parsing
             .in_flight
             .as_ref()
             .is_some_and(|pending| pending.id == id)
         {
-            return Task::none();
+            return;
         }
-        let pending = self.syntax_parsing.in_flight.take().unwrap();
-        let Some(document) = self.workspace.document(pending.document) else {
-            self.syntax_parsing.snapshot = None;
-            return Task::none();
+        let pending = self.in_flight.take().unwrap();
+        let Some(document) = workspace.document(pending.document) else {
+            self.snapshot = None;
+            return;
         };
         if document.revision() != pending.revision
             || document.render_syntax_token() != pending.settings.token
-            || self.settings.syntax_theme != pending.settings.theme
+            || theme != pending.settings.theme
         {
-            return Task::none();
+            return;
         }
         let mut cache = document.syntax_cache.borrow_mut();
         if !Arc::ptr_eq(cache.generation(), &pending.generation) {
-            return Task::none();
+            return;
         }
         match result {
             Ok(result) => {
@@ -149,7 +175,6 @@ impl App {
         }
         // This message causes a redraw, and App::update schedules the next
         // batch, first filling the latest viewport and then refining context.
-        Task::none()
     }
 }
 
@@ -186,7 +211,7 @@ mod tests {
         document.set_main_selection(crate::editor::EditorSelection::new(position, position));
         document.ensure_syntax_cache(app.settings.syntax_theme);
         let before = rendered_rows(&app);
-        let id = app.workspace.active_document_id;
+        let id = app.workspace.active_document_id();
 
         for text in ["a", "é", "🦀"] {
             let _ = app.update_editor(id, crate::editor::EditorAction::InsertText(text.into()));
@@ -261,7 +286,7 @@ mod tests {
         let position = crate::editor::EditorPosition::new(1, 8);
         document.set_main_selection(crate::editor::EditorSelection::new(position, position));
         let before = rendered_rows(&app);
-        let document_id = app.workspace.active_document_id;
+        let document_id = app.workspace.active_document_id();
         let _ = app.update_editor(
             document_id,
             crate::editor::EditorAction::InsertText("x".into()),
@@ -370,7 +395,7 @@ mod tests {
     fn closing_or_switching_tabs_does_not_continue_obsolete_work() {
         let mut app = app();
         let (id, request) = app.next_syntax_request().unwrap();
-        let document = app.workspace.active_document_id;
+        let document = app.workspace.active_document_id();
         app.workspace.close(document);
         let _ = app.complete_syntax_parse(id, Ok(request.parse()));
         assert!(app.next_syntax_request().is_none());
@@ -396,7 +421,7 @@ mod tests {
     fn reload_with_reused_document_revision_gets_a_fresh_snapshot() {
         let mut app = app();
         let (id, request) = app.next_syntax_request().unwrap();
-        let document_id = app.workspace.active_document_id;
+        let document_id = app.workspace.active_document_id();
         let old_revision = app.workspace.active_document().unwrap().revision();
         *app.workspace.document_mut(document_id).unwrap() = crate::core::Document::from_path(
             document_id,
@@ -426,18 +451,44 @@ mod tests {
     fn completion_during_shutdown_does_not_leave_a_stuck_worker_after_failed_exit() {
         let mut app = app();
         let (id, request) = app.next_syntax_request().unwrap();
-        app.session.exiting = true;
+        app.lifecycle.begin_shutdown();
         let _ = app.update(Message::SyntaxParsed(id, Ok(request.parse())));
-        assert!(app.syntax_parsing.in_flight.is_none());
-        app.session.exiting = false;
-        assert!(app.next_syntax_request().is_some());
+        assert_eq!(app.syntax_parsing.in_flight.as_ref().unwrap().id, id);
+        let _ = app.update(Message::ShutdownPersisted(Err("disk unavailable".into())));
+        assert!(!app.lifecycle.is_exiting());
+        assert_ne!(app.syntax_parsing.in_flight.as_ref().unwrap().id, id);
     }
 
     #[test]
     fn syntax_results_do_not_dirty_session_state() {
         let mut app = app();
-        app.session.enabled = true;
         let (id, request) = app.next_syntax_request().unwrap();
-        assert!(!app.session_should_track(&Message::SyntaxParsed(id, Ok(request.parse()))));
+        let _ = app.update(Message::None); // Commit fixture mutations before observing session dirtiness.
+        app.session.set_enabled(true);
+        let _ = app.update(Message::SyntaxParsed(id, Ok(request.parse())));
+        assert!(!app.session.is_dirty());
+    }
+}
+
+impl SyntaxParsing {
+    pub(super) fn observe(
+        &self,
+        event: super::events::Event,
+        active: DocumentId,
+        work: &mut super::events::PendingWork,
+    ) {
+        use super::events::{Event, Work, WorkspaceEvent as W};
+        let needed = match event {
+            Event::Started | Event::SettingsChanged | Event::SyntaxAvailable => true,
+            Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,
+            Event::AnalysisCompleted(id)
+            | Event::Workspace(
+                W::ContentChanged(id) | W::ViewChanged(id) | W::LoadStateChanged(id),
+            ) => id == active,
+            _ => false,
+        };
+        if needed {
+            work.request(Work::Syntax);
+        }
     }
 }
