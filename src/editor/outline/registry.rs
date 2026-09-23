@@ -12,8 +12,7 @@ use super::diagnostics;
 use super::schema::parse_outline_schema;
 use super::types::OutlineDiagnostic;
 
-const CACHE_VERSION: &str = "3";
-const CACHE_FILE: &str = "outline-registry-v3.xml";
+const CACHE_FILE: &str = "outline-registry.xml";
 const CACHE_PATH_ENV: &str = "FRAGILE_NOTEPAD_OUTLINE_CACHE_PATH";
 
 mod cache_xml;
@@ -299,5 +298,27 @@ mod tests {
     #[test]
     fn compiled_cache_rejects_corrupt_xml() {
         assert!(registry_from_cache_xml("<compiled-outline-cache>").is_none());
+    }
+
+    #[test]
+    fn compiled_cache_accepts_compatible_contents_without_version_gating() {
+        let registry = OutlineRegistry::load();
+        let xml = registry_to_cache_xml(&registry);
+        let document = roxmltree::Document::parse(&xml).unwrap();
+        assert!(document.root_element().attribute("version").is_none());
+
+        // A legacy version attribute does not invalidate otherwise compatible data.
+        let legacy = xml.replacen(
+            "<compiled-outline-cache ",
+            "<compiled-outline-cache version=\"1\" ",
+            1,
+        );
+        assert_eq!(registry_from_cache_xml(&legacy), Some(registry));
+
+        // Required structure still has to be readable, even with a matching hash.
+        let incompatible = xml
+            .replace("<members>", "<obsolete-members>")
+            .replace("</members>", "</obsolete-members>");
+        assert!(registry_from_cache_xml(&incompatible).is_none());
     }
 }

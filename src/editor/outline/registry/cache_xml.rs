@@ -1,4 +1,4 @@
-use super::{CACHE_VERSION, OutlineRegistry};
+use super::OutlineRegistry;
 use crate::editor::outline::compiler::{
     CompiledOutlineRegistry, OutlineBlockCommentPlan, OutlineBodyKind, OutlineBodyPlan,
     OutlineCallablePlan, OutlineLexicalPlan, OutlineMemberPlan, OutlineNameCapture, OutlinePlan,
@@ -15,10 +15,7 @@ pub(super) fn registry_to_cache_xml(registry: &OutlineRegistry) -> String {
         &mut xml,
         0,
         "compiled-outline-cache",
-        &[
-            ("version", CACHE_VERSION.to_owned()),
-            ("hash", registry.hash.to_string()),
-        ],
+        &[("hash", registry.hash.to_string())],
     );
 
     push_diagnostics(&mut xml, 1, "diagnostics", &registry.diagnostics);
@@ -71,6 +68,16 @@ fn push_plan(xml: &mut String, plan: &OutlinePlan) {
         }
         if let Some(pattern) = &rule.prefix_pattern {
             attributes.push(("prefix-pattern", pattern.clone()));
+        }
+        for (name, pattern) in [
+            ("name-pattern", &rule.name_pattern),
+            ("line-skip-pattern", &rule.line_skip_pattern),
+            ("generic-open-pattern", &rule.generic_open_pattern),
+            ("generic-suffix-pattern", &rule.generic_suffix_pattern),
+        ] {
+            if let Some(pattern) = pattern {
+                attributes.push((name, pattern.clone()));
+            }
         }
         push_empty(xml, 3, "rule", &attributes);
     }
@@ -477,9 +484,7 @@ pub(super) fn registry_from_cache_xml(xml: &str) -> Option<OutlineRegistry> {
     let document = roxmltree::Document::parse(xml).ok()?;
     let root = document.root_element();
 
-    if !root.has_tag_name("compiled-outline-cache")
-        || root.attribute("version") != Some(CACHE_VERSION)
-    {
+    if !root.has_tag_name("compiled-outline-cache") {
         return None;
     }
 
@@ -522,6 +527,12 @@ fn parse_cached_plan(node: roxmltree::Node<'_, '_>) -> Option<OutlinePlan> {
                     separator: rule.attribute("separator")?.to_owned(),
                     terminator: rule.attribute("terminator").map(str::to_owned),
                     prefix_pattern: rule.attribute("prefix-pattern").map(str::to_owned),
+                    name_pattern: rule.attribute("name-pattern").map(str::to_owned),
+                    line_skip_pattern: rule.attribute("line-skip-pattern").map(str::to_owned),
+                    generic_open_pattern: rule.attribute("generic-open-pattern").map(str::to_owned),
+                    generic_suffix_pattern: rule
+                        .attribute("generic-suffix-pattern")
+                        .map(str::to_owned),
                 })
             })
             .collect::<Option<Vec<_>>>()?,

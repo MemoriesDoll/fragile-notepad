@@ -44,6 +44,10 @@ pub struct OutlineMemberPlan {
     pub separator: String,
     pub terminator: Option<String>,
     pub prefix_pattern: Option<String>,
+    pub name_pattern: Option<String>,
+    pub line_skip_pattern: Option<String>,
+    pub generic_open_pattern: Option<String>,
+    pub generic_suffix_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -244,14 +248,41 @@ fn compile_language(
         .iter()
         .filter_map(|rule| {
             let kinds = parse_node_kind(&rule.kind).zip(parse_node_kind(&rule.within));
-            let valid_prefix = rule.prefix_pattern.as_ref().is_none_or(|pattern| {
-                regex::Regex::new(&format!("^(?:{pattern})")).is_ok_and(|regex| !regex.is_match(""))
+            let valid_patterns = [
+                &rule.prefix_pattern,
+                &rule.name_pattern,
+                &rule.line_skip_pattern,
+                &rule.generic_open_pattern,
+                &rule.generic_suffix_pattern,
+            ]
+            .into_iter()
+            .all(|pattern| {
+                pattern.as_ref().is_none_or(|pattern| {
+                    regex::Regex::new(&format!("\\A(?:{pattern})"))
+                        .is_ok_and(|regex| !regex.is_match(""))
+                })
             });
+            let valid_name = rule.name_pattern.as_ref().is_none_or(|pattern| {
+                regex::Regex::new(pattern).is_ok_and(|regex| {
+                    regex
+                        .capture_names()
+                        .flatten()
+                        .any(|name| name == "name" || name.starts_with("name_"))
+                })
+            });
+            let valid_generics = rule.generic_open_pattern.is_some()
+                == rule.generic_suffix_pattern.is_some()
+                && (rule.generic_open_pattern.is_none()
+                    || ["generics-open", "generics-close"]
+                        .iter()
+                        .all(|role| family.syntax_tokens.iter().any(|token| token.role == *role)));
             if kinds.is_none()
                 || rule.separator.is_empty()
                 || rule.terminator.as_deref() == Some("")
                 || rule.terminator.as_deref() == Some(rule.separator.as_str())
-                || !valid_prefix
+                || !valid_patterns
+                || !valid_name
+                || !valid_generics
             {
                 diagnostics.push(diagnostics::error(format!(
                     "outline language {language_name} has an invalid members rule"
@@ -265,6 +296,10 @@ fn compile_language(
                 separator: rule.separator.clone(),
                 terminator: rule.terminator.clone(),
                 prefix_pattern: rule.prefix_pattern.clone(),
+                name_pattern: rule.name_pattern.clone(),
+                line_skip_pattern: rule.line_skip_pattern.clone(),
+                generic_open_pattern: rule.generic_open_pattern.clone(),
+                generic_suffix_pattern: rule.generic_suffix_pattern.clone(),
             })
         })
         .collect();

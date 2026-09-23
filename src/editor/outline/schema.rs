@@ -52,6 +52,10 @@ pub struct RawMemberRule {
     pub separator: String,
     pub terminator: Option<String>,
     pub prefix_pattern: Option<String>,
+    pub name_pattern: Option<String>,
+    pub line_skip_pattern: Option<String>,
+    pub generic_open_pattern: Option<String>,
+    pub generic_suffix_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -269,6 +273,10 @@ fn parse_language(element: roxmltree::Node<'_, '_>) -> RawLanguage {
                 separator: node.attribute("separator").unwrap_or("").to_owned(),
                 terminator: node.attribute("terminator").map(str::to_owned),
                 prefix_pattern: node.attribute("prefix-pattern").map(str::to_owned),
+                name_pattern: node.attribute("name-pattern").map(str::to_owned),
+                line_skip_pattern: node.attribute("line-skip-pattern").map(str::to_owned),
+                generic_open_pattern: node.attribute("generic-open-pattern").map(str::to_owned),
+                generic_suffix_pattern: node.attribute("generic-suffix-pattern").map(str::to_owned),
             })
             .collect(),
         containers: element

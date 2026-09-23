@@ -300,6 +300,12 @@ fn invalid_xml_member_rules_are_rejected() {
         r#"kind="enum-member" within="enum" separator="," terminator=",""#,
         r#"kind="enum-member" within="enum" separator="," prefix-pattern="[""#,
         r#"kind="enum-member" within="enum" separator="," prefix-pattern="a*""#,
+        r#"kind="enum-member" within="enum" separator="," name-pattern="[""#,
+        r#"kind="enum-member" within="enum" separator="," name-pattern="[a-z]+""#,
+        r#"kind="enum-member" within="enum" separator="," line-skip-pattern="a*""#,
+        r#"kind="enum-member" within="enum" separator="," generic-open-pattern="a""#,
+        r#"kind="enum-member" within="enum" separator="," generic-suffix-pattern="a""#,
+        r#"kind="enum-member" within="enum" separator="," generic-open-pattern="a" generic-suffix-pattern="b""#,
     ] {
         let xml = format!(
             r#"<outline-parsers schema-version="1">
@@ -528,4 +534,131 @@ fn enum_member_boundaries_and_prefixes_come_from_xml() {
         ["Red", "Blue"]
     );
     assert_eq!(names(&result), ["update"]);
+}
+
+fn enum_member_names(result: &OutlineParseResult) -> Vec<&str> {
+    result.tree.roots[0]
+        .children
+        .iter()
+        .filter(|node| node.kind == fragile_notepad::editor::outline::OutlineNodeKind::EnumMember)
+        .map(|node| node.name.as_str())
+        .collect()
+}
+
+#[test]
+fn generic_enum_initializers_do_not_split_at_type_arguments() {
+    for (syntax, source) in [
+        ("rs", "enum E { A = value::<u8, u16>(), B }"),
+        (
+            "rs",
+            "enum E { A = value::<u8, Vec<Result<u16, u32>>>() as isize, B }",
+        ),
+        ("cpp", "enum E { A = value<int, long>(), B };"),
+        ("cpp", "enum E { A = value_v<int, long>, B };"),
+        ("cpp", "enum E { A = value_v<int, long> + 1, B };"),
+        (
+            "cpp",
+            "enum E { A = traits<int, pair<long, short>>::value, B };",
+        ),
+        (
+            "cpp",
+            "enum E { A = value <int, long> /* comment */ (), B };",
+        ),
+    ] {
+        let result = parse(source, syntax);
+        assert_eq!(enum_member_names(&result), ["A", "B"], "{source}");
+        let first = &result.tree.roots[0].children[0];
+        assert_eq!(first.range.end.column, source.rfind(", B").unwrap());
+    }
+    for syntax in ["rs", "cpp"] {
+        let source = "enum E { A = left < right, B = right > left, C = 1 << 2, D = 8 >> 1, E }";
+        assert_eq!(
+            enum_member_names(&parse(source, syntax)),
+            ["A", "B", "C", "D", "E"]
+        );
+    }
+    assert_eq!(
+        enum_member_names(&parse("enum E { A = value_v<int, long> };", "cpp")),
+        ["A"]
+    );
+}
+
+#[test]
+fn quoted_enum_names_preserve_following_members_and_navigation_ranges() {
+    for (syntax, source, expected) in [
+        ("ts", r#"enum E { A, "B" = 1, C }"#, vec!["A", "B", "C"]),
+        (
+            "ts",
+            r#"enum E { /* "Fake" */ 'a"b' = "x,y", "c'd", "é,\"f", Last }"#,
+            vec!["a\"b", "c'd", "é,\\\"f", "Last"],
+        ),
+        ("ts", r#"enum E { "Only" }"#, vec!["Only"]),
+        (
+            "kt",
+            "enum class E { A, `when`, C }",
+            vec!["A", "when", "C"],
+        ),
+        (
+            "kt",
+            "enum class E { `enum`, `with space`, Last }",
+            vec!["enum", "with space", "Last"],
+        ),
+    ] {
+        let result = parse(source, syntax);
+        assert_eq!(result.tree.roots.len(), 1, "{source}");
+        assert_eq!(enum_member_names(&result), expected, "{source}");
+        for node in &result.tree.roots[0].children {
+            assert_eq!(
+                &source[node.range.start.column..node.range.start.column + node.name.len()],
+                node.name
+            );
+            assert!(node.range.end.column <= source.len());
+        }
+    }
+}
+
+#[test]
+fn enum_directives_skip_whole_logical_lines_and_keep_all_branches() {
+    for syntax in ["c", "cpp"] {
+        for source in [
+            "enum E {\n A,\n#if FEATURE\n B,\n#endif\n C\n};",
+            "enum E {\n #if FEATURE\n A,\n #else\n B,\n #endif\n C\n};",
+            "enum E {\n /* condition */ #if FEATURE\n A,\n #else\n B,\n #endif\n C\n};",
+            "enum E {\n#if defined(FEATURE) && \\\n    OTHER(1, 2)\n A,\n#elif OTHER\n B,\n#endif\n C\n};",
+        ] {
+            let result = parse(source, syntax);
+            assert_eq!(enum_member_names(&result), ["A", "B", "C"], "{source}");
+            assert!(result.functions.is_empty(), "{source}");
+        }
+    }
+}
+
+#[test]
+fn unsupported_member_syntax_recovers_at_the_next_separator() {
+    assert_eq!(
+        enum_member_names(&parse("enum E { A, @unfinished, C }", "rs")),
+        ["A", "C"]
+    );
+}
+
+#[test]
+fn member_name_directive_and_generic_syntax_is_selected_by_xml() {
+    let xml = fragile_notepad::assets::syntax::outline_parsers_xml()
+        .replace("role=\"generics-open\" value=\"&lt;\"", "role=\"generics-open\" value=\"«\"")
+        .replace("role=\"generics-close\" value=\"&gt;\"", "role=\"generics-close\" value=\"»\"")
+        .replace("generic-open-pattern=\"::\\s*&lt;\" generic-suffix-pattern=\"[^\\p{L}\\p{N}_\\s]|as\\b\"",
+            r#"generic-open-pattern="@«" generic-suffix-pattern="\(" name-pattern="~(?P&lt;name&gt;[^~]+)~" line-skip-pattern="\$[^\r\n]*""#);
+    let registry = OutlineRegistry::from_xml(&xml);
+    assert!(
+        registry.diagnostics().is_empty(),
+        "{:?}",
+        registry.diagnostics()
+    );
+    let source = "enum E {\n $ignore this, comma\n ~A A~ = value@«X, Y»(), B\n}";
+    let result = OutlineEngine::new(
+        registry.plan_for_syntax("rs").unwrap(),
+        registry.registry_hash(),
+    )
+    .parse_buffer(&EditorBuffer::from_text(source), "rs");
+    assert_eq!(enum_member_names(&result), ["A A", "B"]);
 }

@@ -131,17 +131,41 @@ so tuple/struct payloads and initializer arguments do not become extra members.
 The optional terminator stops the list before constructors and regular methods.
 The optional anchored regular expression `prefix-pattern` skips annotation
 markers/names and their following balanced argument group. Rust configures
-attribute markers; Java and Kotlin configure annotation names. Empty separators,
-empty terminators, and invalid or empty-matching prefix patterns are rejected.
+attribute markers; Java and Kotlin configure annotation names.
 Members keep their source ranges and can themselves own nested declarations.
+
+Additional anchored patterns configure member syntax without language tokens in
+the scanner:
+
+- `name-pattern` captures quoted/escaped names in a named group `name`. Alternative
+  quote styles can use additional groups prefixed `name_`; the first participating
+  group supplies the name. The whole match consumes the surrounding quotes, while
+  the captured source spelling supplies the label and navigation start. Ordinary
+  identifiers remain the fallback. Comments are skipped; literal starts remain
+  available here so TypeScript string names and Kotlin backtick names are visible.
+- `line-skip-pattern` consumes directive lines, including configured continuations.
+  It only applies at the first non-whitespace/non-comment position on a line.
+  C/C++ configure preprocessor directives; members in all conditional branches are
+  listed without evaluating build conditions.
+- `generic-open-pattern` consumes the expression prefix through an opening generic
+  delimiter. `generic-suffix-pattern` validates what follows its balanced closing
+  delimiter. These patterns must be supplied together with family `generics-open`
+  and `generics-close` syntax tokens. Rust configures turbofish syntax; C++ configures
+  template expressions. Context checks preserve comparisons and
+  shifts instead of treating every angle token as a delimiter.
+
+Empty separators, empty terminators, invalid or empty-matching patterns, name
+patterns without a name capture, and incomplete generic configurations are rejected.
+An unrecognized member recovers at the next separator instead of discarding the
+rest of the list.
 
 ## Validation and cache
 
 Malformed or empty lexical delimiters produce registry diagnostics and exclude
-the affected language plan. The compiled registry cache uses version 3; older
-caches are rebuilt. Source XML remains schema version 1 with explicit rule
-extensions. Older `raw-string kind` entries must be migrated to the attributes
-above. Updated bundled definitions and cache round-trip tests cover these fields.
+the affected language plan. The compiled registry cache is stored in
+`outline-registry.xml`. A source XML hash mismatch or unreadable cache structure
+triggers a rebuild. Bundled definitions and cache round-trip tests cover the
+supported rule fields.
 
 Run `cargo test --locked --test outline_parsing --test outline_performance` for
 cross-language regressions, custom XML rules, and large-document checks. Existing
