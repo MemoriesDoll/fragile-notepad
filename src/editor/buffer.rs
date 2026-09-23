@@ -54,17 +54,13 @@ impl EditorBuffer {
 
     pub fn slice_text(&self, range: EditorRange) -> String {
         let range = self.clamp_range(range);
-        let start = self.char_offset(range.start);
-        let end = self.char_offset(range.end);
+        let start = self.char_offset_clamped(range.start);
+        let end = self.char_offset_clamped(range.end);
 
         self.rope.slice(start..end).to_string()
     }
 
     pub fn position_for_byte_offset(&self, byte_offset: usize) -> Option<EditorPosition> {
-        if byte_offset > self.len_bytes() {
-            return None;
-        }
-
         self.byte_to_char_boundary(byte_offset)?;
         if self.is_inside_paired_line_ending(byte_offset) {
             return None;
@@ -79,6 +75,7 @@ impl EditorBuffer {
         Some(EditorPosition::new(line, column))
     }
 
+    /// Includes the final line, even when the buffer is empty.
     pub fn line_count(&self) -> usize {
         self.line_starts.len()
     }
@@ -92,10 +89,6 @@ impl EditorBuffer {
     }
 
     pub fn line_text(&self, index: usize) -> Option<String> {
-        if index >= self.line_count() {
-            return None;
-        }
-
         let start = self.byte_to_char_boundary(*self.line_starts.get(index)?)?;
         let end = self.line_content_end_char(index);
 
@@ -104,8 +97,8 @@ impl EditorBuffer {
 
     pub fn replace_range(&mut self, range: EditorRange, replacement: &str) -> EditDelta {
         let before_range = self.clamp_range(range);
-        let start_offset = self.char_offset(before_range.start);
-        let end_offset = self.char_offset(before_range.end);
+        let start_offset = self.char_offset_clamped(before_range.start);
+        let end_offset = self.char_offset_clamped(before_range.end);
         let before_text = self.rope.slice(start_offset..end_offset).to_string();
 
         self.replace_chars(start_offset, end_offset, replacement);
@@ -159,10 +152,8 @@ impl EditorBuffer {
             .and_then(|offset| self.byte_to_char_boundary(*offset))
             .unwrap_or(0);
         let line_end = self.line_content_end_char(line);
-        let line_byte_len = self.rope.slice(line_start..line_end).len_bytes();
-        let target_column = position.column.min(line_byte_len);
         let column =
-            previous_char_boundary_in_slice(self.rope.slice(line_start..line_end), target_column);
+            previous_char_boundary_in_slice(self.rope.slice(line_start..line_end), position.column);
 
         EditorPosition::new(line, column)
     }
@@ -185,14 +176,10 @@ impl EditorBuffer {
             .saturating_add(position.column)
     }
 
-    fn char_offset(&self, position: EditorPosition) -> usize {
-        let position = self.clamp_position(position);
-        let line_start_byte = self.line_starts.get(position.line).copied().unwrap_or(0);
-        let line_start_char = self.byte_to_char_boundary(line_start_byte).unwrap_or(0);
-
+    /// Convert an endpoint already checked by `clamp_range`.
+    fn char_offset_clamped(&self, position: EditorPosition) -> usize {
         self.rope
-            .byte_to_char(line_start_byte + position.column)
-            .max(line_start_char)
+            .byte_to_char(self.line_starts[position.line] + position.column)
     }
 
     fn byte_to_char_boundary(&self, byte_offset: usize) -> Option<usize> {

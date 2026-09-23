@@ -227,6 +227,34 @@ fn editor_model_buffer_replace_range_clamps_columns_to_utf8_char_boundaries() {
 }
 
 #[test]
+fn editor_model_buffer_clamps_ranges_and_rejects_out_of_bounds_lookups() {
+    for source in ["", "é好", "é\r\n好\n\r", "\r\n"] {
+        let mut buffer = EditorBuffer::from_text(source);
+        let beyond_end = EditorPosition::new(usize::MAX, usize::MAX);
+        let full_range = EditorRange::new(beyond_end, EditorPosition::new(0, 0));
+
+        assert!(buffer.line_count() >= 1);
+        assert_eq!(buffer.line_text(buffer.line_count()), None);
+        assert_eq!(buffer.line_text(usize::MAX), None);
+        assert_eq!(buffer.position_for_byte_offset(source.len() + 1), None);
+        assert_eq!(buffer.position_for_byte_offset(usize::MAX), None);
+        assert_eq!(buffer.byte_offset(beyond_end), source.len());
+        assert_eq!(buffer.slice_text(full_range), source);
+
+        let delta = buffer.replace_range(full_range, "x");
+        assert_eq!(delta.before_text, source);
+        assert_eq!(buffer.text(), "x");
+        assert_eq!(buffer.line_count(), 1);
+    }
+
+    let mut buffer = EditorBuffer::from_text("é好");
+    let inside_characters = EditorRange::new(EditorPosition::new(0, 1), EditorPosition::new(0, 4));
+    assert_eq!(buffer.slice_text(inside_characters), "é");
+    assert_eq!(buffer.replace_range(inside_characters, "").before_text, "é");
+    assert_eq!(buffer.text(), "好");
+}
+
+#[test]
 fn editor_model_buffer_exposes_range_positions_and_chunks() {
     let buffer = EditorBuffer::from_text("one\n\u{00e9}two\nthree");
     let range = EditorRange::new(EditorPosition::new(1, 0), EditorPosition::new(1, 4));

@@ -88,11 +88,9 @@ impl App {
                     prompt.error = Some("Wait for the document to finish loading.".into());
                     return operation::focus(INPUT_ID);
                 }
-                let last_line = document.buffer.line_count().saturating_sub(1);
-                let target_line = line_number.saturating_sub(1).min(last_line);
                 let position = document
                     .buffer
-                    .clamp_position(EditorPosition::new(target_line, 0));
+                    .clamp_position(EditorPosition::new(line_number.saturating_sub(1), 0));
                 document.set_main_selection(EditorSelection::new(position, position));
                 document.reveal_position(position);
                 self.update_go_to_line(GoToLineMessage::GoToLineClosed)

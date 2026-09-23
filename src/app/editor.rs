@@ -129,7 +129,6 @@ impl App {
         end: EditorPosition,
         replacement: String,
     ) -> bool {
-        let document_id = self.workspace.active_document_id();
         let Some(document) = self.workspace.active_document_mut() else {
             return false;
         };
@@ -139,14 +138,12 @@ impl App {
         }
 
         document.set_main_selection(EditorSelection::new(start, end));
-        let changed = replace_selection(
+        replace_selection(
             document,
             &replacement,
             false,
             self.settings.indentation.width() as usize,
-        );
-
-        document_id == self.workspace.active_document_id() && changed
+        )
     }
 
     fn cached_outline_entries(&self, document_id: DocumentId) -> Option<&[FunctionEntry]> {

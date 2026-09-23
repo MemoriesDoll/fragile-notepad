@@ -656,10 +656,6 @@ pub(super) fn unindent(document: &mut crate::core::Document, indentation_width: 
 }
 
 fn selected_line_span(buffer: &EditorBuffer, selection: EditorSelection) -> Option<(usize, usize)> {
-    if buffer.line_count() == 0 {
-        return None;
-    }
-
     if selection.is_caret() {
         let line = buffer.clamp_position(selection.cursor).line;
         return Some((line, line));
@@ -710,10 +706,6 @@ fn selected_touched_line_range(
     buffer: &EditorBuffer,
     selection: impl Into<SelectionRange>,
 ) -> Option<EditorRange> {
-    if buffer.line_count() == 0 {
-        return None;
-    }
-
     let selection = selection.into();
     let (first_line, last_line) = if selection.is_rectangular() {
         let range = buffer.clamp_range(selection.range());
@@ -721,10 +713,6 @@ fn selected_touched_line_range(
     } else {
         selected_line_span(buffer, selection.selection())?
     };
-    if first_line > last_line {
-        return None;
-    }
-
     let end = if last_line + 1 < buffer.line_count() {
         EditorPosition::new(last_line + 1, 0)
     } else {
@@ -1064,10 +1052,6 @@ fn apply_concrete_replacements_with_policy(
     allow_grouping: bool,
     single_caret_after: bool,
 ) -> bool {
-    if replacements.is_empty() {
-        return false;
-    }
-
     for replacement in &mut replacements {
         replacement.range = document.buffer.clamp_range(replacement.range);
     }
@@ -1081,12 +1065,10 @@ fn apply_concrete_replacements_with_policy(
     });
     replacements.dedup_by(|a, b| a.range == b.range && a.replacement == b.replacement);
 
-    let Some(first) = replacements.first() else {
+    let Some((first, rest)) = replacements.split_first() else {
         return false;
     };
-    let Some(last) = replacements.last() else {
-        return false;
-    };
+    let last = rest.last().unwrap_or(first);
 
     let span = EditorRange::new(first.range.start, last.range.end);
     let span_start_offset = document.buffer.byte_offset(span.start);
