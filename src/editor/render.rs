@@ -1,8 +1,9 @@
 use super::buffer::EditorBuffer;
 use super::decoration::{DecorationModel, HiddenLineSpan, IndentGuide, LineDecoration};
 use super::layout::{
-    EditorLayout, EditorMetrics, byte_column_for, row_y, scrolled_text_origin_x, visual_column_for,
-    visual_column_for_with_offset, visual_width_with_tab_width, x_for_visual_column,
+    EditorLayout, EditorMetrics, GUTTER_RIGHT_MARGIN, byte_column_for, row_y,
+    scrolled_text_origin_x, visual_column_for, visual_column_for_with_offset,
+    visual_width_with_tab_width, x_for_visual_column,
 };
 use super::position::{
     EditorPosition, EditorSelection, ProjectedSelectionLine, SelectionRange, SelectionSet,
@@ -17,7 +18,6 @@ pub(crate) use syntax::SyntaxParseRequest;
 pub use syntax::{SyntaxLineCache, SyntaxParseResult};
 
 const DEFAULT_SYNTAX_TOKEN: &str = "txt";
-const GUTTER_RIGHT_MARGIN: f32 = 6.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderPlan {

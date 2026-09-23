@@ -15,7 +15,8 @@ pub fn view<'a>(document: &'a Document, settings: &'a EditorSettings) -> Element
         line_height: BASE_TEXT_SIZE * settings.zoom * 1.25,
         character_width: BASE_TEXT_SIZE * settings.zoom * 0.55,
         ..EditorMetrics::default()
-    };
+    }
+    .with_line_count(document.buffer.line_count());
     let editor = AdvancedEditor::new(
         &document.buffer,
         &document.viewport,

@@ -6,6 +6,8 @@ use super::viewport::ViewportModel;
 use iced::Rectangle;
 use unicode_width::UnicodeWidthChar;
 
+pub(super) const GUTTER_RIGHT_MARGIN: f32 = 6.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EditorMetrics {
     pub line_height: f32,
@@ -28,6 +30,15 @@ impl EditorMetrics {
             fold_lane_width: 16.0,
             hidden_indicator_width: 12.0,
         }
+    }
+
+    /// Fits the largest logical line number while preserving the minimum width.
+    pub fn with_line_count(mut self, line_count: usize) -> Self {
+        let digits = line_count.max(1).ilog10() + 1;
+        self.line_number_width = self
+            .line_number_width
+            .max(digits as f32 * self.character_width + GUTTER_RIGHT_MARGIN);
+        self
     }
 
     pub fn gutter_width(self, decorations: &DecorationModel) -> f32 {
