@@ -1106,6 +1106,44 @@ async fn run_instance<P>(
                 );
                 let _ = ui_caches.insert(id, user_interface::Cache::default());
 
+                // Prepare actual pixels while the HWND is hidden. The native
+                // paint handler supplies them during ShowWindow's opening fade,
+                // before the ordinary compositor gets its first visible redraw.
+                let physical_size = window.state.physical_size();
+                if window.first_frame.needs_prepare()
+                    && physical_size.width > 0
+                    && physical_size.height > 0
+                {
+                    let started = StdInstant::now();
+                    user_interfaces
+                        .get_mut(&id)
+                        .expect("Get initial user interface")
+                        .draw(
+                            &mut window.renderer,
+                            window.state.theme(),
+                            &renderer::Style {
+                                text_color: window.state.text_color(),
+                            },
+                            window.state.cursor(),
+                        );
+                    let pixels = compositor
+                        .as_mut()
+                        .expect("Compositor must be initialized")
+                        .screenshot(
+                            &mut window.renderer,
+                            window.state.viewport(),
+                            window.state.background_color(),
+                        );
+                    window
+                        .first_frame
+                        .prepare(&window.raw, physical_size, pixels);
+                    trace::event(
+                        "winit_first_frame_prepared",
+                        started.elapsed().as_micros(),
+                        format_args!("window={id}"),
+                    );
+                }
+
                 if make_visible {
                     window.raw.set_visible(true);
                 }
