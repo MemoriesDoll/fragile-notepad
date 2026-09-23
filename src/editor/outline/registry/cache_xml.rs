@@ -49,6 +49,14 @@ fn push_plan(xml: &mut String, plan: &OutlinePlan) {
         "value",
         &plan.syntax_tokens,
     );
+    push_values(
+        xml,
+        2,
+        "signature-modifiers",
+        "value",
+        "text",
+        &plan.signature_modifiers,
+    );
     push_rules(xml, 2, "containers", &plan.containers);
     push_rules(xml, 2, "declarations", &plan.declarations);
     push_lexical(xml, &plan.lexical);
@@ -88,7 +96,15 @@ fn push_rules(xml: &mut String, depth: usize, tag: &str, rules: &[OutlineRulePla
 }
 
 fn push_callable(xml: &mut String, depth: usize, callable: &OutlineCallablePlan) {
-    push_open(xml, depth, "callable", &[]);
+    push_open(
+        xml,
+        depth,
+        "callable",
+        &[(
+            "assignment-arrow",
+            callable.assignment_arrow.clone().unwrap_or_default(),
+        )],
+    );
     push_values(
         xml,
         depth + 1,
@@ -210,6 +226,10 @@ fn push_lexical(xml: &mut String, lexical: &OutlineLexicalPlan) {
         2,
         "lexical",
         &[
+            (
+                "identifier-prefix",
+                lexical.identifier_prefix.clone().unwrap_or_default(),
+            ),
             ("word-character-extra", lexical.word_character_extra.clone()),
             (
                 "unicode-word-characters",
@@ -259,19 +279,51 @@ fn push_lexical(xml: &mut String, lexical: &OutlineLexicalPlan) {
         push_empty(xml, 4, "string", &attributes);
     }
     push_close(xml, 3, "strings");
-    push_values(
-        xml,
-        3,
-        "raw-strings",
-        "raw-string",
-        "kind",
-        &lexical.raw_strings,
-    );
+    push_open(xml, 3, "raw-strings", &[]);
+    for raw in &lexical.raw_strings {
+        let mut attributes = vec![
+            ("prefixes", raw.prefixes.join(",")),
+            ("open", raw.open.clone()),
+            ("close", raw.close.clone()),
+            ("suffix", raw.suffix.clone()),
+            (
+                "forbidden-delimiter-characters",
+                raw.forbidden_delimiter_characters.clone(),
+            ),
+        ];
+        if let Some(repeat) = &raw.repeat {
+            attributes.push(("repeat", repeat.clone()));
+        }
+        if let Some(limit) = raw.max_delimiter_length {
+            attributes.push(("max-delimiter-length", limit.to_string()));
+        }
+        push_empty(xml, 4, "raw-string", &attributes);
+    }
+    push_close(xml, 3, "raw-strings");
     push_close(xml, 2, "lexical");
 }
 
 fn push_structure(xml: &mut String, structure: &OutlineStructurePlan) {
     push_open(xml, 2, "structure", &[]);
+    for token in &structure.syntax_tokens {
+        push_empty(
+            xml,
+            3,
+            "syntax-token",
+            &[("role", token.role.clone()), ("value", token.value.clone())],
+        );
+    }
+    for delimiter in &structure.delimiters {
+        push_empty(
+            xml,
+            3,
+            "delimiter",
+            &[
+                ("open", delimiter.open.clone()),
+                ("close", delimiter.close.clone()),
+            ],
+        );
+    }
     for body in &structure.bodies {
         let mut attributes = vec![("kind", body_kind_to_str(body.kind).to_owned())];
         if let Some(open) = &body.open {
@@ -282,6 +334,20 @@ fn push_structure(xml: &mut String, structure: &OutlineStructurePlan) {
         }
         if let Some(end_keyword) = &body.end_keyword {
             attributes.push(("end-keyword", end_keyword.clone()));
+        }
+        attributes.push(("block-openers", body.block_openers.join(",")));
+        attributes.push(("conditional-openers", body.conditional_openers.join(",")));
+        attributes.push(("loop-openers", body.loop_openers.join(",")));
+        attributes.push(("statement-boundaries", body.statement_boundaries.join(",")));
+        attributes.push(("member-prefixes", body.member_prefixes.join(",")));
+        if let Some(value) = &body.loop_body_keyword {
+            attributes.push(("loop-body-keyword", value.clone()));
+        }
+        if let Some(value) = &body.header_end {
+            attributes.push(("header-end", value.clone()));
+        }
+        if let Some(value) = &body.line_continuation {
+            attributes.push(("line-continuation", value.clone()));
         }
         push_empty(xml, 3, "body", &attributes);
     }
@@ -425,6 +491,7 @@ fn parse_cached_plan(node: roxmltree::Node<'_, '_>) -> Option<OutlinePlan> {
         syntax_tokens: parse_cached_values(node, "syntax-tokens", "token", "value"),
         family_id: node.attribute("family-id")?.to_owned(),
         adapter_name: node.attribute("adapter-name")?.to_owned(),
+        signature_modifiers: parse_cached_values(node, "signature-modifiers", "value", "text"),
         containers: parse_cached_rules(node, "containers")?,
         declarations: parse_cached_rules(node, "declarations")?,
         lexical: parse_cached_lexical(
@@ -482,6 +549,10 @@ fn parse_cached_rule(node: roxmltree::Node<'_, '_>) -> Option<OutlineRulePlan> {
 
 fn parse_cached_callable(node: roxmltree::Node<'_, '_>) -> Option<OutlineCallablePlan> {
     Some(OutlineCallablePlan {
+        assignment_arrow: node
+            .attribute("assignment-arrow")
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
         reject_names: parse_cached_values(node, "reject-names", "value", "text"),
         reject_previous: parse_cached_values(node, "reject-previous", "value", "text"),
         reject_prefixes: parse_cached_values(node, "reject-prefixes", "value", "text"),
@@ -556,7 +627,17 @@ fn parse_cached_lexical(node: roxmltree::Node<'_, '_>) -> Option<OutlineLexicalP
         line_comments: parse_cached_values(node, "line-comments", "comment", "open"),
         block_comments,
         strings,
-        raw_strings: parse_cached_values(node, "raw-strings", "raw-string", "kind"),
+        identifier_prefix: node
+            .attribute("identifier-prefix")
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        raw_strings: node
+            .children()
+            .find(|child| child.has_tag_name("raw-strings"))?
+            .children()
+            .filter(|child| child.has_tag_name("raw-string"))
+            .map(crate::editor::outline::schema::parse_raw_string)
+            .collect(),
         word_character_extra: node.attribute("word-character-extra")?.to_owned(),
         unicode_word_characters: parse_bool(node.attribute("unicode-word-characters"))?,
     })
@@ -572,11 +653,73 @@ fn parse_cached_structure(node: roxmltree::Node<'_, '_>) -> Option<OutlineStruct
                 open: child.attribute("open").map(str::to_owned),
                 close: child.attribute("close").map(str::to_owned),
                 end_keyword: child.attribute("end-keyword").map(str::to_owned),
+                block_openers: child
+                    .attribute("block-openers")
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                conditional_openers: child
+                    .attribute("conditional-openers")
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                loop_openers: child
+                    .attribute("loop-openers")
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                statement_boundaries: child
+                    .attribute("statement-boundaries")
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                member_prefixes: child
+                    .attribute("member-prefixes")
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                loop_body_keyword: child.attribute("loop-body-keyword").map(str::to_owned),
+                header_end: child.attribute("header-end").map(str::to_owned),
+                line_continuation: child.attribute("line-continuation").map(str::to_owned),
             })
         })
         .collect::<Option<Vec<_>>>()?;
 
-    Some(OutlineStructurePlan { bodies })
+    let delimiters = node
+        .children()
+        .filter(|child| child.has_tag_name("delimiter"))
+        .map(|child| {
+            Some(crate::editor::outline::schema::RawDelimiter {
+                open: child.attribute("open")?.to_owned(),
+                close: child.attribute("close")?.to_owned(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let syntax_tokens = node
+        .children()
+        .filter(|child| child.has_tag_name("syntax-token"))
+        .map(|child| {
+            Some(crate::editor::outline::schema::RawSyntaxToken {
+                role: child.attribute("role")?.to_owned(),
+                value: child.attribute("value")?.to_owned(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(OutlineStructurePlan {
+        bodies,
+        delimiters,
+        syntax_tokens,
+    })
 }
 
 fn parse_cached_diagnostics(node: roxmltree::Node<'_, '_>) -> Option<Vec<OutlineDiagnostic>> {

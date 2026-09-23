@@ -67,6 +67,33 @@ and dependency direction. They do not require an interface for every struct.
 The crate still shares Iced types for settings, input, rendering, and parts of
 the document's viewport/syntax model; `core` is not a framework-free library.
 
+## Syntax and function-list parsing
+
+Syntax highlighting, folding, and the function list have separate consumers.
+Highlighting uses the editor highlighter; folding uses `folding-hints.xml`.
+The function list and function navigation use `editor/outline/`, configured by
+`assets/syntax/outline-parsers.xml`.
+
+The outline pipeline is XML schema → compiled registry → source index →
+declarations and containers → tree and function entries. The source index owns
+one lexical mask, token sequence, and delimiter-pair index per immutable snapshot.
+Both scan directions read the same token boundaries. Body matching reuses the
+delimiter index, and callable and arrow discovery share statement segmentation.
+Lexical shielding consumes complete delimiters and escape sequences while retaining
+original UTF-8 byte offsets. Declaration ranges use exclusive ends.
+
+Language keywords, signature modifiers, raw-string formats, word characters,
+body delimiters, and end-keyword block rules come from XML. Language adapter names
+remain registry metadata; runtime recognition does not dispatch on those names.
+Overlapping declaration rules are deduplicated before computing containment, so
+nesting represents enclosing declarations rather than historical indentation widths.
+
+`app/outline.rs` retains scheduling, cancellation, and revision/language/registry
+checks. The function-list UI consumes the resulting entries without parsing text.
+The compiled XML cache is versioned independently of the source schema and is
+rebuilt when its version or source hash changes. See
+[outline XML configuration](assets/syntax/README.md) for supported rule fields.
+
 ## Import compatibility
 
 Existing service result/error imports through `message` remain available as

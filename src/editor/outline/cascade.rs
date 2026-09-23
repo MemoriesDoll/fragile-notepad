@@ -1,8 +1,6 @@
 use super::fsm::ByteRange;
 use super::fsm::{DeclarationEvent, StructuralEvent, StructuralEventKind};
-use super::{
-    FunctionKind, OutlineBodyKind, OutlineNode, OutlineNodeKind, OutlineScanMode, OutlineTree,
-};
+use super::{FunctionKind, OutlineNode, OutlineNodeKind, OutlineScanMode, OutlineTree};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 
@@ -29,7 +27,6 @@ pub(super) fn cascade(
     declarations: Vec<DeclarationEvent>,
 ) -> CascadeOutput {
     let positions = TextPositions::new(text);
-    let indentation_depths = indentation_depths(text);
     let declaration_intervals =
         IntervalCounts::new(declarations.iter().filter_map(|event| event.body_range));
     let container_intervals =
@@ -73,13 +70,7 @@ pub(super) fn cascade(
             continue;
         }
 
-        let depth = match declaration.rule.body {
-            OutlineBodyKind::Indent => positions
-                .position_for_byte_offset(offset)
-                .and_then(|position| indentation_depths.get(position.line).copied())
-                .unwrap_or(0),
-            _ => container_intervals.count(offset) + declaration_depth,
-        };
+        let depth = container_intervals.count(offset) + declaration_depth;
         let mut kind = if declaration.rule.node_kind == OutlineNodeKind::Method
             || method_intervals.iter().any(|(kind, intervals)| {
                 declaration.rule.method_containers.contains(kind) && intervals.count(offset) > 0
@@ -273,31 +264,6 @@ impl<'a> TextPositions<'a> {
     }
 }
 
-fn indentation_depths(text: &str) -> Vec<usize> {
-    let mut seen = Vec::new();
-    let mut depths = Vec::new();
-    let mut start = 0;
-    loop {
-        let end = super::scan::line_end_offset(text, start);
-        let line = &text[start..end];
-        let indent: usize = line
-            .chars()
-            .take_while(|ch| matches!(ch, ' ' | '\t'))
-            .map(|ch| if ch == '\t' { 4 } else { 1 })
-            .sum();
-        let rank = seen.partition_point(|previous| *previous < indent);
-        depths.push(rank);
-        if !line.trim().is_empty() && seen.get(rank) != Some(&indent) {
-            seen.insert(rank, indent);
-        }
-        if end == text.len() {
-            break;
-        }
-        start = super::scan::next_line_start_offset(text, end);
-    }
-    depths
-}
-
 struct IntervalCounts {
     starts: Vec<usize>,
     ends: Vec<usize>,
@@ -452,7 +418,7 @@ fn node_at_path_mut<'a>(nodes: &'a mut [OutlineNode], path: &[usize]) -> &'a mut
 mod tests {
     use super::*;
     use crate::editor::outline::{
-        OutlineRegistry, lexical::OutlineCodeMask, structure::discover_structure,
+        OutlineRegistry, source::OutlineSource, structure::discover_structure,
     };
 
     fn old_attach(nodes: &mut Vec<OutlineNode>, node: OutlineNode) {
@@ -510,8 +476,7 @@ mod tests {
         for (token, text) in cases {
             let registry = OutlineRegistry::shared();
             let plan = registry.plan_for_syntax(token).unwrap();
-            let structure =
-                discover_structure(text, &OutlineCodeMask::new(text, &plan.lexical), plan);
+            let structure = discover_structure(text, &OutlineSource::new(text, plan), plan);
             let actual = cascade(text, &structure.containers, structure.declarations.clone());
             let mut reference = Vec::new();
             for event in &structure.containers {
@@ -553,20 +518,13 @@ mod tests {
                             && event.signature_range.start == function.start_offset
                     })
                     .unwrap();
-                let expected_depth = if declaration.rule.body == OutlineBodyKind::Indent {
-                    super::super::structure_support::indent_depth_before(
-                        text,
-                        function.start_offset,
-                    )
-                } else {
-                    super::super::structure_support::container_depth(
-                        &structure.containers,
-                        function.start_offset,
-                    ) + super::super::structure_support::declaration_depth(
-                        &structure.declarations,
-                        function.start_offset,
-                    )
-                };
+                let expected_depth = super::super::structure_support::container_depth(
+                    &structure.containers,
+                    function.start_offset,
+                ) + super::super::structure_support::declaration_depth(
+                    &structure.declarations,
+                    function.start_offset,
+                );
                 assert_eq!(function.depth, expected_depth, "{token} {}", function.name);
                 let expected_kind = if declaration.terminated {
                     FunctionKind::Declaration

@@ -4,10 +4,10 @@ use crate::core::DocumentId;
 
 use super::super::buffer::EditorBuffer;
 use super::cascade::cascade;
-use super::lexical::OutlineCodeMask;
 use super::projection::project_functions;
+use super::source::OutlineSource;
 use super::structure::discover_structure;
-use super::{OutlineParseRequest, OutlineParseResult, OutlinePlan, OutlineTree};
+use super::{OutlineParseRequest, OutlineParseResult, OutlinePlan};
 
 #[derive(Debug, Clone)]
 pub struct OutlineEngine<'a> {
@@ -38,8 +38,8 @@ impl<'a> OutlineEngine<'a> {
     }
 
     pub fn parse(&self, request: OutlineParseRequest) -> OutlineParseResult {
-        let mask = OutlineCodeMask::new(&request.text, &self.plan.lexical);
-        let structure = discover_structure(&request.text, &mask, self.plan);
+        let source = OutlineSource::new(&request.text, self.plan);
+        let structure = discover_structure(&request.text, &source, self.plan);
         let cascade = cascade(&request.text, &structure.containers, structure.declarations);
         let functions = project_functions(cascade.functions);
 
@@ -48,11 +48,7 @@ impl<'a> OutlineEngine<'a> {
             request.revision,
             request.syntax_token,
             request.registry_hash,
-            if functions.is_empty() {
-                OutlineTree::default()
-            } else {
-                cascade.tree
-            },
+            cascade.tree,
             functions,
             self.plan.diagnostics.clone(),
         )

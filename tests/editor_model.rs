@@ -1318,7 +1318,7 @@ fn editor_model_outline_detects_ruby_end_keyword_classes_modules_and_methods() {
         result.functions[0].body_range,
         Some(EditorRange::new(
             EditorPosition::new(2, "    def load".len()),
-            EditorPosition::new(6, 0)
+            EditorPosition::new(5, "    end".len())
         ))
     );
 }

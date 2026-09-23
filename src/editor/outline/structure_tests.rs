@@ -1,13 +1,13 @@
 use super::*;
-use crate::editor::outline::lexical::OutlineCodeMask;
+use crate::editor::outline::source::OutlineSource;
 use crate::editor::outline::{OutlineNodeKind, OutlineRegistry};
 
 fn discover_for_syntax(text: &str, syntax_token: &str) -> StructurePassOutput {
     let registry = OutlineRegistry::load();
     let plan = registry.plan_for_syntax(syntax_token).unwrap();
-    let mask = OutlineCodeMask::new(text, &plan.lexical);
+    let source = OutlineSource::new(text, plan);
 
-    discover_structure(text, &mask, plan)
+    discover_structure(text, &source, plan)
 }
 
 #[test]

@@ -1,34 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
 <outline-parsers schema-version="1">
   <family id="brace">
+    <syntax-token role="parameters-open" value="(" />
+    <syntax-token role="parameters-close" value=")" />
+    <syntax-token role="brackets-open" value="[" />
+    <syntax-token role="brackets-close" value="]" />
+    <syntax-token role="generics-open" value="&lt;" />
+    <syntax-token role="generics-close" value="&gt;" />
+    <syntax-token role="assignment" value="=" />
+    <syntax-token role="separator" value="," />
+    <syntax-token role="statement-end" value=";" />
+    <syntax-token role="assignment-reject-before" value="&lt;" />
+    <syntax-token role="assignment-reject-before" value="&gt;" />
+    <syntax-token role="assignment-reject-before" value="!" />
+    <syntax-token role="assignment-reject-before" value="+" />
+    <syntax-token role="assignment-reject-before" value="-" />
+    <syntax-token role="assignment-reject-before" value="*" />
+    <syntax-token role="assignment-reject-before" value="/" />
+    <syntax-token role="assignment-reject-before" value="%" />
+    <syntax-token role="assignment-reject-before" value="&amp;" />
+    <syntax-token role="assignment-reject-before" value="|" />
+    <syntax-token role="assignment-reject-after" value="=" />
+    <syntax-token role="assignment-reject-after" value="&gt;" />
     <adapter name="rust" />
     <adapter name="javascript" />
     <adapter name="generic-brace" />
+    <delimiter open="(" close=")" />
+    <delimiter open="[" close="]" />
     <body kind="brace" open="{" close="}" />
   </family>
 
   <family id="indent">
     <adapter name="python" />
     <adapter name="generic-indent" />
-    <body kind="indent" />
+    <delimiter open="(" close=")" />
+    <delimiter open="[" close="]" />
+    <delimiter open="{" close="}" />
+    <body kind="indent" header-end=":" line-continuation="\" />
   </family>
 
   <family id="end-keyword">
+    <syntax-token role="statement-end" value=";" />
     <adapter name="ruby" />
     <adapter name="generic-end-keyword" />
-    <body kind="end-keyword" end-keyword="end" />
+    <body kind="end-keyword" end-keyword="end" block-openers="def,class,module,if,unless,case,begin,while,until,for,do" conditional-openers="if,unless,while,until" loop-openers="while,until,for" loop-body-keyword="do" statement-boundaries=";,=,(,[,then,else,do" member-prefixes=".,:" />
   </family>
 
-  <language name="Rust">
+  <language name="Rust" signature-modifiers="pub,async,const,unsafe,extern,default">
     <token value="rs" />
     <use-family id="brace" adapter="rust" />
-    <lexical>
+    <lexical identifier-prefix="r#">
       <word-characters extra="_" unicode="true" />
       <line-comment open="//" />
       <block-comment open="/*" close="*/" nested="true" />
       <string open="&quot;" close="&quot;" escape="\" />
-      <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
-      <raw-string kind="rust" />
+      <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" single-quote-literals="true" />
+      <raw-string prefixes="r,br,cr" repeat="#" open="&quot;" close="&quot;" />
     </lexical>
     <container kind="module" keyword="mod" name="after-keyword" body="brace" />
     <container kind="trait" keyword="trait" name="after-keyword" body="brace" />
@@ -71,7 +98,7 @@
     </lexical>
     <container kind="class" keyword="class" name="after-keyword" body="brace" />
     <declaration kind="function" keyword="function" name="after-keyword" body="brace" method-containers="class" />
-    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class" reject-names="if,for,while,switch,catch,function,return,throw,new" reject-previous=".,=,return,throw,new,function" control-headers="for,if,else if,while,switch,catch" />
+    <declaration kind="function" scan="callable" assignment-arrow="=&gt;" name="before-parameters" body="brace" method-containers="class" reject-names="if,for,while,switch,catch,function,return,throw,new" reject-previous=".,=,return,throw,new,function" control-headers="for,if,else if,while,switch,catch" />
   </language>
 
   <language name="Java">
@@ -83,6 +110,7 @@
       <block-comment open="/*" close="*/" />
       <string open="&quot;" close="&quot;" escape="\" />
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+      <string open="&quot;&quot;&quot;" close="&quot;&quot;&quot;" escape="\" />
     </lexical>
     <container kind="class" keyword="class" name="after-keyword" body="brace" />
     <container kind="interface" keyword="interface" name="after-keyword" body="brace" />
@@ -123,6 +151,7 @@
       <block-comment open="/*" close="*/" />
       <string open="&quot;" close="&quot;" escape="\" />
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
+      <raw-string prefixes="R&quot;,u8R&quot;,uR&quot;,UR&quot;,LR&quot;" open="(" close=")" suffix="&quot;" max-delimiter-length="16" forbidden-delimiter-characters=")\" />
     </lexical>
     <container kind="namespace" keyword="namespace" name="after-keyword" body="brace" />
     <container kind="class" keyword="class" name="after-keyword" body="brace" />
@@ -135,7 +164,7 @@
     <token value="rake" />
     <use-family id="end-keyword" adapter="ruby" />
     <lexical>
-      <word-characters extra="_@!" unicode="true" />
+      <word-characters extra="_@!?" unicode="true" />
       <line-comment open="#" />
       <string open="&quot;" close="&quot;" escape="\" />
       <string open="&apos;" close="&apos;" escape="\" />

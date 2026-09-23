@@ -16,6 +16,7 @@ pub struct OutlinePlan {
     pub syntax_tokens: Vec<String>,
     pub family_id: String,
     pub adapter_name: String,
+    pub signature_modifiers: Vec<String>,
     pub containers: Vec<OutlineRulePlan>,
     pub declarations: Vec<OutlineRulePlan>,
     pub lexical: OutlineLexicalPlan,
@@ -71,6 +72,7 @@ pub struct OutlineCallablePlan {
     pub container_name_previous: Vec<String>,
     pub assignment_continuations: Vec<String>,
     pub control_headers: Vec<String>,
+    pub assignment_arrow: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -78,7 +80,8 @@ pub struct OutlineLexicalPlan {
     pub line_comments: Vec<String>,
     pub block_comments: Vec<OutlineBlockCommentPlan>,
     pub strings: Vec<OutlineStringPlan>,
-    pub raw_strings: Vec<String>,
+    pub raw_strings: Vec<super::schema::RawRawString>,
+    pub identifier_prefix: Option<String>,
     pub word_character_extra: String,
     pub unicode_word_characters: bool,
 }
@@ -102,6 +105,8 @@ pub struct OutlineStringPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlineStructurePlan {
     pub bodies: Vec<OutlineBodyPlan>,
+    pub delimiters: Vec<super::schema::RawDelimiter>,
+    pub syntax_tokens: Vec<super::schema::RawSyntaxToken>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +115,14 @@ pub struct OutlineBodyPlan {
     pub open: Option<String>,
     pub close: Option<String>,
     pub end_keyword: Option<String>,
+    pub block_openers: Vec<String>,
+    pub conditional_openers: Vec<String>,
+    pub loop_openers: Vec<String>,
+    pub loop_body_keyword: Option<String>,
+    pub statement_boundaries: Vec<String>,
+    pub member_prefixes: Vec<String>,
+    pub header_end: Option<String>,
+    pub line_continuation: Option<String>,
 }
 
 pub fn compile_outline_schema(
@@ -215,6 +228,40 @@ fn compile_language(
         &mut diagnostics,
     );
 
+    validate_lexical(&language.lexical, &language_name, &mut diagnostics);
+    for token in &family.syntax_tokens {
+        if token.value.chars().count() != 1
+            || !matches!(
+                token.role.as_str(),
+                "parameters-open"
+                    | "parameters-close"
+                    | "brackets-open"
+                    | "brackets-close"
+                    | "generics-open"
+                    | "generics-close"
+                    | "assignment"
+                    | "separator"
+                    | "statement-end"
+                    | "assignment-reject-before"
+                    | "assignment-reject-after"
+            )
+        {
+            diagnostics.push(diagnostics::error(format!(
+                "outline family {family_id} has an invalid syntax-token role or value"
+            )));
+        }
+    }
+    for delimiter in &family.delimiters {
+        if delimiter.open.is_empty()
+            || delimiter.close.is_empty()
+            || delimiter.open == delimiter.close
+        {
+            diagnostics.push(diagnostics::error(format!(
+                "outline family {family_id} has an empty or ambiguous delimiter"
+            )));
+        }
+    }
+
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == super::types::OutlineDiagnosticSeverity::Error)
@@ -227,9 +274,10 @@ fn compile_language(
         syntax_tokens: language.tokens.clone(),
         family_id: family_id.to_owned(),
         adapter_name: adapter_name.to_owned(),
+        signature_modifiers: language.signature_modifiers.clone(),
         containers,
         declarations,
-        lexical: compile_lexical(&language.lexical, adapter_name),
+        lexical: compile_lexical(&language.lexical),
         structure,
         diagnostics,
     })
@@ -257,7 +305,11 @@ fn compile_structure(
         }
     }
 
-    OutlineStructurePlan { bodies }
+    OutlineStructurePlan {
+        bodies,
+        delimiters: family.delimiters.clone(),
+        syntax_tokens: family.syntax_tokens.clone(),
+    }
 }
 
 fn compile_body(body: &RawBody) -> Result<OutlineBodyPlan, String> {
@@ -275,8 +327,14 @@ fn compile_body(body: &RawBody) -> Result<OutlineBodyPlan, String> {
 
     match kind {
         OutlineBodyKind::Brace => {
-            if body.open.as_deref() != Some("{") || body.close.as_deref() != Some("}") {
-                return Err("brace body must define open=\"{\" and close=\"}\"".to_owned());
+            if body.open.as_deref().unwrap_or("").is_empty()
+                || body.close.as_deref().unwrap_or("").is_empty()
+                || body.open == body.close
+            {
+                return Err(
+                    "brace body must define distinct non-empty open and close delimiters"
+                        .to_owned(),
+                );
             }
         }
         OutlineBodyKind::EndKeyword => {
@@ -284,7 +342,14 @@ fn compile_body(body: &RawBody) -> Result<OutlineBodyPlan, String> {
                 return Err("end-keyword body must define an end-keyword".to_owned());
             }
         }
-        OutlineBodyKind::Indent | OutlineBodyKind::None => {}
+        OutlineBodyKind::Indent => {
+            if body.header_end.as_deref() == Some("")
+                || body.line_continuation.as_deref() == Some("")
+            {
+                return Err("indent body has an empty header or continuation token".to_owned());
+            }
+        }
+        OutlineBodyKind::None => {}
     }
 
     Ok(OutlineBodyPlan {
@@ -292,6 +357,14 @@ fn compile_body(body: &RawBody) -> Result<OutlineBodyPlan, String> {
         open: body.open.clone(),
         close: body.close.clone(),
         end_keyword: body.end_keyword.clone(),
+        block_openers: body.block_openers.clone(),
+        conditional_openers: body.conditional_openers.clone(),
+        loop_openers: body.loop_openers.clone(),
+        loop_body_keyword: body.loop_body_keyword.clone(),
+        statement_boundaries: body.statement_boundaries.clone(),
+        member_prefixes: body.member_prefixes.clone(),
+        header_end: body.header_end.clone(),
+        line_continuation: body.line_continuation.clone(),
     })
 }
 
@@ -411,6 +484,7 @@ fn compile_rule(
             container_name_previous: rule.container_name_previous.clone(),
             assignment_continuations: rule.assignment_continuations.clone(),
             control_headers: rule.control_headers.clone(),
+            assignment_arrow: rule.assignment_arrow.clone(),
         }
     } else {
         OutlineCallablePlan::default()
@@ -428,7 +502,34 @@ fn compile_rule(
     })
 }
 
-fn compile_lexical(lexical: &RawLexical, adapter_name: &str) -> OutlineLexicalPlan {
+fn validate_lexical(
+    lexical: &RawLexical,
+    language: &str,
+    diagnostics: &mut Vec<OutlineDiagnostic>,
+) {
+    let invalid = lexical.line_comments.iter().any(String::is_empty)
+        || lexical
+            .block_comments
+            .iter()
+            .any(|comment| comment.open.is_empty() || comment.close.is_empty())
+        || lexical.strings.iter().any(|string| {
+            string.open.is_empty()
+                || string.close.is_empty()
+                || string.escape.as_deref() == Some("")
+        })
+        || lexical.raw_strings.iter().any(|raw| {
+            raw.prefixes.is_empty()
+                || raw.prefixes.iter().any(String::is_empty)
+                || raw.open.is_empty()
+                || raw.close.is_empty()
+                || raw.repeat.as_deref() == Some("")
+        });
+    if invalid {
+        diagnostics.push(diagnostics::error(format!("outline language {language} has an empty lexical delimiter or incomplete raw-string rule")));
+    }
+}
+
+fn compile_lexical(lexical: &RawLexical) -> OutlineLexicalPlan {
     OutlineLexicalPlan {
         line_comments: lexical.line_comments.clone(),
         block_comments: lexical
@@ -440,27 +541,21 @@ fn compile_lexical(lexical: &RawLexical, adapter_name: &str) -> OutlineLexicalPl
                 nested: comment.nested,
             })
             .collect(),
-        strings: lexical
-            .strings
-            .iter()
-            .map(|string| compile_string(string, adapter_name))
-            .collect(),
+        strings: lexical.strings.iter().map(compile_string).collect(),
         raw_strings: lexical.raw_strings.clone(),
-        word_character_extra: lexical
-            .word_character_extra
-            .clone()
-            .unwrap_or_else(|| "_".to_owned()),
+        identifier_prefix: lexical.identifier_prefix.clone(),
+        word_character_extra: lexical.word_character_extra.clone().unwrap_or_default(),
         unicode_word_characters: lexical.unicode_word_characters,
     }
 }
 
-fn compile_string(string: &RawString, adapter_name: &str) -> OutlineStringPlan {
+fn compile_string(string: &RawString) -> OutlineStringPlan {
     OutlineStringPlan {
         open: string.open.clone(),
         close: string.close.clone(),
         escape: string.escape.clone(),
         requires_closing_on_line: string.requires_closing_on_line,
-        single_quote_literals: adapter_name == "rust" && string.open == "'",
+        single_quote_literals: string.single_quote_literals,
     }
 }
 

@@ -13,6 +13,8 @@ pub struct RawFamily {
     pub id: Option<String>,
     pub adapters: Vec<String>,
     pub bodies: Vec<RawBody>,
+    pub delimiters: Vec<RawDelimiter>,
+    pub syntax_tokens: Vec<RawSyntaxToken>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -21,6 +23,14 @@ pub struct RawBody {
     pub open: Option<String>,
     pub close: Option<String>,
     pub end_keyword: Option<String>,
+    pub block_openers: Vec<String>,
+    pub conditional_openers: Vec<String>,
+    pub loop_openers: Vec<String>,
+    pub loop_body_keyword: Option<String>,
+    pub statement_boundaries: Vec<String>,
+    pub member_prefixes: Vec<String>,
+    pub header_end: Option<String>,
+    pub line_continuation: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -29,6 +39,7 @@ pub struct RawLanguage {
     pub tokens: Vec<String>,
     pub family: Option<RawUseFamily>,
     pub lexical: RawLexical,
+    pub signature_modifiers: Vec<String>,
     pub containers: Vec<RawRule>,
     pub declarations: Vec<RawRule>,
 }
@@ -44,7 +55,8 @@ pub struct RawLexical {
     pub line_comments: Vec<String>,
     pub block_comments: Vec<RawBlockComment>,
     pub strings: Vec<RawString>,
-    pub raw_strings: Vec<String>,
+    pub raw_strings: Vec<RawRawString>,
+    pub identifier_prefix: Option<String>,
     pub word_character_extra: Option<String>,
     pub unicode_word_characters: bool,
 }
@@ -62,6 +74,7 @@ pub struct RawString {
     pub close: String,
     pub escape: Option<String>,
     pub requires_closing_on_line: bool,
+    pub single_quote_literals: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -85,8 +98,32 @@ pub struct RawRule {
     pub container_name_previous: Vec<String>,
     pub assignment_continuations: Vec<String>,
     pub control_headers: Vec<String>,
+    pub assignment_arrow: Option<String>,
     pub method_containers: Vec<String>,
     pub declaration_terminator: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawDelimiter {
+    pub open: String,
+    pub close: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawSyntaxToken {
+    pub role: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawRawString {
+    pub prefixes: Vec<String>,
+    pub repeat: Option<String>,
+    pub open: String,
+    pub close: String,
+    pub suffix: String,
+    pub max_delimiter_length: Option<usize>,
+    pub forbidden_delimiter_characters: String,
 }
 
 pub fn parse_outline_schema(xml: &str) -> (RawOutlineSchema, Vec<OutlineDiagnostic>) {
@@ -144,6 +181,22 @@ pub fn parse_outline_schema(xml: &str) -> (RawOutlineSchema, Vec<OutlineDiagnost
 
 fn parse_family(element: roxmltree::Node<'_, '_>) -> RawFamily {
     RawFamily {
+        syntax_tokens: element
+            .children()
+            .filter(|node| node.has_tag_name("syntax-token"))
+            .map(|node| RawSyntaxToken {
+                role: node.attribute("role").unwrap_or("").to_owned(),
+                value: node.attribute("value").unwrap_or("").to_owned(),
+            })
+            .collect(),
+        delimiters: element
+            .children()
+            .filter(|node| node.has_tag_name("delimiter"))
+            .map(|node| RawDelimiter {
+                open: node.attribute("open").unwrap_or("").to_owned(),
+                close: node.attribute("close").unwrap_or("").to_owned(),
+            })
+            .collect(),
         id: element.attribute("id").map(str::to_owned),
         adapters: element
             .children()
@@ -165,6 +218,14 @@ fn parse_body(element: roxmltree::Node<'_, '_>) -> RawBody {
         open: element.attribute("open").map(str::to_owned),
         close: element.attribute("close").map(str::to_owned),
         end_keyword: element.attribute("end-keyword").map(str::to_owned),
+        block_openers: parse_csv_attribute(element.attribute("block-openers")),
+        conditional_openers: parse_csv_attribute(element.attribute("conditional-openers")),
+        loop_openers: parse_csv_attribute(element.attribute("loop-openers")),
+        loop_body_keyword: element.attribute("loop-body-keyword").map(str::to_owned),
+        statement_boundaries: parse_csv_attribute(element.attribute("statement-boundaries")),
+        member_prefixes: parse_csv_attribute(element.attribute("member-prefixes")),
+        header_end: element.attribute("header-end").map(str::to_owned),
+        line_continuation: element.attribute("line-continuation").map(str::to_owned),
     }
 }
 
@@ -176,6 +237,7 @@ fn parse_language(element: roxmltree::Node<'_, '_>) -> RawLanguage {
         .unwrap_or_default();
 
     RawLanguage {
+        signature_modifiers: parse_csv_attribute(element.attribute("signature-modifiers")),
         name: element.attribute("name").map(str::to_owned),
         tokens: element
             .children()
@@ -230,11 +292,11 @@ fn parse_lexical(element: roxmltree::Node<'_, '_>) -> RawLexical {
             .filter(|node| node.has_tag_name("string"))
             .filter_map(parse_string)
             .collect(),
+        identifier_prefix: element.attribute("identifier-prefix").map(str::to_owned),
         raw_strings: element
             .children()
             .filter(|node| node.has_tag_name("raw-string"))
-            .filter_map(|node| node.attribute("kind"))
-            .map(str::to_owned)
+            .map(parse_raw_string)
             .collect(),
         word_character_extra: word_characters
             .and_then(|node| node.attribute("extra"))
@@ -252,6 +314,23 @@ fn parse_block_comment(element: roxmltree::Node<'_, '_>) -> Option<RawBlockComme
     })
 }
 
+pub(super) fn parse_raw_string(element: roxmltree::Node<'_, '_>) -> RawRawString {
+    RawRawString {
+        prefixes: parse_csv_attribute(element.attribute("prefixes")),
+        repeat: element.attribute("repeat").map(str::to_owned),
+        open: element.attribute("open").unwrap_or("").to_owned(),
+        close: element.attribute("close").unwrap_or("").to_owned(),
+        suffix: element.attribute("suffix").unwrap_or("").to_owned(),
+        max_delimiter_length: element
+            .attribute("max-delimiter-length")
+            .and_then(|value| value.parse().ok()),
+        forbidden_delimiter_characters: element
+            .attribute("forbidden-delimiter-characters")
+            .unwrap_or("")
+            .to_owned(),
+    }
+}
+
 fn parse_string(element: roxmltree::Node<'_, '_>) -> Option<RawString> {
     let open = element.attribute("open")?;
     Some(RawString {
@@ -259,6 +338,7 @@ fn parse_string(element: roxmltree::Node<'_, '_>) -> Option<RawString> {
         close: element.attribute("close").unwrap_or(open).to_owned(),
         escape: element.attribute("escape").map(str::to_owned),
         requires_closing_on_line: element.attribute("requires-closing-on-line") == Some("true"),
+        single_quote_literals: element.attribute("single-quote-literals") == Some("true"),
     })
 }
 
@@ -289,6 +369,10 @@ fn parse_rule(element: roxmltree::Node<'_, '_>) -> RawRule {
             element.attribute("assignment-continuations"),
         ),
         control_headers: parse_csv_attribute(element.attribute("control-headers")),
+        assignment_arrow: element
+            .attribute("assignment-arrow")
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
         method_containers: parse_csv_attribute(element.attribute("method-containers")),
         declaration_terminator: element
             .attribute("declaration-terminator")

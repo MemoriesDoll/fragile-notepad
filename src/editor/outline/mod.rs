@@ -1,7 +1,6 @@
 use super::buffer::EditorBuffer;
 use super::position::{EditorPosition, EditorRange};
 
-mod adapters;
 mod callable_statements;
 mod cascade;
 mod compiler;
@@ -14,6 +13,7 @@ mod registry;
 mod scan;
 mod schema;
 mod service;
+mod source;
 mod structure;
 mod structure_support;
 mod types;
@@ -26,8 +26,8 @@ pub use compiler::{
 pub use engine::OutlineEngine;
 pub use registry::OutlineRegistry;
 pub use schema::{
-    RawBlockComment, RawBody, RawFamily, RawLanguage, RawLexical, RawOutlineSchema, RawRule,
-    RawString, RawUseFamily, parse_outline_schema,
+    RawBlockComment, RawBody, RawDelimiter, RawFamily, RawLanguage, RawLexical, RawOutlineSchema,
+    RawRawString, RawRule, RawString, RawSyntaxToken, RawUseFamily, parse_outline_schema,
 };
 pub use service::{
     OutlineSnapshotMetadata, OutlineState, OutlineStatus, outline_registry_hash,

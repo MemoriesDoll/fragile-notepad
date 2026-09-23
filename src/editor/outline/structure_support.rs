@@ -3,10 +3,6 @@ use super::fsm::{ByteRange, DeclarationEvent};
 #[cfg(test)]
 use super::fsm::{StructuralEvent, StructuralEventKind};
 #[cfg(test)]
-use super::scan::{
-    indentation_before, leading_whitespace_len, line_ending_len_before, line_start_offset,
-};
-#[cfg(test)]
 use crate::editor::position_for_byte_offset;
 
 #[cfg(test)]
@@ -50,34 +46,6 @@ pub(super) fn declaration_depth(declarations: &[DeclarationEvent], offset: usize
                 && event.signature_range.start != offset
         })
         .count()
-}
-
-#[cfg(test)]
-pub(super) fn indent_depth_before(text: &str, offset: usize) -> usize {
-    let current_indent = indentation_before(text, offset);
-    let current_line_start = line_start_offset(text, offset);
-    let mut cursor = current_line_start;
-    let mut depths = Vec::new();
-
-    while cursor > 0 {
-        let previous_line_end = cursor.saturating_sub(line_ending_len_before(text, cursor));
-        let previous_line_start = line_start_offset(text, previous_line_end);
-        let line = text
-            .get(previous_line_start..previous_line_end)
-            .unwrap_or("");
-
-        if !line.trim().is_empty() {
-            let indent =
-                indentation_before(text, previous_line_start + leading_whitespace_len(line));
-            if indent < current_indent && !depths.contains(&indent) {
-                depths.push(indent);
-            }
-        }
-
-        cursor = previous_line_start;
-    }
-
-    depths.len()
 }
 
 #[cfg(test)]
