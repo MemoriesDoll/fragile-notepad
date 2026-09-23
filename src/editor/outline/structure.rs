@@ -25,6 +25,22 @@ pub(super) fn discover_structure(
     for rule in &plan.containers {
         containers.extend(container_events_for_rule(text, source, rule));
     }
+    // Overlapping XML keywords can describe the same body. Prefer the earliest
+    // header and, at the same start, the longest prefix before the name.
+    containers.sort_by_key(|event| {
+        (
+            event.signature_range.start,
+            std::cmp::Reverse(event.name_range.start),
+        )
+    });
+    let mut container_bodies = std::collections::HashSet::new();
+    containers.retain(|event| {
+        let extent = event.body_range.unwrap_or(ByteRange::new(
+            event.signature_range.end,
+            event.signature_range.end,
+        ));
+        container_bodies.insert((extent.start, extent.end))
+    });
     let container_names = ContainerNames::new(text, &containers);
 
     for rule in &plan.declarations {
@@ -829,6 +845,29 @@ fn token_matches_required_kind(
                     is_qualified_identifier(previous_text, source)
                         || token_matches_required_kind(text, source, previous, "template-type-tail")
                 })
+        }
+        "array-type-tail" => {
+            let Some(close) = previous_code_token(text, source, token.end).filter(|close| {
+                source.symbol_text(close.text(text)) == SyntaxSymbol::BracketsClose
+            }) else {
+                return false;
+            };
+            let Some(open) = source.matching_delimiter(close.start) else {
+                return false;
+            };
+            // Array type suffixes have empty bracket pairs, possibly with spacing.
+            if source
+                .next_token(open)
+                .and_then(|open| source.next_token(open.end))
+                != Some(close)
+            {
+                return false;
+            }
+            previous_contiguous_code_token(text, source, open).is_some_and(|prefix| {
+                is_qualified_identifier(prefix.text(text), source)
+                    || token_matches_required_kind(text, source, prefix, "template-type-tail")
+                    || token_matches_required_kind(text, source, prefix, "array-type-tail")
+            })
         }
         _ => false,
     }

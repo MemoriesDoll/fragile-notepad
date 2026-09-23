@@ -284,6 +284,7 @@ message_catalog! {
         ChromeAnimationFrame(arg0: Instant) => Defer,
         RuntimeEvent(arg0: event::Event, arg1: event::Status, arg2: window::Id) => Reject,
         ToggleFunctionList => Reject,
+        FunctionListQueryChanged(arg0: String) => Reject,
         FunctionListEntrySelected(arg0: EditorPosition) => Reject,
         FoldCurrent => Reject,
         UnfoldCurrent => Reject,

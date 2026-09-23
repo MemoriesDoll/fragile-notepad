@@ -32,6 +32,7 @@ impl App {
             is_find_visible: false,
             is_inline_replace_visible: false,
             is_function_list_visible: false,
+            function_list_query: String::new(),
             main_window_id: Some(main_window_id),
             settings_window: None,
             advanced_search_window: None,

@@ -29,6 +29,7 @@ impl App {
                 is_find_visible: self.is_find_visible,
                 is_inline_replace_visible: self.is_inline_replace_visible,
                 is_function_list_visible: self.is_function_list_visible,
+                function_list_query: &self.function_list_query,
                 chrome_animation: self.chrome_animation_info(),
                 active_menu: self.menu.active(),
                 active_menu_path: self.menu.path(),

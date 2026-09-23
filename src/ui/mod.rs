@@ -70,6 +70,7 @@ pub fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         is_find_visible,
         is_inline_replace_visible,
         is_function_list_visible,
+        function_list_query,
         chrome_animation,
         active_menu,
         active_menu_path,
@@ -122,33 +123,34 @@ pub fn view<'a>(model: WorkbenchView<'a>) -> Element<'a, Message> {
         .width(Fill)
         .style(styles::editor_surface);
 
-    let main_area: Element<'a, Message> =
-        if chrome_animation.function_list_rendered_visible || is_function_list_visible {
-            if let Some(document) = active_document {
-                let function_list_width = function_list_panel::FUNCTION_LIST_PANEL_WIDTH
-                    * chrome_animation.function_list_progress.clamp(0.0, 1.0);
+    let main_area: Element<'a, Message> = if chrome_animation.function_list_rendered_visible
+        || is_function_list_visible
+    {
+        if let Some(document) = active_document {
+            let function_list_width = function_list_panel::FUNCTION_LIST_PANEL_WIDTH
+                * chrome_animation.function_list_progress.clamp(0.0, 1.0);
 
-                row![
-                    editor_surface,
-                    container(motion::fade(
-                        function_list_panel::view(document, active_outline_state),
-                        chrome_animation.function_list_progress,
-                        styles::editor_background,
-                        is_function_list_visible,
-                    ))
-                    .width(Length::Fixed(function_list_width))
-                    .height(Fill)
-                    .clip(true),
-                ]
+            row![
+                editor_surface,
+                container(motion::fade(
+                    function_list_panel::view(document, active_outline_state, function_list_query),
+                    chrome_animation.function_list_progress,
+                    styles::editor_background,
+                    is_function_list_visible,
+                ))
+                .width(Length::Fixed(function_list_width))
                 .height(Fill)
-                .width(Fill)
-                .into()
-            } else {
-                editor_surface.into()
-            }
+                .clip(true),
+            ]
+            .height(Fill)
+            .width(Fill)
+            .into()
         } else {
             editor_surface.into()
-        };
+        }
+    } else {
+        editor_surface.into()
+    };
 
     let shell = container(workbench.push(main_area).push(status_bar::view(
         active_document,

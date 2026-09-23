@@ -1,97 +1,431 @@
-use iced::widget::{button, column, container, row, scrollable, space, text};
-use iced::{Center, Element, Fill, Length};
+use iced::widget::{button, column, container, row, scrollable, space, text, text_input, tooltip};
+use iced::{Center, Element, Fill, Font};
 
 use crate::core::Document;
-use crate::editor::{FunctionEntry, FunctionKind, OutlineState, OutlineStatus};
+use crate::editor::outline::{OutlineNode, OutlineNodeKind};
+use crate::editor::{EditorRange, FunctionKind, OutlineState, OutlineStatus, containing_function};
 use crate::message::Message;
-use crate::ui::styles;
+use crate::ui::icons::hero::{self, HeroIcon, IconTone};
+use crate::ui::{centered_button_content, styles};
 
-pub const FUNCTION_LIST_PANEL_WIDTH: f32 = 244.0;
+pub const FUNCTION_LIST_PANEL_WIDTH: f32 = 280.0;
 pub const FUNCTION_LIST_PANEL_TITLE: &str = "Function List";
-pub const FUNCTION_LIST_EMPTY_MESSAGE: &str = "No functions found.";
-pub const FUNCTION_LIST_PENDING_MESSAGE: &str = "Scanning...";
+pub const FUNCTION_LIST_EMPTY_MESSAGE: &str = "No symbols found";
+pub const FUNCTION_LIST_PENDING_MESSAGE: &str = "Scanning symbols…";
+pub const SCROLL_ID: &str = "function-list-scroll";
+pub const INPUT_ID: &str = "function-list-filter";
 
-const TITLE_TEXT_SIZE: u32 = 13;
-const BODY_TEXT_SIZE: u32 = 13;
-const LABEL_TEXT_SIZE: u32 = 11;
-const INDENT_WIDTH: f32 = 14.0;
-
-pub fn view<'a>(_: &'a Document, outline_state: Option<&'a OutlineState>) -> Element<'a, Message> {
-    let body = match outline_state {
-        Some(state) if state.status == OutlineStatus::Pending => {
-            empty_state(FUNCTION_LIST_PENDING_MESSAGE)
+pub fn view<'a>(
+    document: &'a Document,
+    outline_state: Option<&'a OutlineState>,
+    query: &'a str,
+) -> Element<'a, Message> {
+    let ready = outline_state.filter(|state| state.status == OutlineStatus::Ready);
+    let entries = ready.map_or(&[][..], |state| state.functions.as_slice());
+    let visible = ready.map_or_else(Vec::new, |state| visible_rows(state, query));
+    let total = ready.map_or(0, |state| {
+        if state.tree.roots.is_empty() {
+            state.functions.len()
+        } else {
+            symbol_count(&state.tree.roots)
         }
-        Some(state) if !state.functions.is_empty() => function_rows(state.functions.clone()),
-        _ => empty_state(FUNCTION_LIST_EMPTY_MESSAGE),
+    });
+    let caret = document.main_selection().cursor;
+    let current = containing_function(entries, caret)
+        .map(|entry| entry.range)
+        .or_else(|| {
+            visible
+                .iter()
+                .filter(|row| row.range.start <= caret && caret < row.range.end)
+                .max_by_key(|row| (row.depth, row.range.start))
+                .map(|row| row.range)
+        });
+    let count = if ready.is_none() {
+        String::from("—")
+    } else if query.trim().is_empty() {
+        total.to_string()
+    } else {
+        format!(
+            "{} / {}",
+            visible.iter().filter(|row| row.matched).count(),
+            total
+        )
+    };
+
+    let header = row![
+        text(FUNCTION_LIST_PANEL_TITLE).size(13).font(Font {
+            weight: iced::font::Weight::Semibold,
+            ..Font::DEFAULT
+        }),
+        container(text(count).size(11))
+            .padding([2, 6])
+            .style(styles::function_list_count),
+        space::horizontal(),
+        icon_button(
+            HeroIcon::XMark,
+            "Close function list",
+            Message::ToggleFunctionList
+        ),
+    ]
+    .spacing(7)
+    .align_y(Center);
+
+    let title = document.title();
+    let file = tooltip(
+        text(title.clone())
+            .size(12)
+            .width(Fill)
+            .wrapping(text::Wrapping::None)
+            .ellipsis(text::Ellipsis::Middle)
+            .style(styles::function_list_secondary),
+        container(text(title).size(12))
+            .padding(6)
+            .style(styles::tooltip),
+        tooltip::Position::Bottom,
+    );
+
+    let mut input = text_input("Filter symbols…", query)
+        .id(INPUT_ID)
+        .on_input(Message::FunctionListQueryChanged)
+        .size(12)
+        .padding([7, 9])
+        .width(Fill)
+        .style(styles::input);
+    if let Some(first) = visible.iter().find(|row| row.matched) {
+        input = input.on_submit(Message::FunctionListEntrySelected(first.range.start));
+    }
+    let mut filter = row![input].spacing(4).align_y(Center);
+    if !query.is_empty() {
+        filter = filter.push(icon_button(
+            HeroIcon::XMark,
+            "Clear filter",
+            Message::FunctionListQueryChanged(String::new()),
+        ));
+    }
+
+    let body = if ready.is_none() {
+        empty_state(
+            FUNCTION_LIST_PENDING_MESSAGE,
+            "The list updates as you edit.",
+        )
+    } else if total == 0 {
+        empty_state(
+            FUNCTION_LIST_EMPTY_MESSAGE,
+            "Functions and types in this file will appear here.",
+        )
+    } else if visible.is_empty() {
+        empty_state(
+            "No matching symbols",
+            "Try another name or clear the filter.",
+        )
+    } else {
+        visible
+            .into_iter()
+            .fold(column![].spacing(2).padding([4, 6]), |rows, symbol| {
+                let active = current == Some(symbol.range);
+                rows.push(symbol_row(symbol, active))
+            })
+            .into()
     };
 
     container(
         column![
-            container(text(FUNCTION_LIST_PANEL_TITLE).size(TITLE_TEXT_SIZE))
-                .padding([8, 10])
+            container(column![header, file, filter].spacing(8))
+                .padding([10, 12])
                 .width(Fill)
                 .style(styles::function_list_header),
-            scrollable(body).smooth_scroll(true).height(Fill),
+            scrollable(body)
+                .id(SCROLL_ID)
+                .smooth_scroll(true)
+                .height(Fill),
+            container(row![
+                text("Source order").size(11),
+                space::horizontal(),
+                text("Click to jump").size(11),
+            ])
+            .padding([8, 12])
+            .width(Fill)
+            .style(styles::function_list_footer),
         ]
         .height(Fill),
     )
-    .width(Length::Fixed(FUNCTION_LIST_PANEL_WIDTH))
+    .width(FUNCTION_LIST_PANEL_WIDTH)
     .height(Fill)
     .style(styles::function_list_panel)
     .into()
 }
 
-fn function_rows(entries: Vec<FunctionEntry>) -> Element<'static, Message> {
-    let rows = entries
-        .into_iter()
-        .fold(column![].spacing(1).padding(4), |rows, entry| {
-            rows.push(function_row(entry))
-        });
-
-    rows.into()
+fn symbol_count(nodes: &[OutlineNode]) -> usize {
+    nodes
+        .iter()
+        .map(|node| 1 + symbol_count(&node.children))
+        .sum()
 }
 
-fn function_row(entry: FunctionEntry) -> Element<'static, Message> {
-    button(
+#[derive(Debug)]
+struct SymbolRow<'a> {
+    name: &'a str,
+    kind: OutlineNodeKind,
+    range: EditorRange,
+    depth: usize,
+    matched: bool,
+}
+
+fn visible_rows<'a>(state: &'a OutlineState, query: &str) -> Vec<SymbolRow<'a>> {
+    let query = query.trim().to_lowercase();
+    // Function-only snapshots are also used by callers without an outline tree.
+    if state.tree.roots.is_empty() {
+        return state
+            .functions
+            .iter()
+            .filter(|entry| query.is_empty() || entry.name.to_lowercase().contains(&query))
+            .map(|entry| SymbolRow {
+                name: &entry.name,
+                kind: match entry.kind {
+                    FunctionKind::Function => OutlineNodeKind::Function,
+                    FunctionKind::Method => OutlineNodeKind::Method,
+                    FunctionKind::Declaration => OutlineNodeKind::Declaration,
+                },
+                range: entry.range,
+                depth: entry.depth,
+                matched: true,
+            })
+            .collect();
+    }
+
+    let mut rows = Vec::new();
+    append_nodes(&state.tree.roots, &query, false, &mut rows);
+    rows
+}
+
+fn append_nodes<'a>(
+    nodes: &'a [OutlineNode],
+    query: &str,
+    parent_matches: bool,
+    rows: &mut Vec<SymbolRow<'a>>,
+) {
+    // The parser attaches functions after containers; sibling storage order is
+    // therefore not necessarily source order.
+    let mut ordered = nodes.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|node| node.range.start);
+    for node in ordered {
+        let start = rows.len();
+        let name = if node.name.is_empty() {
+            "(anonymous)"
+        } else {
+            &node.name
+        };
+        let matched = parent_matches || query.is_empty() || name.to_lowercase().contains(query);
+        rows.push(SymbolRow {
+            name,
+            kind: node.kind,
+            range: node.range,
+            depth: node.depth,
+            matched,
+        });
+        append_nodes(&node.children, query, matched, rows);
+        // Keep ancestors as context; matching a container also shows its children.
+        if rows.len() == start + 1 && !matched {
+            rows.pop();
+        }
+    }
+}
+
+fn symbol_row(symbol: SymbolRow<'_>, active: bool) -> Element<'_, Message> {
+    let (badge, kind, function_kind) = match symbol.kind {
+        OutlineNodeKind::Function => ("fn", "Function", Some(FunctionKind::Function)),
+        OutlineNodeKind::Method | OutlineNodeKind::Constructor => {
+            ("m", "Method", Some(FunctionKind::Method))
+        }
+        OutlineNodeKind::Declaration => ("d", "Declaration", Some(FunctionKind::Declaration)),
+        OutlineNodeKind::Module => ("mod", "Module", None),
+        OutlineNodeKind::Namespace => ("ns", "Namespace", None),
+        OutlineNodeKind::Class => ("cls", "Class", None),
+        OutlineNodeKind::Enum => ("enum", "Enum", None),
+        OutlineNodeKind::Interface => ("ifc", "Interface", None),
+        OutlineNodeKind::Trait => ("tr", "Trait", None),
+        OutlineNodeKind::Impl => ("impl", "Implementation", None),
+        OutlineNodeKind::Tag => ("tag", "Tag", None),
+        OutlineNodeKind::Section => ("sec", "Section", None),
+        OutlineNodeKind::Unknown => ("…", "Container", None),
+    };
+    let label = container(text(badge).size(10).font(Font::MONOSPACE))
+        .center_x(30)
+        .center_y(22);
+    let label = if let Some(kind) = function_kind {
+        label.style(styles::function_list_kind_label(kind))
+    } else {
+        label.style(styles::function_list_count)
+    };
+    let content = button(
         row![
-            space::horizontal().width(Length::Fixed(indent_for(entry.depth))),
-            text(entry.name).size(BODY_TEXT_SIZE).width(Fill),
-            kind_label(entry.kind),
+            space::horizontal().width((symbol.depth.min(4) * 10) as f32),
+            label,
+            text(symbol.name)
+                .size(13)
+                .font(Font {
+                    weight: if function_kind.is_some() {
+                        iced::font::Weight::Normal
+                    } else {
+                        iced::font::Weight::Semibold
+                    },
+                    ..Font::DEFAULT
+                })
+                .width(Fill)
+                .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::End),
+            text((symbol.range.start.line + 1).to_string())
+                .size(11)
+                .style(styles::function_list_secondary),
         ]
         .spacing(7)
         .align_y(Center)
         .width(Fill),
     )
-    .padding([6, 7])
+    .padding([5, 7])
     .width(Fill)
-    .style(styles::menu_dropdown_item)
-    .on_press(Message::FunctionListEntrySelected(entry.range.start))
+    .style(styles::function_list_entry(active))
+    .on_press(Message::FunctionListEntrySelected(symbol.range.start));
+
+    tooltip(
+        content,
+        container(
+            column![
+                text(symbol.name).size(13),
+                text(format!("{kind} · Line {}", symbol.range.start.line + 1)).size(11),
+            ]
+            .spacing(4),
+        )
+        .padding(8)
+        .max_width(420)
+        .style(styles::tooltip),
+        tooltip::Position::Left,
+    )
+    .gap(8)
     .into()
 }
 
-fn kind_label<'a>(kind: FunctionKind) -> Element<'a, Message> {
-    container(text(kind_text(kind)).size(LABEL_TEXT_SIZE))
-        .padding([2, 5])
-        .style(styles::function_list_kind_label)
-        .into()
+fn icon_button(icon: HeroIcon, label: &'static str, message: Message) -> Element<'static, Message> {
+    tooltip(
+        button(centered_button_content(hero::icon(
+            icon,
+            14,
+            IconTone::Muted,
+        )))
+        .width(24)
+        .height(24)
+        .padding(0)
+        .style(styles::icon_button)
+        .on_press(message),
+        container(text(label).size(12))
+            .padding([4, 7])
+            .style(styles::tooltip),
+        tooltip::Position::Bottom,
+    )
+    .into()
 }
 
-fn empty_state<'a>(message: &'static str) -> Element<'a, Message> {
-    container(text(message).size(BODY_TEXT_SIZE))
-        .padding(12)
-        .width(Fill)
-        .style(styles::function_list_empty)
-        .into()
+fn empty_state(title: &'static str, detail: &'static str) -> Element<'static, Message> {
+    container(
+        column![
+            container(text("fn").size(18).font(Font::MONOSPACE))
+                .center_x(40)
+                .center_y(36)
+                .style(styles::function_list_count),
+            text(title).size(13),
+            text(detail).size(12).style(styles::function_list_secondary),
+        ]
+        .spacing(10),
+    )
+    .padding([28, 18])
+    .width(Fill)
+    .into()
 }
 
-fn kind_text(kind: FunctionKind) -> &'static str {
-    match kind {
-        FunctionKind::Function => "fn",
-        FunctionKind::Method => "method",
-        FunctionKind::Declaration => "decl",
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::EditorBuffer;
+    use crate::editor::outline::{OutlineEngine, OutlineRegistry};
+
+    fn parse(source: &str, syntax: &str) -> OutlineState {
+        let registry = OutlineRegistry::shared();
+        OutlineState::ready(
+            OutlineEngine::new(
+                registry.plan_for_syntax(syntax).unwrap(),
+                registry.registry_hash(),
+            )
+            .parse_buffer(&EditorBuffer::from_text(source), syntax),
+        )
     }
-}
 
-fn indent_for(depth: usize) -> f32 {
-    (depth.min(8) as f32) * INDENT_WIDTH
+    #[test]
+    fn xml_parsed_parent_context_is_retained_across_languages() {
+        for (syntax, source, expected) in [
+            (
+                "rs",
+                "mod workspace { impl App { fn update() {} } }",
+                vec!["workspace", "App", "update"],
+            ),
+            (
+                "py",
+                "class App:\n    def update(self):\n        pass",
+                vec!["App", "update"],
+            ),
+            ("js", "class App { update() {} }", vec!["App", "update"]),
+            (
+                "ts",
+                "class App { update(): void {} }",
+                vec!["App", "update"],
+            ),
+            (
+                "java",
+                "class App { void update() {} }",
+                vec!["App", "update"],
+            ),
+            ("kt", "class App { fun update() {} }", vec!["App", "update"]),
+            (
+                "cpp",
+                "namespace workspace { class App { void update() {} }; }",
+                vec!["workspace", "App", "update"],
+            ),
+            (
+                "rb",
+                "module Workspace\n  class App\n    def update\n    end\n  end\nend",
+                vec!["Workspace", "App", "update"],
+            ),
+        ] {
+            let state = parse(source, syntax);
+            let rows = visible_rows(&state, "UPDATE");
+            assert_eq!(
+                rows.iter().map(|row| row.name).collect::<Vec<_>>(),
+                expected,
+                "{syntax}"
+            );
+            assert_eq!(
+                rows.iter().map(|row| row.depth).collect::<Vec<_>>(),
+                (0..rows.len()).collect::<Vec<_>>(),
+                "{syntax}"
+            );
+        }
+    }
+
+    #[test]
+    fn rows_follow_source_order_and_filter_preserves_enclosing_functions() {
+        let state = parse(
+            "fn before() {}\nimpl App { fn outer() { fn leaf() {} } fn other() {} }\nfn after() {}",
+            "rs",
+        );
+        let all = visible_rows(&state, "");
+        assert_eq!(
+            all.iter().map(|row| row.name).collect::<Vec<_>>(),
+            ["before", "App", "outer", "leaf", "other", "after"]
+        );
+        let filtered = visible_rows(&state, "leaf");
+        assert_eq!(
+            filtered.iter().map(|row| row.name).collect::<Vec<_>>(),
+            ["App", "outer", "leaf"]
+        );
+        assert!(visible_rows(&state, "missing").is_empty());
+    }
 }

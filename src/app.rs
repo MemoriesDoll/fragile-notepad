@@ -63,6 +63,7 @@ pub struct App {
     is_find_visible: bool,
     is_inline_replace_visible: bool,
     is_function_list_visible: bool,
+    function_list_query: String,
     main_window_id: Option<window::Id>,
     settings_window: Option<SettingsWindow>,
     advanced_search_window: Option<AdvancedSearchWindow>,

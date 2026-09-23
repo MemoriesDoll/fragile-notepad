@@ -58,6 +58,7 @@
       <raw-string prefixes="r,br,cr" repeat="#" open="&quot;" close="&quot;" />
     </lexical>
     <container kind="module" keyword="mod" name="after-keyword" body="brace" />
+    <container kind="enum" keyword="enum" name="after-keyword" body="brace" />
     <container kind="trait" keyword="trait" name="after-keyword" body="brace" />
     <container kind="impl" keyword="impl" name="after-keyword" body="brace" />
     <declaration kind="function" keyword="fn" name="after-keyword" body="brace" method-containers="impl,trait" declaration-terminator=";" />
@@ -96,6 +97,7 @@
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
       <string open="`" close="`" escape="\" />
     </lexical>
+    <container kind="enum" keyword="enum" name="after-keyword" body="brace" />
     <container kind="class" keyword="class" name="after-keyword" body="brace" />
     <declaration kind="function" keyword="function" name="after-keyword" body="brace" method-containers="class" />
     <declaration kind="function" scan="callable" assignment-arrow="=&gt;" name="before-parameters" body="brace" method-containers="class" reject-names="if,for,while,switch,catch,function,return,throw,new" reject-previous=".,=,return,throw,new,function" control-headers="for,if,else if,while,switch,catch" />
@@ -112,10 +114,11 @@
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
       <string open="&quot;&quot;&quot;" close="&quot;&quot;&quot;" escape="\" />
     </lexical>
+    <container kind="enum" keyword="enum" name="after-keyword" body="brace" />
     <container kind="class" keyword="class" name="after-keyword" body="brace" />
     <container kind="interface" keyword="interface" name="after-keyword" body="brace" />
     <container kind="class" keyword="record" name="after-keyword" body="brace" />
-    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class,interface" declaration-terminator=";" reject-names="if,for,while,switch,catch,new,return,throw,super,this" reject-previous=".,:,=,return,throw,new,record" reject-prefixes="-&gt;" start-boundaries="{,},;,:" container-name-previous="class,interface,record" assignment-continuations="default" control-headers="for,if,else if,while,switch,catch" />
+    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class,interface,enum" declaration-terminator=";" reject-names="if,for,while,switch,catch,new,return,throw,super,this" reject-previous=".,:,=,return,throw,new,record" reject-prefixes="-&gt;" start-boundaries="{,},;,:" container-name-previous="class,interface,record,enum" qualified-separators="." require-non-container-previous-kind="qualified-identifier,template-type-tail,array-type-tail" assignment-continuations="default" control-headers="for,if,else if,while,switch,catch" />
   </language>
 
   <language name="Kotlin">
@@ -130,10 +133,11 @@
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
       <string open="&quot;&quot;&quot;" close="&quot;&quot;&quot;" />
     </lexical>
+    <container kind="enum" keyword="enum class" name="after-keyword" body="brace" />
     <container kind="class" keyword="class" name="after-keyword" body="brace" />
     <container kind="interface" keyword="interface" name="after-keyword" body="brace" />
     <container kind="impl" keyword="object" name="after-keyword" body="brace" />
-    <declaration kind="function" keyword="fun" name="after-keyword" body="brace" method-containers="class,interface,impl" declaration-terminator="line" />
+    <declaration kind="function" keyword="fun" name="after-keyword" body="brace" method-containers="class,interface,impl,enum" declaration-terminator="line" />
   </language>
 
   <language name="C Family">
@@ -153,9 +157,12 @@
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
       <raw-string prefixes="R&quot;,u8R&quot;,uR&quot;,UR&quot;,LR&quot;" open="(" close=")" suffix="&quot;" max-delimiter-length="16" forbidden-delimiter-characters=")\" />
     </lexical>
-    <container kind="namespace" keyword="namespace" name="after-keyword" body="brace" />
-    <container kind="class" keyword="class" name="after-keyword" body="brace" />
-    <container kind="class" keyword="struct" name="after-keyword" body="brace" />
+    <container kind="enum" keyword="enum class" name="after-keyword" body="brace" declaration-terminator=";" />
+    <container kind="enum" keyword="enum struct" name="after-keyword" body="brace" declaration-terminator=";" />
+    <container kind="enum" keyword="enum" name="after-keyword" body="brace" declaration-terminator=";" />
+    <container kind="namespace" keyword="namespace" name="after-keyword" body="brace" declaration-terminator=";" />
+    <container kind="class" keyword="class" name="after-keyword" body="brace" declaration-terminator=";" />
+    <container kind="class" keyword="struct" name="after-keyword" body="brace" declaration-terminator=";" />
     <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class" declaration-terminator=";" reject-names="if,for,while,switch,catch,sizeof,alignof,decltype,return,throw,new,delete,static_cast,dynamic_cast,reinterpret_cast,const_cast" reject-previous=".,=,return,throw,new,delete" reject-prefixes="-&gt;" require-non-container-previous="const,static,inline,virtual,explicit,operator" require-non-container-previous-kind="qualified-identifier,template-type-tail" start-boundaries="{,},;,:" operator-tokens="(),[],&lt;,&gt;,=,!,+,-,*,/,%,&amp;,|,^,~" name-prefixes="~" qualified-separators="::" compound-prefixes="operator" container-name-previous="class,struct" assignment-continuations="default,delete,0" control-headers="for,if,else if,while,switch,catch" />
   </language>
 

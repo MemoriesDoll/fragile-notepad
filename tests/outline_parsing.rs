@@ -325,3 +325,86 @@ fn callable_punctuation_and_assignment_arrows_are_selected_by_xml() {
         EditorPosition::new(2, "value decl«»§".len())
     );
 }
+
+#[test]
+fn xml_enum_containers_keep_names_kinds_and_methods_without_duplicate_classes() {
+    use fragile_notepad::editor::FunctionKind;
+    use fragile_notepad::editor::outline::OutlineNodeKind;
+    for (syntax, source, has_method) in [
+        ("rs", "enum CloseGoal { KeepOpen, ExitApp }", false),
+        ("ts", "enum CloseGoal { KeepOpen, ExitApp }", false),
+        (
+            "java",
+            "enum CloseGoal { KeepOpen, ExitApp; void update() {} }",
+            true,
+        ),
+        (
+            "kt",
+            "enum class CloseGoal { KeepOpen, ExitApp; fun update() {} }",
+            true,
+        ),
+        ("c", "enum CloseGoal { KeepOpen, ExitApp };", false),
+        ("cpp", "enum CloseGoal { KeepOpen, ExitApp };", false),
+        (
+            "cpp",
+            "enum class CloseGoal : int { KeepOpen, ExitApp };",
+            false,
+        ),
+        (
+            "cpp",
+            "enum /* comment */ struct CloseGoal { KeepOpen, ExitApp };",
+            false,
+        ),
+    ] {
+        let result = parse(source, syntax);
+        assert_eq!(
+            result.tree.roots.len(),
+            1,
+            "{syntax}: {source}: {:?}",
+            result.tree
+        );
+        let root = &result.tree.roots[0];
+        assert_eq!(root.name, "CloseGoal", "{syntax}: {source}");
+        assert_eq!(root.kind, OutlineNodeKind::Enum);
+        assert_eq!(root.depth, 0);
+        assert_eq!(
+            result.functions.len(),
+            usize::from(has_method),
+            "{syntax}: {source}"
+        );
+        if has_method {
+            assert_eq!(root.children[0].name, "update");
+            assert_eq!(result.functions[0].kind, FunctionKind::Method);
+            assert_eq!(result.functions[0].depth, 1);
+        }
+    }
+}
+
+#[test]
+fn enum_forward_declarations_do_not_take_the_following_type_body() {
+    use fragile_notepad::editor::outline::OutlineNodeKind;
+    let result = parse("enum class Goal;\nclass App { void update() {} };", "cpp");
+    assert_eq!(
+        result
+            .tree
+            .roots
+            .iter()
+            .map(|node| (node.name.as_str(), node.kind))
+            .collect::<Vec<_>>(),
+        [
+            ("Goal", OutlineNodeKind::Enum),
+            ("App", OutlineNodeKind::Class)
+        ]
+    );
+    assert_eq!(result.tree.roots[0].range.end, EditorPosition::new(0, 16));
+    assert_eq!(result.tree.roots[1].children[0].name, "update");
+}
+
+#[test]
+fn java_enum_constant_arguments_are_not_functions() {
+    let result = parse(
+        "enum Goal { KeepOpen(1), ExitApp(2); Goal(int value) {} void update() {} String[] labels() { return null; } java.util.List<String> names() { return null; } }",
+        "java",
+    );
+    assert_eq!(names(&result), ["Goal", "update", "labels", "names"]);
+}

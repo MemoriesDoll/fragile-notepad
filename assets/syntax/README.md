@@ -8,6 +8,20 @@ The outline parser is a structural recognizer, not a complete language grammar.
 Its shared scanner consumes compiled XML plans. Language-specific keywords and
 lexical formats belong here rather than in language switches in Rust code.
 
+The sidebar displays the outline tree, including containers without methods.
+Its count and filter include both functions and types. Matching a container name
+shows its children; matching a child retains its ancestor rows as context.
+Enum declarations use `container kind="enum"` rules (Rust, TypeScript, Java,
+Kotlin, C and C++). Individual enum variants/constants are not modeled as symbols.
+Overlapping container rules sharing a body prefer the earliest header and the
+longest keyword prefix, so a scoped enum is not also emitted as a class.
+Callable rules can use `require-non-container-previous-kind` to require an
+`identifier`, `qualified-identifier`, `template-type-tail`, or `array-type-tail`
+before a method name while still admitting constructors. Array and generic
+suffixes use the configured syntax roles; qualified names use
+`qualified-separators`. Java uses these constraints to exclude enum constant
+arguments from the function list.
+
 ## Families and bodies
 
 A language selects a family through `use-family`. Existing adapter names remain

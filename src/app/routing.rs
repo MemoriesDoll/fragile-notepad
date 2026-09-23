@@ -68,6 +68,13 @@ impl App {
                 self.update_language(syntax_token)
             }
             ApplicationMessage::ToggleFunctionList => self.toggle_function_list(),
+            ApplicationMessage::FunctionListQueryChanged(query) => {
+                self.function_list_query = query;
+                iced::widget::operation::snap_to(
+                    crate::ui::function_list_panel::SCROLL_ID,
+                    iced::widget::scrollable::RelativeOffset::START,
+                )
+            }
             ApplicationMessage::FunctionListEntrySelected(position) => {
                 self.select_function_list_entry(position)
             }

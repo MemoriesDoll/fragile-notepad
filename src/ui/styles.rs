@@ -521,29 +521,86 @@ pub fn function_list_header(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(palette.chrome_high)),
         text_color: Some(palette.text),
-        border: hairline(palette.border_soft),
         ..container::Style::default()
     }
 }
 
-pub fn function_list_kind_label(theme: &Theme) -> container::Style {
+pub fn function_list_count(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 
     container::Style {
         background: Some(Background::Color(palette.surface_low)),
         text_color: Some(palette.muted_text),
-        border: border(1.0, palette.border_soft, CONTROL_RADIUS),
+        border: border(0.0, Color::TRANSPARENT, CONTROL_RADIUS),
         ..container::Style::default()
     }
 }
 
-pub fn function_list_empty(theme: &Theme) -> container::Style {
+pub fn function_list_footer(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
 
     container::Style {
-        background: None,
+        background: Some(palette.chrome_high.into()),
         text_color: Some(palette.muted_text),
         ..container::Style::default()
+    }
+}
+
+pub fn function_list_secondary(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(VisualPalette::from_theme(theme).muted_text),
+    }
+}
+
+pub fn function_list_kind_label(
+    kind: crate::editor::FunctionKind,
+) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let palette = VisualPalette::from_theme(theme);
+        let (background, foreground) = match kind {
+            crate::editor::FunctionKind::Function => (palette.accent_soft, palette.accent),
+            crate::editor::FunctionKind::Method => (palette.success_soft, palette.success),
+            crate::editor::FunctionKind::Declaration => (palette.surface_low, palette.muted_text),
+        };
+        container::Style {
+            background: Some(background.into()),
+            text_color: Some(foreground),
+            border: border(0.0, Color::TRANSPARENT, 4.0),
+            ..Default::default()
+        }
+    }
+}
+
+pub fn function_list_entry(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let palette = VisualPalette::from_theme(theme);
+        let background = match status {
+            button::Status::Pressed => Some(palette.accent_soft.into()),
+            button::Status::Hovered => Some(
+                if active {
+                    palette.accent_soft.mix(palette.accent, 0.08)
+                } else {
+                    palette.surface_low
+                }
+                .into(),
+            ),
+            _ if active => Some(palette.accent_soft.into()),
+            _ => None,
+        };
+        button::Style {
+            background,
+            text_color: palette.text,
+            border: border(
+                1.0,
+                if active {
+                    palette.accent.scale_alpha(0.3)
+                } else {
+                    Color::TRANSPARENT
+                },
+                CONTROL_RADIUS,
+            ),
+            ..Default::default()
+        }
     }
 }
 

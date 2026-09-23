@@ -133,7 +133,11 @@ impl App {
             .function_list
             .set_visible(self.is_function_list_visible);
 
-        Task::none()
+        iced::widget::operation::focus(if self.is_function_list_visible {
+            crate::ui::function_list_panel::INPUT_ID
+        } else {
+            crate::ui::editor::EDITOR_ID
+        })
     }
 
     pub(super) fn select_function_list_entry(
@@ -151,7 +155,7 @@ impl App {
         document.preferred_vertical_column = None;
         document.reveal_position(position);
 
-        Task::none()
+        iced::widget::operation::focus(crate::ui::editor::EDITOR_ID)
     }
 }
 

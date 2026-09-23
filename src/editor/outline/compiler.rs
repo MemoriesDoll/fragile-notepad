@@ -572,6 +572,7 @@ fn parse_node_kind(value: &str) -> Option<OutlineNodeKind> {
         "module" => Some(OutlineNodeKind::Module),
         "namespace" => Some(OutlineNodeKind::Namespace),
         "class" => Some(OutlineNodeKind::Class),
+        "enum" => Some(OutlineNodeKind::Enum),
         "interface" => Some(OutlineNodeKind::Interface),
         "trait" => Some(OutlineNodeKind::Trait),
         "impl" => Some(OutlineNodeKind::Impl),

@@ -15,6 +15,7 @@ pub struct WorkbenchView<'a> {
     pub is_find_visible: bool,
     pub is_inline_replace_visible: bool,
     pub is_function_list_visible: bool,
+    pub function_list_query: &'a str,
     pub chrome_animation: ChromeAnimationInfo,
     pub active_menu: Option<Menu>,
     pub active_menu_path: &'a [String],

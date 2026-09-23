@@ -491,6 +491,8 @@ where
                                     },
                                     height: text_bounds.height,
                                 },
+                                // Keep the thin caret crisp at fractional glyph positions.
+                                snap: true,
                                 ..renderer::Quad::default()
                             },
                             style.value,
