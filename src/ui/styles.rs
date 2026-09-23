@@ -536,16 +536,6 @@ pub fn function_list_count(theme: &Theme) -> container::Style {
     }
 }
 
-pub fn function_list_footer(theme: &Theme) -> container::Style {
-    let palette = VisualPalette::from_theme(theme);
-
-    container::Style {
-        background: Some(palette.chrome_high.into()),
-        text_color: Some(palette.muted_text),
-        ..container::Style::default()
-    }
-}
-
 pub fn function_list_secondary(theme: &Theme) -> text::Style {
     text::Style {
         color: Some(VisualPalette::from_theme(theme).muted_text),
@@ -553,15 +543,37 @@ pub fn function_list_secondary(theme: &Theme) -> text::Style {
 }
 
 pub fn function_list_kind_label(
-    kind: crate::editor::FunctionKind,
+    kind: crate::editor::outline::OutlineNodeKind,
 ) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
+        use crate::editor::outline::OutlineNodeKind;
+
         let palette = VisualPalette::from_theme(theme);
-        let (background, foreground) = match kind {
-            crate::editor::FunctionKind::Function => (palette.accent_soft, palette.accent),
-            crate::editor::FunctionKind::Method => (palette.success_soft, palette.success),
-            crate::editor::FunctionKind::Declaration => (palette.surface_low, palette.muted_text),
+        // Related symbols share a color family, with a separate tone per kind.
+        // Dark text on light surfaces and pastel text on dark surfaces keep the
+        // small badge labels readable, including on selected rows.
+        let (light, dark) = match kind {
+            OutlineNodeKind::Function => ((0, 93, 184), (109, 180, 255)),
+            OutlineNodeKind::Method => ((24, 111, 63), (104, 211, 145)),
+            OutlineNodeKind::Constructor => ((77, 111, 15), (180, 210, 104)),
+            OutlineNodeKind::Declaration => ((76, 97, 126), (167, 187, 216)),
+            OutlineNodeKind::Module => ((119, 70, 171), (193, 157, 245)),
+            OutlineNodeKind::Namespace => ((147, 57, 142), (223, 155, 215)),
+            OutlineNodeKind::Class => ((132, 93, 12), (229, 195, 106)),
+            OutlineNodeKind::Enum => ((161, 74, 16), (244, 172, 102)),
+            OutlineNodeKind::EnumMember => ((158, 67, 54), (240, 156, 138)),
+            OutlineNodeKind::Interface => ((12, 110, 133), (98, 207, 226)),
+            OutlineNodeKind::Trait => ((13, 116, 108), (100, 210, 193)),
+            OutlineNodeKind::Impl => ((76, 79, 166), (160, 166, 245)),
+            OutlineNodeKind::Tag => ((156, 54, 103), (237, 145, 183)),
+            OutlineNodeKind::Section => ((110, 80, 126), (199, 172, 217)),
+            OutlineNodeKind::Unknown => ((88, 96, 107), (177, 184, 194)),
         };
+        let (r, g, b) = if palette.is_dark { dark } else { light };
+        let foreground = Color::from_rgb8(r, g, b);
+        let background = palette
+            .surface
+            .mix(foreground, if palette.is_dark { 0.10 } else { 0.09 });
         container::Style {
             background: Some(background.into()),
             text_color: Some(foreground),

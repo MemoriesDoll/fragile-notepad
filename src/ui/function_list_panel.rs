@@ -133,14 +133,6 @@ pub fn view<'a>(
                 .id(SCROLL_ID)
                 .smooth_scroll(true)
                 .height(Fill),
-            container(row![
-                text("Source order").size(11),
-                space::horizontal(),
-                text("Click to jump").size(11),
-            ])
-            .padding([8, 12])
-            .width(Fill)
-            .style(styles::function_list_footer),
         ]
         .height(Fill),
     )
@@ -227,32 +219,27 @@ fn append_nodes<'a>(
 }
 
 fn symbol_row(symbol: SymbolRow<'_>, active: bool) -> Element<'_, Message> {
-    let (badge, kind, function_kind) = match symbol.kind {
-        OutlineNodeKind::Function => ("fn", "Function", Some(FunctionKind::Function)),
-        OutlineNodeKind::Method | OutlineNodeKind::Constructor => {
-            ("m", "Method", Some(FunctionKind::Method))
-        }
-        OutlineNodeKind::Declaration => ("d", "Declaration", Some(FunctionKind::Declaration)),
-        OutlineNodeKind::Module => ("mod", "Module", None),
-        OutlineNodeKind::Namespace => ("ns", "Namespace", None),
-        OutlineNodeKind::Class => ("cls", "Class", None),
-        OutlineNodeKind::Enum => ("enum", "Enum", None),
-        OutlineNodeKind::EnumMember => ("val", "Enum member", None),
-        OutlineNodeKind::Interface => ("ifc", "Interface", None),
-        OutlineNodeKind::Trait => ("tr", "Trait", None),
-        OutlineNodeKind::Impl => ("impl", "Implementation", None),
-        OutlineNodeKind::Tag => ("tag", "Tag", None),
-        OutlineNodeKind::Section => ("sec", "Section", None),
-        OutlineNodeKind::Unknown => ("…", "Container", None),
+    let (badge, kind) = match symbol.kind {
+        OutlineNodeKind::Function => ("fn", "Function"),
+        OutlineNodeKind::Method => ("m", "Method"),
+        OutlineNodeKind::Constructor => ("ctor", "Constructor"),
+        OutlineNodeKind::Declaration => ("d", "Declaration"),
+        OutlineNodeKind::Module => ("mod", "Module"),
+        OutlineNodeKind::Namespace => ("ns", "Namespace"),
+        OutlineNodeKind::Class => ("cls", "Class"),
+        OutlineNodeKind::Enum => ("enum", "Enum"),
+        OutlineNodeKind::EnumMember => ("val", "Enum member"),
+        OutlineNodeKind::Interface => ("ifc", "Interface"),
+        OutlineNodeKind::Trait => ("tr", "Trait"),
+        OutlineNodeKind::Impl => ("impl", "Implementation"),
+        OutlineNodeKind::Tag => ("tag", "Tag"),
+        OutlineNodeKind::Section => ("sec", "Section"),
+        OutlineNodeKind::Unknown => ("…", "Container"),
     };
     let label = container(text(badge).size(10).font(Font::MONOSPACE))
         .center_x(30)
-        .center_y(22);
-    let label = if let Some(kind) = function_kind {
-        label.style(styles::function_list_kind_label(kind))
-    } else {
-        label.style(styles::function_list_count)
-    };
+        .center_y(22)
+        .style(styles::function_list_kind_label(symbol.kind));
     let content = button(
         row![
             space::horizontal().width((symbol.depth.min(4) * 10) as f32),
@@ -260,8 +247,14 @@ fn symbol_row(symbol: SymbolRow<'_>, active: bool) -> Element<'_, Message> {
             text(symbol.name)
                 .size(13)
                 .font(Font {
-                    weight: if function_kind.is_some() || symbol.kind == OutlineNodeKind::EnumMember
-                    {
+                    weight: if matches!(
+                        symbol.kind,
+                        OutlineNodeKind::Function
+                            | OutlineNodeKind::Method
+                            | OutlineNodeKind::Constructor
+                            | OutlineNodeKind::Declaration
+                            | OutlineNodeKind::EnumMember
+                    ) {
                         iced::font::Weight::Normal
                     } else {
                         iced::font::Weight::Semibold
