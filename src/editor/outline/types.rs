@@ -25,6 +25,7 @@ pub enum OutlineNodeKind {
     Namespace,
     Class,
     Enum,
+    EnumMember,
     Interface,
     Trait,
     Impl,

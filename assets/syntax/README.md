@@ -12,7 +12,8 @@ The sidebar displays the outline tree, including containers without methods.
 Its count and filter include both functions and types. Matching a container name
 shows its children; matching a child retains its ancestor rows as context.
 Enum declarations use `container kind="enum"` rules (Rust, TypeScript, Java,
-Kotlin, C and C++). Individual enum variants/constants are not modeled as symbols.
+Kotlin, C and C++). Their variants/constants are child symbols, separate from the
+callable entries used by previous/next-function navigation.
 Overlapping container rules sharing a body prefer the earliest header and the
 longest keyword prefix, so a scoped enum is not also emitted as a class.
 Callable rules can use `require-non-container-previous-kind` to require an
@@ -115,10 +116,29 @@ is computed. Function-list depth counts enclosing declarations and containers;
 control blocks and indentation widths do not introduce additional function nodes.
 Containers are retained in the outline tree even when they have no functions.
 
+## Member lists
+
+Languages can add a member rule for a container kind:
+
+```xml
+<members kind="enum-member" within="enum" separator="," terminator=";"
+         prefix-pattern="#\s*!?" />
+```
+
+The scanner reads identifiers at the top level of each matching brace body.
+Separators inside comments, strings, or configured nested delimiters are ignored,
+so tuple/struct payloads and initializer arguments do not become extra members.
+The optional terminator stops the list before constructors and regular methods.
+The optional anchored regular expression `prefix-pattern` skips annotation
+markers/names and their following balanced argument group. Rust configures
+attribute markers; Java and Kotlin configure annotation names. Empty separators,
+empty terminators, and invalid or empty-matching prefix patterns are rejected.
+Members keep their source ranges and can themselves own nested declarations.
+
 ## Validation and cache
 
 Malformed or empty lexical delimiters produce registry diagnostics and exclude
-the affected language plan. The compiled registry cache uses version 2; older
+the affected language plan. The compiled registry cache uses version 3; older
 caches are rebuilt. Source XML remains schema version 1 with explicit rule
 extensions. Older `raw-string kind` entries must be migrated to the attributes
 above. Updated bundled definitions and cache round-trip tests cover these fields.

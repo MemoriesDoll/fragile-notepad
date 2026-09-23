@@ -8,6 +8,7 @@ mod diagnostics;
 mod engine;
 mod fsm;
 mod lexical;
+mod members;
 mod projection;
 mod registry;
 mod scan;
@@ -20,14 +21,15 @@ mod types;
 
 pub use compiler::{
     OutlineBlockCommentPlan, OutlineBodyKind, OutlineBodyPlan, OutlineCallablePlan,
-    OutlineLexicalPlan, OutlineNameCapture, OutlinePlan, OutlineRulePlan, OutlineScanMode,
-    OutlineStringPlan, OutlineStructurePlan,
+    OutlineLexicalPlan, OutlineMemberPlan, OutlineNameCapture, OutlinePlan, OutlineRulePlan,
+    OutlineScanMode, OutlineStringPlan, OutlineStructurePlan,
 };
 pub use engine::OutlineEngine;
 pub use registry::OutlineRegistry;
 pub use schema::{
-    RawBlockComment, RawBody, RawDelimiter, RawFamily, RawLanguage, RawLexical, RawOutlineSchema,
-    RawRawString, RawRule, RawString, RawSyntaxToken, RawUseFamily, parse_outline_schema,
+    RawBlockComment, RawBody, RawDelimiter, RawFamily, RawLanguage, RawLexical, RawMemberRule,
+    RawOutlineSchema, RawRawString, RawRule, RawString, RawSyntaxToken, RawUseFamily,
+    parse_outline_schema,
 };
 pub use service::{
     OutlineSnapshotMetadata, OutlineState, OutlineStatus, outline_registry_hash,

@@ -1,8 +1,8 @@
 use super::{CACHE_VERSION, OutlineRegistry};
 use crate::editor::outline::compiler::{
     CompiledOutlineRegistry, OutlineBlockCommentPlan, OutlineBodyKind, OutlineBodyPlan,
-    OutlineCallablePlan, OutlineLexicalPlan, OutlineNameCapture, OutlinePlan, OutlineRulePlan,
-    OutlineScanMode, OutlineStringPlan, OutlineStructurePlan,
+    OutlineCallablePlan, OutlineLexicalPlan, OutlineMemberPlan, OutlineNameCapture, OutlinePlan,
+    OutlineRulePlan, OutlineScanMode, OutlineStringPlan, OutlineStructurePlan,
 };
 use crate::editor::outline::types::{
     OutlineDiagnostic, OutlineDiagnosticSeverity, OutlineNodeKind,
@@ -59,6 +59,22 @@ fn push_plan(xml: &mut String, plan: &OutlinePlan) {
     );
     push_rules(xml, 2, "containers", &plan.containers);
     push_rules(xml, 2, "declarations", &plan.declarations);
+    push_open(xml, 2, "members", &[]);
+    for rule in &plan.members {
+        let mut attributes = vec![
+            ("node-kind", node_kind_to_str(rule.node_kind).to_owned()),
+            ("within", node_kind_to_str(rule.within).to_owned()),
+            ("separator", rule.separator.clone()),
+        ];
+        if let Some(terminator) = &rule.terminator {
+            attributes.push(("terminator", terminator.clone()));
+        }
+        if let Some(pattern) = &rule.prefix_pattern {
+            attributes.push(("prefix-pattern", pattern.clone()));
+        }
+        push_empty(xml, 3, "rule", &attributes);
+    }
+    push_close(xml, 2, "members");
     push_lexical(xml, &plan.lexical);
     push_structure(xml, &plan.structure);
     push_diagnostics(xml, 2, "diagnostics", &plan.diagnostics);
@@ -494,6 +510,21 @@ fn parse_cached_plan(node: roxmltree::Node<'_, '_>) -> Option<OutlinePlan> {
         signature_modifiers: parse_cached_values(node, "signature-modifiers", "value", "text"),
         containers: parse_cached_rules(node, "containers")?,
         declarations: parse_cached_rules(node, "declarations")?,
+        members: node
+            .children()
+            .find(|child| child.has_tag_name("members"))?
+            .children()
+            .filter(|child| child.has_tag_name("rule"))
+            .map(|rule| {
+                Some(OutlineMemberPlan {
+                    node_kind: parse_node_kind(rule.attribute("node-kind")?)?,
+                    within: parse_node_kind(rule.attribute("within")?)?,
+                    separator: rule.attribute("separator")?.to_owned(),
+                    terminator: rule.attribute("terminator").map(str::to_owned),
+                    prefix_pattern: rule.attribute("prefix-pattern").map(str::to_owned),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
         lexical: parse_cached_lexical(
             node.children()
                 .find(|child| child.has_tag_name("lexical"))?,
@@ -778,6 +809,7 @@ fn node_kind_to_str(kind: OutlineNodeKind) -> &'static str {
         OutlineNodeKind::Namespace => "namespace",
         OutlineNodeKind::Class => "class",
         OutlineNodeKind::Enum => "enum",
+        OutlineNodeKind::EnumMember => "enum-member",
         OutlineNodeKind::Interface => "interface",
         OutlineNodeKind::Trait => "trait",
         OutlineNodeKind::Impl => "impl",
@@ -797,6 +829,7 @@ fn parse_node_kind(value: &str) -> Option<OutlineNodeKind> {
         "namespace" => Some(OutlineNodeKind::Namespace),
         "class" => Some(OutlineNodeKind::Class),
         "enum" => Some(OutlineNodeKind::Enum),
+        "enum-member" => Some(OutlineNodeKind::EnumMember),
         "interface" => Some(OutlineNodeKind::Interface),
         "trait" => Some(OutlineNodeKind::Trait),
         "impl" => Some(OutlineNodeKind::Impl),

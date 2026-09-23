@@ -3,7 +3,7 @@ use iced::{Center, Element, Fill, Font};
 
 use crate::core::Document;
 use crate::editor::outline::{OutlineNode, OutlineNodeKind};
-use crate::editor::{EditorRange, FunctionKind, OutlineState, OutlineStatus, containing_function};
+use crate::editor::{EditorRange, FunctionKind, OutlineState, OutlineStatus};
 use crate::message::Message;
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::{centered_button_content, styles};
@@ -21,7 +21,6 @@ pub fn view<'a>(
     query: &'a str,
 ) -> Element<'a, Message> {
     let ready = outline_state.filter(|state| state.status == OutlineStatus::Ready);
-    let entries = ready.map_or(&[][..], |state| state.functions.as_slice());
     let visible = ready.map_or_else(Vec::new, |state| visible_rows(state, query));
     let total = ready.map_or(0, |state| {
         if state.tree.roots.is_empty() {
@@ -31,15 +30,11 @@ pub fn view<'a>(
         }
     });
     let caret = document.main_selection().cursor;
-    let current = containing_function(entries, caret)
-        .map(|entry| entry.range)
-        .or_else(|| {
-            visible
-                .iter()
-                .filter(|row| row.range.start <= caret && caret < row.range.end)
-                .max_by_key(|row| (row.depth, row.range.start))
-                .map(|row| row.range)
-        });
+    let current = visible
+        .iter()
+        .filter(|row| row.range.start <= caret && caret < row.range.end)
+        .max_by_key(|row| (row.depth, row.range.start))
+        .map(|row| row.range);
     let count = if ready.is_none() {
         String::from("—")
     } else if query.trim().is_empty() {
@@ -242,6 +237,7 @@ fn symbol_row(symbol: SymbolRow<'_>, active: bool) -> Element<'_, Message> {
         OutlineNodeKind::Namespace => ("ns", "Namespace", None),
         OutlineNodeKind::Class => ("cls", "Class", None),
         OutlineNodeKind::Enum => ("enum", "Enum", None),
+        OutlineNodeKind::EnumMember => ("val", "Enum member", None),
         OutlineNodeKind::Interface => ("ifc", "Interface", None),
         OutlineNodeKind::Trait => ("tr", "Trait", None),
         OutlineNodeKind::Impl => ("impl", "Implementation", None),
@@ -264,7 +260,8 @@ fn symbol_row(symbol: SymbolRow<'_>, active: bool) -> Element<'_, Message> {
             text(symbol.name)
                 .size(13)
                 .font(Font {
-                    weight: if function_kind.is_some() {
+                    weight: if function_kind.is_some() || symbol.kind == OutlineNodeKind::EnumMember
+                    {
                         iced::font::Weight::Normal
                     } else {
                         iced::font::Weight::Semibold

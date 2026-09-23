@@ -19,6 +19,7 @@ pub struct OutlinePlan {
     pub signature_modifiers: Vec<String>,
     pub containers: Vec<OutlineRulePlan>,
     pub declarations: Vec<OutlineRulePlan>,
+    pub members: Vec<OutlineMemberPlan>,
     pub lexical: OutlineLexicalPlan,
     pub structure: OutlineStructurePlan,
     pub diagnostics: Vec<OutlineDiagnostic>,
@@ -34,6 +35,15 @@ pub struct OutlineRulePlan {
     pub body: OutlineBodyKind,
     pub method_containers: Vec<OutlineNodeKind>,
     pub declaration_terminator: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutlineMemberPlan {
+    pub node_kind: OutlineNodeKind,
+    pub within: OutlineNodeKind,
+    pub separator: String,
+    pub terminator: Option<String>,
+    pub prefix_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -229,6 +239,35 @@ fn compile_language(
     );
 
     validate_lexical(&language.lexical, &language_name, &mut diagnostics);
+    let members = language
+        .members
+        .iter()
+        .filter_map(|rule| {
+            let kinds = parse_node_kind(&rule.kind).zip(parse_node_kind(&rule.within));
+            let valid_prefix = rule.prefix_pattern.as_ref().is_none_or(|pattern| {
+                regex::Regex::new(&format!("^(?:{pattern})")).is_ok_and(|regex| !regex.is_match(""))
+            });
+            if kinds.is_none()
+                || rule.separator.is_empty()
+                || rule.terminator.as_deref() == Some("")
+                || rule.terminator.as_deref() == Some(rule.separator.as_str())
+                || !valid_prefix
+            {
+                diagnostics.push(diagnostics::error(format!(
+                    "outline language {language_name} has an invalid members rule"
+                )));
+                return None;
+            }
+            let (node_kind, within) = kinds.unwrap();
+            Some(OutlineMemberPlan {
+                node_kind,
+                within,
+                separator: rule.separator.clone(),
+                terminator: rule.terminator.clone(),
+                prefix_pattern: rule.prefix_pattern.clone(),
+            })
+        })
+        .collect();
     for token in &family.syntax_tokens {
         if token.value.chars().count() != 1
             || !matches!(
@@ -277,6 +316,7 @@ fn compile_language(
         signature_modifiers: language.signature_modifiers.clone(),
         containers,
         declarations,
+        members,
         lexical: compile_lexical(&language.lexical),
         structure,
         diagnostics,
@@ -573,6 +613,7 @@ fn parse_node_kind(value: &str) -> Option<OutlineNodeKind> {
         "namespace" => Some(OutlineNodeKind::Namespace),
         "class" => Some(OutlineNodeKind::Class),
         "enum" => Some(OutlineNodeKind::Enum),
+        "enum-member" => Some(OutlineNodeKind::EnumMember),
         "interface" => Some(OutlineNodeKind::Interface),
         "trait" => Some(OutlineNodeKind::Trait),
         "impl" => Some(OutlineNodeKind::Impl),

@@ -197,6 +197,14 @@ fn enum_only_document_has_a_navigable_row_when_filtered_by_its_name() {
         outline_registry_hash(),
     )));
     assert!(outline.functions.is_empty());
+    let members = &outline.tree.roots[0].children;
+    assert_eq!(
+        members
+            .iter()
+            .map(|member| member.name.as_str())
+            .collect::<Vec<_>>(),
+        ["KeepOpen", "ExitApp"]
+    );
     let renderer = futures::executor::block_on(<iced::Renderer as Headless>::new(
         renderer::Settings::default(),
         Some("tiny-skia"),
@@ -204,7 +212,13 @@ fn enum_only_document_has_a_navigable_row_when_filtered_by_its_name() {
     .unwrap();
     let size = Size::new(280.0, 520.0);
     let viewport = Rectangle::with_size(size);
-    for query in ["", " CLOSEGOAL "] {
+    for (query, y, expected) in [
+        ("", 125.0, EditorPosition::new(2, 0)),
+        (" CLOSEGOAL ", 125.0, EditorPosition::new(2, 0)),
+        ("", 160.0, members[0].range.start),
+        ("", 194.0, members[1].range.start),
+        ("ExitApp", 160.0, members[1].range.start),
+    ] {
         let mut element = function_list_panel::view(&document, Some(&outline), query);
         let mut tree = Tree::new(element.as_widget());
         tree.diff(element.as_widget_mut());
@@ -221,14 +235,14 @@ fn enum_only_document_has_a_navigable_row_when_filtered_by_its_name() {
                 &mut tree,
                 &Event::Mouse(event),
                 Layout::new(&node),
-                mouse::Cursor::Available(Point::new(100.0, 125.0)),
+                mouse::Cursor::Available(Point::new(100.0, y)),
                 &renderer,
                 &mut Shell::new(&iced::window::Headless, Waker::noop(), &mut messages),
                 &viewport,
             );
         }
         assert!(
-            matches!(&messages[..], [Message::FunctionListEntrySelected(position)] if *position == EditorPosition::new(2, 0)),
+            matches!(&messages[..], [Message::FunctionListEntrySelected(position)] if *position == expected),
             "{query:?}: {messages:?}"
         );
     }

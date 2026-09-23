@@ -41,6 +41,12 @@ pub(super) fn discover_structure(
         ));
         container_bodies.insert((extent.start, extent.end))
     });
+    let members = super::members::discover_members(text, source, &containers);
+    let member_names = members
+        .iter()
+        .map(|member| member.name_range.start)
+        .collect::<std::collections::HashSet<_>>();
+    containers.extend(members);
     let container_names = ContainerNames::new(text, &containers);
 
     for rule in &plan.declarations {
@@ -57,7 +63,10 @@ pub(super) fn discover_structure(
     // Overlapping keyword rules (e.g. a modifier plus declaration keyword) describe
     // one declaration. Remove duplicates before they contribute nesting intervals.
     let mut seen = std::collections::HashSet::new();
-    declarations.retain(|event| seen.insert((event.name_range.start, event.signature_range.end)));
+    declarations.retain(|event| {
+        !member_names.contains(&event.name_range.start)
+            && seen.insert((event.name_range.start, event.signature_range.end))
+    });
 
     StructurePassOutput {
         containers,

@@ -12,8 +12,8 @@ use super::diagnostics;
 use super::schema::parse_outline_schema;
 use super::types::OutlineDiagnostic;
 
-const CACHE_VERSION: &str = "2";
-const CACHE_FILE: &str = "outline-registry-v2.xml";
+const CACHE_VERSION: &str = "3";
+const CACHE_FILE: &str = "outline-registry-v3.xml";
 const CACHE_PATH_ENV: &str = "FRAGILE_NOTEPAD_OUTLINE_CACHE_PATH";
 
 mod cache_xml;

@@ -42,6 +42,16 @@ pub struct RawLanguage {
     pub signature_modifiers: Vec<String>,
     pub containers: Vec<RawRule>,
     pub declarations: Vec<RawRule>,
+    pub members: Vec<RawMemberRule>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawMemberRule {
+    pub kind: String,
+    pub within: String,
+    pub separator: String,
+    pub terminator: Option<String>,
+    pub prefix_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -250,6 +260,17 @@ fn parse_language(element: roxmltree::Node<'_, '_>) -> RawLanguage {
             .find(|node| node.has_tag_name("use-family"))
             .map(parse_use_family),
         lexical,
+        members: element
+            .children()
+            .filter(|node| node.has_tag_name("members"))
+            .map(|node| RawMemberRule {
+                kind: node.attribute("kind").unwrap_or("").to_owned(),
+                within: node.attribute("within").unwrap_or("").to_owned(),
+                separator: node.attribute("separator").unwrap_or("").to_owned(),
+                terminator: node.attribute("terminator").map(str::to_owned),
+                prefix_pattern: node.attribute("prefix-pattern").map(str::to_owned),
+            })
+            .collect(),
         containers: element
             .children()
             .filter(|node| node.has_tag_name("container"))

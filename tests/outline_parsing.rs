@@ -291,6 +291,31 @@ fn invalid_xml_lexical_rules_produce_diagnostics_instead_of_nonprogressing_scans
 }
 
 #[test]
+fn invalid_xml_member_rules_are_rejected() {
+    for rule in [
+        r#"kind="invalid-kind" within="enum" separator=",""#,
+        r#"kind="enum-member" within="invalid-kind" separator=",""#,
+        r#"kind="enum-member" within="enum" separator="""#,
+        r#"kind="enum-member" within="enum" separator="," terminator="""#,
+        r#"kind="enum-member" within="enum" separator="," terminator=",""#,
+        r#"kind="enum-member" within="enum" separator="," prefix-pattern="[""#,
+        r#"kind="enum-member" within="enum" separator="," prefix-pattern="a*""#,
+    ] {
+        let xml = format!(
+            r#"<outline-parsers schema-version="1">
+          <family id="brace"><adapter name="generic-brace" /><body kind="brace" open="{{" close="}}" /></family>
+          <language name="Invalid"><token value="invalid" /><use-family id="brace" adapter="generic-brace" />
+          <container kind="enum" keyword="enum" name="after-keyword" body="brace" />
+          <members {rule} /></language>
+        </outline-parsers>"#
+        );
+        let registry = OutlineRegistry::from_xml(&xml);
+        assert!(registry.plan_for_syntax("invalid").is_none(), "{rule}");
+        assert!(!registry.diagnostics().is_empty(), "{rule}");
+    }
+}
+
+#[test]
 fn callable_punctuation_and_assignment_arrows_are_selected_by_xml() {
     let xml = r#"<outline-parsers schema-version="1">
       <family id="custom"><adapter name="generic-brace" />
@@ -368,12 +393,20 @@ fn xml_enum_containers_keep_names_kinds_and_methods_without_duplicate_classes() 
         assert_eq!(root.kind, OutlineNodeKind::Enum);
         assert_eq!(root.depth, 0);
         assert_eq!(
+            root.children
+                .iter()
+                .filter(|node| node.kind == OutlineNodeKind::EnumMember)
+                .map(|node| (node.name.as_str(), node.depth))
+                .collect::<Vec<_>>(),
+            [("KeepOpen", 1), ("ExitApp", 1)]
+        );
+        assert_eq!(
             result.functions.len(),
             usize::from(has_method),
             "{syntax}: {source}"
         );
         if has_method {
-            assert_eq!(root.children[0].name, "update");
+            assert!(root.children.iter().any(|node| node.name == "update"));
             assert_eq!(result.functions[0].kind, FunctionKind::Method);
             assert_eq!(result.functions[0].depth, 1);
         }
@@ -407,4 +440,92 @@ fn java_enum_constant_arguments_are_not_functions() {
         "java",
     );
     assert_eq!(names(&result), ["Goal", "update", "labels", "names"]);
+}
+
+#[test]
+fn enum_members_ignore_payload_fields_attributes_and_initializer_arguments() {
+    use fragile_notepad::editor::outline::OutlineNodeKind;
+    let source = "enum Message {\n    // Fake,\n    #[cfg(any(feature = \"a,b\", feature = \"c\"))]\n    Empty,\n    Pair(Result<A, B>, usize),\n    Record { first: A, second: B },\n    Value = compute(1, (2, 3)),\n    r#type,\n    Über,\n}\n";
+    let result = parse(source, "rs");
+    assert!(result.functions.is_empty());
+    let members = &result.tree.roots[0].children;
+    assert_eq!(
+        members
+            .iter()
+            .map(|node| node.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Empty", "Pair", "Record", "Value", "type", "Über"]
+    );
+    assert!(
+        members
+            .iter()
+            .all(|node| node.kind == OutlineNodeKind::EnumMember
+                && node.depth == 1
+                && node.children.is_empty())
+    );
+    assert_eq!(members[0].range.start, EditorPosition::new(3, 4));
+    assert_eq!(
+        members[2].range.end,
+        EditorPosition::new(5, "    Record { first: A, second: B }".len())
+    );
+    assert_eq!(members[4].range.start, EditorPosition::new(7, 6));
+    assert_eq!(
+        members[5].range.end,
+        EditorPosition::new(8, "    Über".len())
+    );
+}
+
+#[test]
+fn annotated_enum_constants_own_their_methods_and_stop_before_regular_methods() {
+    use fragile_notepad::editor::outline::OutlineNodeKind;
+    let result = parse(
+        "enum Goal { @pkg.Label(\"a,b\") KeepOpen(1) { void act() {} }, @Deprecated ExitApp(2); Goal(int value) {} void update() {} }",
+        "java",
+    );
+    let root = &result.tree.roots[0];
+    assert_eq!(
+        root.children
+            .iter()
+            .map(|node| node.name.as_str())
+            .collect::<Vec<_>>(),
+        ["KeepOpen", "ExitApp", "Goal", "update"]
+    );
+    assert_eq!(root.children[0].kind, OutlineNodeKind::EnumMember);
+    assert_eq!(root.children[0].children[0].name, "act");
+    assert_eq!(root.children[0].children[0].depth, 2);
+    assert_eq!(names(&result), ["act", "Goal", "update"]);
+}
+
+#[test]
+fn enum_member_boundaries_and_prefixes_come_from_xml() {
+    use fragile_notepad::editor::outline::OutlineNodeKind;
+    let xml = fragile_notepad::assets::syntax::outline_parsers_xml()
+        .replace("keyword=\"enum\"", "keyword=\"choice\"")
+        .replace(
+            "separator=\",\" terminator=\";\"",
+            "separator=\"|\" terminator=\"!\"",
+        )
+        .replace("prefix-pattern=\"#\\s*!?\"", "prefix-pattern=\"~\"");
+    let registry = OutlineRegistry::from_xml(&xml);
+    assert!(
+        registry.diagnostics().is_empty(),
+        "{:?}",
+        registry.diagnostics()
+    );
+    let source = "choice Palette { ~[doc(a,b)] Red(A, B) | Blue = call(1, 2) ! fn update() {} }";
+    let result = OutlineEngine::new(
+        registry.plan_for_syntax("rs").unwrap(),
+        registry.registry_hash(),
+    )
+    .parse_buffer(&EditorBuffer::from_text(source), "rs");
+    assert_eq!(
+        result.tree.roots[0]
+            .children
+            .iter()
+            .filter(|node| node.kind == OutlineNodeKind::EnumMember)
+            .map(|node| node.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Red", "Blue"]
+    );
+    assert_eq!(names(&result), ["update"]);
 }
