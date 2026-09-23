@@ -174,6 +174,14 @@ regression requests a two-layer device, verifies spill/reuse and retained pixels
 and reproduces the original invalid-texture error before the fix. This does not
 simulate physical-VRAM exhaustion.
 
+## Initial Windows background
+
+On Windows, a temporary, per-window `WM_ERASEBKGND` handler fills the initial
+client area with the theme background, preventing a white flash
+while preserving the native opening fade. The handler is removed after the first
+successful presentation or window destruction and survives renderer replacement.
+Non-opaque backgrounds skip the GDI fill.
+
 ## Synchronous window resizing
 
 The runtime now handles the physical size returned by `request_inner_size`.

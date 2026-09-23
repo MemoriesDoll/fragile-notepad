@@ -1482,6 +1482,7 @@ async fn run_instance<P>(
 
                         match present_result {
                             Ok(()) => {
+                                window.first_frame.presented(&window.raw);
                                 present_span.finish();
 
                                 if let Some(evidence) = strict_present_evidence {
@@ -2834,6 +2835,9 @@ fn present_missing_first_present_window<P, C>(
         || window.raw.pre_present_notify(),
     );
     let present_us = present_started.elapsed().as_micros();
+    if present_result.is_ok() {
+        window.first_frame.presented(&window.raw);
+    }
     let status = match &present_result {
         Ok(()) => backend::PresentStatus::Presented,
         Err(error) => backend::PresentStatus::Failed(strict_surface_failure(error)),

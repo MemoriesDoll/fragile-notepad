@@ -1,3 +1,4 @@
+mod first_frame;
 mod state;
 
 use state::State;
@@ -78,6 +79,7 @@ where
         let _ = self.entries.insert(
             id,
             Window {
+                first_frame: first_frame::FirstFrame::new(&window, state.background_color()),
                 raw: window,
                 waker,
                 state,
@@ -184,6 +186,7 @@ where
     P::Theme: theme::Base,
 {
     pub raw: Arc<winit::window::Window>,
+    pub first_frame: first_frame::FirstFrame,
     pub waker: shell::Waker,
     pub state: State<P>,
     pub exit_on_close_request: bool,
@@ -220,6 +223,7 @@ where
     ) -> (Self, RenderingState<P, C>) {
         let Window {
             raw,
+            first_frame,
             waker,
             state,
             exit_on_close_request,
@@ -242,6 +246,7 @@ where
         (
             Window {
                 raw,
+                first_frame,
                 waker,
                 state,
                 exit_on_close_request,
