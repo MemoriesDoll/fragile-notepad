@@ -11,11 +11,11 @@ use crate::core::{
     ShortcutCommand, ShortcutDisplayPart, ShortcutGroup, ShortcutModifierIcon,
 };
 use crate::message::{Message, SettingsCategory};
-use crate::settings_dialog::SettingsDialogState;
+use crate::settings_dialog::{SettingsDialogState, ShortcutNoticeKind};
 use crate::ui::dropdown::dropdown;
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::shortcut::{self, ShortcutIcon};
-use crate::ui::{controls, styles, utility};
+use crate::ui::{controls, motion, styles, utility};
 
 const INDENTATION_OPTIONS: &[IndentationMode] = &[
     IndentationMode::Tabs,
@@ -23,6 +23,7 @@ const INDENTATION_OPTIONS: &[IndentationMode] = &[
     IndentationMode::Spaces(4),
     IndentationMode::Spaces(8),
 ];
+const SHORTCUT_STATUS_HEIGHT: f32 = 42.0;
 
 pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
     let title = match dialog.category {
@@ -477,8 +478,8 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         .into_iter()
         .filter(|command| command.group() == dialog.shortcut_group)
         .collect();
-    let mut pane = column![
-        utility::description("Click a binding, then press the new shortcut."),
+    let pane = column![
+        shortcut_status(dialog),
         row![
             groups,
             space::horizontal(),
@@ -491,54 +492,6 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         .align_y(Center),
     ]
     .spacing(10);
-    // Keep the notice slot mounted so recording/conflict feedback does not
-    // replace the list's widget tree and jump back to the first shortcut.
-    let mut notices = column![].spacing(8);
-    if let Some(command) = dialog.capturing_shortcut {
-        notices = notices.push(
-            container(
-                row![
-                    text(format!("Press a shortcut for {}", command.label()))
-                        .size(13)
-                        .width(Fill),
-                    button(text("Cancel recording").size(12))
-                        .padding([7, 10])
-                        .style(styles::command_button)
-                        .on_press(Message::ShortcutGroupSelected(dialog.shortcut_group)),
-                ]
-                .spacing(8)
-                .align_y(Center),
-            )
-            .padding(10)
-            .width(Fill)
-            .style(styles::info_badge),
-        );
-    }
-    if let Some(conflict) = dialog.shortcut_conflict {
-        notices = notices.push(
-            container(
-                row![
-                    text(format!(
-                        "{} is already assigned to {}.",
-                        conflict.binding.display(),
-                        conflict.command.label()
-                    ))
-                    .size(13)
-                    .width(Fill),
-                    button(text("Dismiss").size(12))
-                        .padding([7, 10])
-                        .style(styles::command_button)
-                        .on_press(Message::ShortcutConflictDismissed),
-                ]
-                .spacing(8)
-                .align_y(Center),
-            )
-            .padding(10)
-            .width(Fill)
-            .style(styles::utility_notice),
-        );
-    }
-    pane = pane.push(notices);
     let mut rows = column![].spacing(0);
     for (index, command) in commands.into_iter().enumerate() {
         if index > 0 {
@@ -548,6 +501,7 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
             &dialog.draft,
             command,
             dialog.capturing_shortcut,
+            dialog.shortcut_notice_animation.pulse(),
         ));
     }
     pane.push(
@@ -564,30 +518,123 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
     .into()
 }
 
+fn shortcut_status(dialog: &SettingsDialogState) -> Element<'_, Message> {
+    let animation = dialog.shortcut_notice_animation;
+    let fallback_current = animation.rendered() == ShortcutNoticeKind::None
+        && (dialog.capturing_shortcut.is_some() || dialog.shortcut_conflict.is_some());
+    let kind = match animation.rendered() {
+        ShortcutNoticeKind::None if dialog.capturing_shortcut.is_some() => {
+            ShortcutNoticeKind::Listening(dialog.capturing_shortcut.unwrap())
+        }
+        ShortcutNoticeKind::None if dialog.shortcut_conflict.is_some() => {
+            ShortcutNoticeKind::Conflict(dialog.shortcut_conflict.unwrap())
+        }
+        kind => kind,
+    };
+
+    let content: Element<'_, Message> = match kind {
+        ShortcutNoticeKind::None => container(utility::description(
+            "Click a binding, then press the new shortcut.",
+        ))
+        .width(Fill)
+        .center_y(SHORTCUT_STATUS_HEIGHT)
+        .into(),
+        ShortcutNoticeKind::Listening(command) => container(
+            row![
+                text("Listening").size(12).font(utility::semibold()),
+                text(format!("Press a shortcut for {}", command.label()))
+                    .size(12)
+                    .width(Fill),
+                button(text("Cancel").size(12))
+                    .padding([6, 9])
+                    .style(styles::command_button)
+                    .on_press(Message::ShortcutGroupSelected(dialog.shortcut_group)),
+            ]
+            .spacing(10)
+            .align_y(Center),
+        )
+        .padding([8, 10])
+        .width(Fill)
+        .height(SHORTCUT_STATUS_HEIGHT)
+        .style(styles::listening_notice)
+        .into(),
+        ShortcutNoticeKind::Conflict(conflict) => container(
+            row![
+                text("Conflict").size(12).font(utility::semibold()),
+                text(format!(
+                    "{} is already assigned to {}.",
+                    conflict.binding.display(),
+                    conflict.command.label()
+                ))
+                .size(12)
+                .width(Fill),
+                button(text("Dismiss").size(12))
+                    .padding([6, 9])
+                    .style(styles::command_button)
+                    .on_press(Message::ShortcutConflictDismissed),
+            ]
+            .spacing(10)
+            .align_y(Center),
+        )
+        .padding([8, 10])
+        .width(Fill)
+        .height(SHORTCUT_STATUS_HEIGHT)
+        .style(styles::utility_notice)
+        .into(),
+    };
+
+    let opacity = if fallback_current {
+        1.0
+    } else {
+        animation.opacity()
+    };
+    let content = if kind == ShortcutNoticeKind::None {
+        content
+    } else {
+        // Keep the notice in its fixed slot while its paint fades as a group.
+        // The slot itself remains mounted, so the table never moves.
+        motion::fade(content, opacity, styles::settings_panel_background, true)
+    };
+
+    container(content)
+        .width(Fill)
+        .height(SHORTCUT_STATUS_HEIGHT)
+        .clip(true)
+        .into()
+}
+
 fn shortcut_row(
     settings: &EditorSettings,
     command: ShortcutCommand,
     capturing: Option<ShortcutCommand>,
+    pulse: f32,
 ) -> Element<'_, Message> {
     let recording = capturing == Some(command);
     let binding = settings.shortcuts.binding(command);
     let binding_view: Element<'_, Message> = if recording {
-        text("Press keys…").size(13).into()
+        text("Press keys…").size(12).into()
     } else {
         shortcut_binding_view(binding)
+    };
+    let binding_button: Element<'_, Message> = if recording {
+        button(container(binding_view).center_x(Fill))
+            .padding([6, 9])
+            .width(174)
+            .style(styles::listening_command_button(pulse))
+            .on_press(Message::ShortcutCaptureStarted(command))
+            .into()
+    } else {
+        button(container(binding_view).center_x(Fill))
+            .padding([6, 9])
+            .width(174)
+            .style(styles::command_button)
+            .on_press(Message::ShortcutCaptureStarted(command))
+            .into()
     };
     container(
         row![
             text(command.label()).size(13).width(Fill),
-            button(container(binding_view).center_x(Fill))
-                .padding([6, 9])
-                .width(174)
-                .style(if recording {
-                    styles::primary_command_button
-                } else {
-                    styles::command_button
-                })
-                .on_press(Message::ShortcutCaptureStarted(command)),
+            binding_button,
             button(text("Clear").size(12))
                 .padding([6, 5])
                 .style(styles::text_button)

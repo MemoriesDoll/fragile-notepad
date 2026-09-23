@@ -200,6 +200,7 @@ impl App {
             return Task::none();
         }
         let task = self.update_traced(message);
+        self.settings_dialog.sync_shortcut_notice_animation();
         let search_task = if self.session.exiting {
             Task::none()
         } else {
@@ -609,6 +610,7 @@ impl App {
     fn needs_animation_frames(&self) -> bool {
         self.chrome_animation.needs_frames()
             || self.close_prompt.needs_frames()
+            || self.settings_dialog.shortcut_notice_needs_frames()
             || self
                 .go_to_line_prompt
                 .as_ref()
@@ -617,6 +619,7 @@ impl App {
 
     fn update_chrome_animation_frame(&mut self, at: Instant) -> Task<Message> {
         self.chrome_animation.update_frame(at);
+        self.settings_dialog.update_shortcut_notice_animation(at);
         let close = self
             .close_prompt
             .update_frame(at)

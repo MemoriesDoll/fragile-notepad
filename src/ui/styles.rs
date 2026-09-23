@@ -390,6 +390,21 @@ pub fn settings_panel(theme: &Theme) -> container::Style {
     }
 }
 
+pub fn settings_panel_background(theme: &Theme) -> Color {
+    VisualPalette::from_theme(theme).app
+}
+
+pub fn listening_notice(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+
+    container::Style {
+        background: Some(Background::Color(palette.accent_soft)),
+        text_color: Some(palette.accent),
+        border: border(1.0, palette.accent.scale_alpha(0.42), 8.0),
+        ..container::Style::default()
+    }
+}
+
 /// Shared surfaces for the window picker, search workspace, and preferences.
 pub fn utility_dialog(theme: &Theme) -> container::Style {
     let palette = VisualPalette::from_theme(theme);
@@ -1004,6 +1019,21 @@ pub fn primary_command_button(theme: &Theme, status: button::Status) -> button::
         text_color: palette.accent_text,
         border: border(1.0, palette.accent, CONTROL_RADIUS),
         ..button::Style::default()
+    }
+}
+
+pub fn listening_command_button(pulse: f32) -> impl Fn(&Theme, button::Status) -> button::Style {
+    let pulse = pulse.clamp(0.0, 1.0);
+    move |theme, status| {
+        let palette = VisualPalette::from_theme(theme);
+        let mut style = primary_command_button(theme, status);
+        style.border = border(1.0, palette.accent, CONTROL_RADIUS);
+        style.shadow = Shadow {
+            color: palette.accent.scale_alpha(0.14 + pulse * 0.2),
+            offset: Vector::new(0.0, 0.0),
+            blur_radius: 3.0 + pulse * 7.0,
+        };
+        style
     }
 }
 

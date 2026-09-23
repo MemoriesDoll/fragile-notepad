@@ -150,6 +150,7 @@ fn main() {
                     shortcut_group: ShortcutGroup::Edit,
                     capturing_shortcut: None,
                     shortcut_conflict: None,
+                    shortcut_notice_animation: Default::default(),
                 };
                 render(
                     &mut renderer,
