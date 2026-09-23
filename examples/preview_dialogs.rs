@@ -134,7 +134,7 @@ fn main() {
                 }
             }
         }
-        for (width, height, size_name) in [(900, 724, "normal"), (760, 524, "minimum")] {
+        for (width, height, size_name) in [(820, 560, "normal"), (720, 460, "minimum")] {
             for (category, category_name) in [
                 (SettingsCategory::General, "general"),
                 (SettingsCategory::Appearance, "appearance"),

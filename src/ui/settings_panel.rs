@@ -42,7 +42,7 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
     } else {
         scrollable(pane)
             .smooth_scroll(true)
-            .spacing(10)
+            .spacing(6)
             .height(Fill)
             .into()
     };
@@ -54,11 +54,11 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
             category("Shortcuts", SettingsCategory::Shortcuts, dialog.category),
             space::vertical(),
         ]
-        .spacing(6)
+        .spacing(2)
         .height(Fill),
     )
-    .padding([24, 14])
-    .width(174)
+    .padding([16, 10])
+    .width(156)
     .height(Fill)
     .style(styles::settings_category_list);
 
@@ -74,10 +74,10 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
                             .height(Fill)
                             .width(Fill),
                     ]
-                    .spacing(22)
+                    .spacing(14)
                     .height(Fill)
                 )
-                .padding(24)
+                .padding(18)
                 .width(Fill)
                 .height(Fill)
             ]
@@ -91,7 +91,7 @@ pub fn view(dialog: &SettingsDialogState) -> Element<'_, Message> {
             ]
             .spacing(8)
             .align_y(Center)
-            .padding([12, 20]),
+            .padding([8, 16]),
         ]
         .width(Fill)
         .height(Fill),
@@ -133,7 +133,7 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
         ),
     ]
     .into_iter()
-    .fold(row![].spacing(10), |row, (mode, title, hint)| {
+    .fold(row![].spacing(8), |row, (mode, title, hint)| {
         row.push(
             button(
                 column![
@@ -147,10 +147,10 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
                     })
                     .size(11),
                 ]
-                .spacing(8)
-                .height(90),
+                .spacing(6)
+                .height(76),
             )
-            .padding(14)
+            .padding(10)
             .width(Fill)
             .style(styles::utility_selection(
                 settings.hardware_acceleration == mode,
@@ -162,14 +162,14 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
         section("Rendering", column![
             modes,
             utility::description("If hardware rendering is already active, switching to Software takes effect after restarting."),
-        ].spacing(14).into()),
+        ].spacing(10).into()),
         section("Scrolling", setting_row(
             "Editor scroll speed",
             stepper(format!("{:.2}×", settings.scroll_speed), Message::SettingsScrollSpeedDecrease,
                 Message::SettingsScrollSpeedIncrease, Message::SettingsScrollSpeedReset,
                 settings.scroll_speed > EditorSettings::MIN_SCROLL_SPEED, settings.scroll_speed < EditorSettings::MAX_SCROLL_SPEED),
         )),
-    ].spacing(18).into()
+    ].spacing(14).into()
 }
 
 fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
@@ -179,7 +179,7 @@ fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
         AppearanceMode::Dark,
     ]
     .into_iter()
-    .fold(row![].spacing(10), |row, mode| {
+    .fold(row![].spacing(8), |row, mode| {
         row.push(appearance_choice(mode, settings.appearance == mode))
     });
     column![
@@ -212,11 +212,11 @@ fn appearance_pane(settings: &EditorSettings) -> Element<'_, Message> {
                 ),
                 syntax_preview(settings),
             ]
-            .spacing(14)
+            .spacing(10)
             .into()
         ),
     ]
-    .spacing(18)
+    .spacing(14)
     .into()
 }
 
@@ -241,9 +241,9 @@ fn appearance_choice(mode: AppearanceMode, selected: bool) -> Element<'static, M
             ]
             .align_y(Center),
         ]
-        .spacing(10),
+        .spacing(8),
     )
-    .padding(10)
+    .padding(8)
     .width(Fill)
     .style(styles::utility_selection(selected))
     .on_press(Message::DraftAppearanceSelected(mode))
@@ -303,7 +303,7 @@ fn miniature(dark: bool) -> Element<'static, Message> {
         ]
         .height(Fill),
     ])
-    .height(60)
+    .height(52)
     .width(Fill)
     .clip(true)
     .style(move |_| container::Style {
@@ -361,14 +361,14 @@ fn syntax_preview(settings: &EditorSettings) -> Element<'_, Message> {
         );
     }
     let preview = container(column![
-        container(utility::description("Preview")).padding([10, 14]),
+        container(utility::description("Preview")).padding([8, 12]),
         rule::horizontal(1).style(styles::utility_rule),
-        scrollable(container(lines).padding(14))
+        scrollable(container(lines).padding(10))
             .direction(scrollable::Direction::Both {
                 vertical: scrollable::Scrollbar::default(),
                 horizontal: scrollable::Scrollbar::default(),
             })
-            .height(128)
+            .height(112)
             .width(Fill),
     ])
     .width(Fill)
@@ -403,7 +403,7 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
                 ]
                 .spacing(5),
             ]
-            .spacing(14)
+            .spacing(10)
             .into()
         ),
         section(
@@ -427,7 +427,7 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
                     Message::DraftFoldingControlsToggled
                 ),
             ]
-            .spacing(14)
+            .spacing(10)
             .into()
         ),
         section(
@@ -452,11 +452,11 @@ fn editor_pane(settings: &EditorSettings) -> Element<'_, Message> {
                     Message::DraftEolMarkersToggled
                 ),
             ]
-            .spacing(14)
+            .spacing(10)
             .into()
         ),
     ]
-    .spacing(18)
+    .spacing(14)
     .into()
 }
 
@@ -466,7 +466,7 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         .fold(row![].spacing(4), |row, group| {
             row.push(
                 button(text(group.label()).size(13))
-                    .padding([7, 14])
+                    .padding([6, 11])
                     .style(styles::settings_category_button(
                         group == dialog.shortcut_group,
                     ))
@@ -483,17 +483,17 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
             groups,
             space::horizontal(),
             button(text("Restore all defaults").size(12))
-                .padding([7, 10])
+                .padding([6, 9])
                 .style(styles::command_button)
                 .on_press(Message::ShortcutsResetToDefaults)
         ]
         .spacing(8)
         .align_y(Center),
     ]
-    .spacing(14);
+    .spacing(10);
     // Keep the notice slot mounted so recording/conflict feedback does not
     // replace the list's widget tree and jump back to the first shortcut.
-    let mut notices = column![].spacing(12);
+    let mut notices = column![].spacing(8);
     if let Some(command) = dialog.capturing_shortcut {
         notices = notices.push(
             container(
@@ -506,10 +506,10 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
                         .style(styles::command_button)
                         .on_press(Message::ShortcutGroupSelected(dialog.shortcut_group)),
                 ]
-                .spacing(12)
+                .spacing(8)
                 .align_y(Center),
             )
-            .padding(14)
+            .padding(10)
             .width(Fill)
             .style(styles::info_badge),
         );
@@ -530,10 +530,10 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
                         .style(styles::command_button)
                         .on_press(Message::ShortcutConflictDismissed),
                 ]
-                .spacing(12)
+                .spacing(8)
                 .align_y(Center),
             )
-            .padding(14)
+            .padding(10)
             .width(Fill)
             .style(styles::utility_notice),
         );
@@ -554,7 +554,7 @@ fn shortcuts_pane(dialog: &SettingsDialogState) -> Element<'_, Message> {
         keyed_column![(
             dialog.shortcut_group,
             scrollable(container(rows).style(styles::utility_card))
-                .spacing(10)
+                .spacing(6)
                 .smooth_scroll(true)
                 .height(Fill)
         )]
@@ -580,7 +580,7 @@ fn shortcut_row(
         row![
             text(command.label()).size(13).width(Fill),
             button(container(binding_view).center_x(Fill))
-                .padding([8, 10])
+                .padding([6, 9])
                 .width(174)
                 .style(if recording {
                     styles::primary_command_button
@@ -589,14 +589,14 @@ fn shortcut_row(
                 })
                 .on_press(Message::ShortcutCaptureStarted(command)),
             button(text("Clear").size(12))
-                .padding([8, 6])
+                .padding([6, 5])
                 .style(styles::text_button)
                 .on_press_maybe(binding.map(|_| Message::ShortcutCleared(command))),
         ]
-        .spacing(12)
+        .spacing(8)
         .align_y(Center),
     )
-    .padding([10, 14])
+    .padding([8, 12])
     .width(Fill)
     .into()
 }
@@ -629,8 +629,8 @@ fn shortcut_binding_view(binding: Option<KeyBinding>) -> Element<'static, Messag
 }
 
 fn section<'a>(title: &'static str, content: Element<'a, Message>) -> Element<'a, Message> {
-    container(column![text(title).size(15).font(utility::semibold()), content,].spacing(18))
-        .padding(16)
+    container(column![text(title).size(15).font(utility::semibold()), content,].spacing(12))
+        .padding(12)
         .width(Fill)
         .style(styles::utility_card)
         .into()
@@ -641,7 +641,7 @@ fn setting_row<'a>(title: &'static str, control: Element<'a, Message>) -> Elemen
         text(title).size(13).font(utility::semibold()).width(Fill),
         control
     ]
-    .spacing(18)
+    .spacing(12)
     .align_y(Center)
     .into()
 }
@@ -665,17 +665,17 @@ fn stepper<'a>(
     let icon = |icon| hero::icon(icon, 14, IconTone::Text);
     row![
         button(icon(HeroIcon::Minus))
-            .padding(8)
+            .padding(6)
             .style(styles::command_button)
             .on_press_maybe(can_decrease.then_some(decrease)),
         container(text(value).size(13).font(utility::semibold())).center_x(58),
         button(icon(HeroIcon::Plus))
-            .padding(8)
+            .padding(6)
             .style(styles::command_button)
             .on_press_maybe(can_increase.then_some(increase)),
         controls::compact_command_button("Reset", 12, reset),
     ]
-    .spacing(5)
+    .spacing(4)
     .align_y(Center)
     .into()
 }
@@ -686,7 +686,7 @@ fn footer_button(
     primary: bool,
 ) -> Element<'static, Message> {
     button(container(text(label).size(13)).center_x(54))
-        .padding([9, 12])
+        .padding([7, 10])
         .style(if primary {
             styles::primary_command_button
         } else {
