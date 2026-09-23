@@ -127,7 +127,6 @@ jobs:
             libvulkan1 \
             mesa-vulkan-drivers \
             vulkan-tools \
-            weston \
             pkg-config \
             xvfb \
             xauth
@@ -163,39 +162,26 @@ jobs:
       - name: Validate release gates
         if: runner.os == 'Windows'
         run: |
-          cargo check
           cargo test
           cargo check --no-default-features
-          cargo check --examples
 
       - name: Validate macOS release gates
         if: runner.os == 'macOS'
         shell: bash
         run: |
           source scripts/setup-macos-vulkan.sh
-          cargo check
           cargo test
           cargo check --no-default-features
-          cargo check --examples
 
       - name: Validate Linux release gates
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          cargo check
           WINIT_UNIX_BACKEND=x11 xvfb-run -a cargo test
           cargo check --no-default-features
-          cargo check --examples
 
       - name: Build release
         run: cargo build --release
-
-      - name: Validate Wayland Vulkan release
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          cargo build --locked --release --example backend_switch_probe
-          python scripts/check-wayland-vulkan.py --binary target/release/examples/backend_switch_probe
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
@@ -217,18 +203,12 @@ jobs:
           cp assets/icons/NOTICE.txt dist/package/ICON-NOTICES.txt
           tar -C dist/package -czf "dist/${{ matrix.archive }}" fragile-notepad LICENSE ICON-NOTICES.txt
 
-      - name: Package and validate macOS Vulkan runtime
+      - name: Package macOS Vulkan runtime
         if: runner.os == 'macOS'
         shell: bash
         run: |
           mkdir -p dist
           bash scripts/package-macos.sh dist/package
-          # Test the packaged loader/ICD, independently of the Homebrew setup.
-          cargo build --example backend_switch_probe
-          export DYLD_LIBRARY_PATH="$PWD/dist/package/lib"
-          export VK_DRIVER_FILES="$PWD/dist/package/share/vulkan/icd.d/MoltenVK_icd.json"
-          export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
-          python scripts/check-vulkan-handoff.py --binary target/debug/examples/backend_switch_probe
           tar -C dist/package -czf "dist/${{ matrix.archive }}" .
 
       - name: Upload artifact

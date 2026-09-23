@@ -95,26 +95,4 @@ mod tests {
         }
         assert_eq!((bus.queue.capacity(), bus.queued.capacity()), capacities);
     }
-
-    #[test]
-    #[ignore = "manual transport microbenchmark; no hardware-dependent pass threshold"]
-    fn benchmark_transport() {
-        use std::{hint::black_box, time::Instant};
-        let mut bus = MessageBus::default();
-        let iterations = 1_000_000;
-        let start = Instant::now();
-        for _ in 0..iterations {
-            bus.publish(black_box(TestEvent::Refresh(1)));
-            bus.publish(black_box(TestEvent::Refresh(1)));
-            bus.publish(black_box(TestEvent::Closed(2)));
-            black_box(bus.pop());
-            black_box(bus.pop());
-        }
-        let elapsed = start.elapsed();
-        assert!(bus.is_empty());
-        eprintln!(
-            "{iterations} batches (3 publishes, 2 deliveries, 1 coalesced): {elapsed:?}, {:.1} ns/batch",
-            elapsed.as_nanos() as f64 / iterations as f64
-        );
-    }
 }

@@ -93,7 +93,3 @@ ordering, lossless delivery, coalescing, republishing, and storage reuse. Journa
 tests cover no-op access, batched edits, metadata, structural changes, reordering,
 and streamed previews. Application tests cover subscriber mutations, closing
 workers, settings propagation, deferred search, and shutdown recovery.
-
-`bus::tests::benchmark_transport` is an ignored manual microbenchmark. It measures
-only transport (three publishes, two deliveries, one coalesced event per batch),
-not application latency. It has no hardware-dependent pass threshold.

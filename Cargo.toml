@@ -6,7 +6,6 @@ edition = "2024"
 [features]
 default = ["hybrid-rendering"]
 hybrid-rendering = ["iced/wgpu-bare", "dep:iced_wgpu", "dep:wgpu"]
-gpu-profiling = ["hybrid-rendering", "wgpu/trace", "wgpu/counters"]
 
 [dependencies]
 encoding_rs = { path = "vendor/encoding_rs" }

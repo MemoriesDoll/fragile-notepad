@@ -1,8 +1,8 @@
 # Hybrid Rendering
 
 This document describes the current implementation. It replaces the earlier
-design plan and its illustrative API sketches. Setup, profiling commands, and
-the full probe invocation list are in [DEVELOPMENT.md](DEVELOPMENT.md).
+design plan and its illustrative API sketches. Setup and renderer diagnostics
+are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Startup and policy
 
@@ -109,9 +109,9 @@ image is ready merely because a warm submission completed.
 
 Failure categories distinguish prepare, warm-up, commit, first presentation,
 cancellation, unsupported operation, missing renderer evidence, and rollback
-problems. Window closing/resizing and injected failures are covered by the probe
-scenarios below. A successful probe is evidence for that scenario and machine,
-not a universal no-flash guarantee.
+problems. Historical window closing/resizing and injected-failure captures are
+recorded in [VULKAN_RENDERING.md](VULKAN_RENDERING.md). They describe the tested
+scenarios and machines, not a universal no-flash guarantee.
 
 ## Software rendering optimizations
 
@@ -137,9 +137,9 @@ layer data, and native presentation costs remain platform-dependent.
 Enable `FRAGILE_PERF_TRACE=1` to collect CSV events and optionally set
 `FRAGILE_PERF_TRACE_DIR`. App, winit, fallback compositor, and tiny-skia events
 share the trace file. Primitive-level software events are buffered until draw or
-presentation boundaries; strict handoff phase evidence is flushed for probe
-consumption. Tracing still formats records and performs I/O, so use untraced
-release benchmarks for representative timings.
+presentation boundaries; strict handoff phase evidence is flushed as it occurs.
+Tracing still formats records and performs I/O, so use untraced release builds
+for representative timings.
 
 Useful timing fields in `tiny_skia_present` include `scroll_us`,
 `damage_us`, `snapshot_us`, `grouping_us`, and `os_present_us`.
@@ -148,44 +148,24 @@ clip-mask reuse/rebuilds, paragraph-raster hits/misses/bypasses, and glyph count
 These fields cover different scopes and should not be treated as interchangeable
 whole-frame timings.
 
-For strict handoff evidence, retain both the probe JSON and its CSV. Warm evidence
-includes renderer family, backend/adapter, submission completion, dimensions, pass
-count, and elapsed time. Commit and first-present events establish ordering.
-The JSON's `warm_timeout_ms` field is error evidence, not an assertion that every
-successful run reports its configured timeout.
+Handoff trace events include renderer family, backend/adapter, submission
+completion, dimensions, pass count, and elapsed time. Commit and first-present
+events establish ordering.
 
 ## Validation
 
 Run from the application repository root:
 
 ```powershell
-cargo check --locked
 cargo test --locked
-cargo check --locked --examples
 cargo check --locked --no-default-features
 cargo test --locked -p iced_graphics --lib
 cargo test --locked -p iced_tiny_skia --lib --features iced_tiny_skia/image
 cargo test --locked -p iced_winit -p iced_wgpu --lib
-$env:FRAGILE_PERF_TRACE='1'
-cargo run --example backend_switch_probe -- --scenario=single-window
-cargo run --example backend_switch_probe -- --scenario=multi-window
-cargo run --example backend_switch_probe -- --scenario=resize-during-preparing
-cargo run --example backend_switch_probe -- --scenario=close-during-preparing
-cargo run --example backend_switch_probe -- --scenario=close-during-commit-pending
-cargo run --example backend_switch_probe -- --fail=prepare
-cargo run --example backend_switch_probe -- --fail=warm
-cargo run --example backend_switch_probe -- --fail=commit
-cargo run --example backend_switch_probe -- --fail=first-present
 ```
 
-The close/failure scenarios can pass by proving the expected cancellation or
-rollback; they are not expected to produce a normal successful switch.
-Without trace evidence, strict runs may be `indeterminate`.
-A software-only build of the probe prints a feature-required skip marker.
-
-Recorded local Windows validation passed these nine scenarios, including rollback
-after first-present failure. Icon parity checks compare CPU/GPU output at 100%,
-150%, and 200% scale and require cached-frame equality within each renderer.
+Icon parity checks compare CPU/GPU output at 100%, 150%, and 200% scale and require
+cached-frame equality within each renderer.
 Vendor tests compare optimized pixel-copy, clipping, resampling, mask, and damage
 behavior against reference paths.
 

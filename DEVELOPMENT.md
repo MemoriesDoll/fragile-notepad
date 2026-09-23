@@ -244,58 +244,17 @@ Configuration and cache locations are defined in [src/platform/paths.rs](src/pla
 
 On Unix, session snapshots are written with owner-only file permissions. Clean
 file tabs store paths rather than copying disk contents; unsaved recovery text is
-stored in the session file. The raw small-file cache service is not populated by
-normal open/save operations.
+stored in the session file.
 
-## Bulk-load and recovery profiling
+## Startup timing tests
 
-The following uses an isolated settings directory and synthetic files. Never point
-the profiler at your normal application configuration:
-
-```powershell
-$env:APPDATA="$PWD/target/many-files-investigation/profile"
-$env:LOCALAPPDATA=$env:APPDATA
-cargo run --release --no-default-features --example profile_many_files -- 100 rust64
-cargo run --release --no-default-features --example profile_many_files -- history
-cargo run --release --no-default-features --example profile_many_files -- outline
-cargo run --release --no-default-features --example profile_many_files -- recovery
-cargo run --release --no-default-features --example profile_many_files -- recovery verify
-```
-
-On Linux/macOS, set an absolute isolated `XDG_CONFIG_HOME` containing a
-`many-files-investigation` directory component instead of `APPDATA`, for example:
-
-```bash
-export XDG_CONFIG_HOME="$PWD/target/many-files-investigation/profile"
-export XDG_CACHE_HOME="$PWD/target/many-files-investigation/cache"
-cargo run --release --no-default-features --example profile_many_files -- 100 rust64
-```
-
-Run these in a dedicated shell or restore the previous environment values when
-finished. `profile_many_files` is a diagnostic harness and closes its window
-automatically; use the application binary for an interactive inspection:
-
-```powershell
-cargo build --release --locked
-$files = Get-ChildItem "$env:APPDATA/fixtures/document_*.rs" | Sort-Object Name | Select-Object -First 50
-& .\target\release\fragile-notepad.exe --no-session @($files.FullName)
-```
-
-Available workloads are `text4` (4,080 bytes/file), `text64` (68,000), `rust64`
-(66,600), `rust900` (962,000), and `rust1100` (1,221,000). `model` measures handlers
-and widget construction without running the returned asynchronous tasks; `history`
-measures settings parsing/writes; `outline` measures declaration scaling. Neither
-`model` nor first-view timing alone measures all-files-ready latency.
-
-The recovery pair verifies 101 tabs and exact unsaved Unicode text across two real
-window lifecycles. Bulk-load output separates file-completion handler time,
-all-files-loaded time, persistence results, and a 16 ms UI heartbeat. Startup tests
-report first-view entry and a separate screenshot-completion milestone after
-layout/rendering; screenshot completion is not an OS presentation timestamp.
-The debug startup test allows 200 ms on local native systems, 750 ms on hosted
-Windows/Linux runners, and 2 s on hosted macOS runners. These are wall-clock measurements that
-include native window setup. The first-view and first-frame probes each retain
-a five-second timeout, and test diagnostics report both timings and the budget.
+Startup tests report first-view entry and a separate screenshot-completion
+milestone after layout/rendering; screenshot completion is not an OS presentation
+timestamp. The debug startup test allows 200 ms on local native systems, 750 ms
+on hosted Windows/Linux runners, and 2 s on hosted macOS runners. These wall-clock
+measurements include native window setup. The first-view and first-frame probes
+each retain a five-second timeout, and diagnostics report both timings and the
+budget.
 
 ## Vendored Dependencies
 
@@ -323,13 +282,13 @@ bash scripts/generate_icon_assets.sh
 ```
 
 Icon design, online references, and licensing are documented in
-[`assets/icons/README.md`](assets/icons/README.md). After regeneration,
-`python scripts/preview_icons.py` builds an offline light/dark gallery at
-`target/icon-review/index.html` with native-size raster/vector comparisons.
+[`assets/icons/README.md`](assets/icons/README.md).
 
 The CI entry points run the standard local validation sequence without
 formatting vendored path dependencies. They call the icon generation script
-before compiling:
+before compiling. `cargo test` compiles the application and examples, so separate
+default-feature `cargo check` and `cargo check --examples` steps are unnecessary.
+The software-only build still needs `cargo check --no-default-features`:
 
 ```powershell
 .\scripts\ci.ps1
@@ -352,9 +311,7 @@ Vulkan driver too; Xvfb supplies an X11 display, not a Vulkan adapter.
 Before handing off changes that touch editor rendering or vendored source, run:
 
 ```powershell
-cargo check
 cargo test
-cargo check --examples
 cargo check --no-default-features
 ```
 
@@ -362,25 +319,7 @@ cargo check --no-default-features
 
 See [PACKAGING.md](PACKAGING.md) for release builds.
 
-For renderer performance changes, also run:
-
-```powershell
-cargo run --release --no-default-features --example profile_tiny_skia_text
-cargo run --release --example profile_render
-```
-
-For the patched software backend hot paths, run without tracing so per-event
-diagnostics do not affect the measurements:
-
-```powershell
-cargo run --release --no-default-features --example profile_backend_hotspots
-cargo run --release --no-default-features --example profile_tiny_skia_text
-```
-
-`profile_backend_hotspots` measures the production scroll detector, cached image
-filtering, and damage compaction. Its nearest-filter numbers are a comparison;
-the optimization preserves the original linear-filter output. Pixel-equivalence
-regressions live in the vendored graphics and tiny-skia crates:
+For changes to the patched renderers, run the vendored regression suites:
 
 ```powershell
 cargo test --locked -p iced_graphics --lib
@@ -393,119 +332,7 @@ The application icon parity test also checks cached-frame equality at 100%,
 difference at the same pixel; extra rows with greater coverage differences still
 fail. Pixel-difference limits remain separate from that edge check.
 
-## Backend Switch Probe
-
-The backend switch probe verifies the runtime path for starting with the
-software renderer, requesting the prepare/warm/commit backend handoff to
-`Backend::Hardware(Api::Vulkan)`, running real wgpu offscreen warm-up, observing
-strict frame-order evidence, and exiting. Use trace collection for strict
-validation; without it, the probe may report `indeterminate` because strict
-success requires warm-up and present-order evidence:
-
-```powershell
-$env:CARGO_TARGET_DIR='target-codex-check'
-$env:FRAGILE_PERF_TRACE='1'
-cargo run --example backend_switch_probe -- --scenario=single-window
-```
-
-The handoff submits the current UI offscreen for each window, polls GPU completion
-without waiting on the event loop, and retains those renderers for commit. The
-warm-up deadline is three seconds. Visible surface creation/configuration still
-runs at commit, so successful frame-order evidence is not a zero-stall guarantee.
-See [the rendering architecture](SEAMLESS_HYBRID_RENDERING.md) for the state flow,
-cache boundaries, and remaining platform-validation limits.
-
-On Windows, keep the generated result JSON and trace CSV from the run. Current
-Windows strict validation records `result=ok`, strict outcome success,
-Wgpu/Vulkan presented evidence, and non-null warm evidence for both
-single-window and multi-window scenarios. For WSL/Linux, all nine strict
-scenarios pass using Mesa Lavapipe under WSLg, including the actual About
-animation. This proves software Vulkan correctness; physical-GPU Linux
-presentation is still unverified. Native macOS has not been locally validated;
-CI configures MoltenVK and the Vulkan loader as described in
-[PACKAGING.md](PACKAGING.md).
-
-To measure sustained redraw cadence and CPU frame costs after a successful
-strict handoff, build the release probe once, then run workloads sequentially:
-
-```text
-cargo build --locked --release --example backend_switch_probe
-python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe
-python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe --workload editor
-python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe --workload editor --windows 2
-python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe --workload plain-text
-python scripts/test_profile_vulkan_live.py
-```
-
-Omit `.exe` on Linux/macOS and configure the platform Vulkan runtime first.
-Keep the probe visible and focused: About intentionally pauses when unfocused,
-so its sustained workload uses one window. Editor workloads advance three rows
-per 24 Hz timer tick. The probe removes its frame subscription and changing
-status labels during measurement; About retains its own animation scheduler.
-Each run defaults to 12 seconds after handoff, discards the first two seconds,
-and saves its trace, log, strict result, and summary under `target/vulkan-live/`.
-Use `--seconds` and `--warmup-seconds` to change the interval. The runner rejects
-missing presentation evidence, software fallback, and insufficient samples.
-These instrumented redraw wall times include interaction, drawing, tracing,
-and presentation waits, but exclude separate application updates/UI rebuilding;
-they do not measure GPU execution or display scanout latency. Initial prepare
-and commit delays belong to the handoff scenario and are outside this interval.
-
-Linux CI also runs the release probe on an isolated Weston Wayland compositor
-with a private socket and runtime directory:
-
-```text
-cargo build --locked --release --example backend_switch_probe
-python scripts/check-wayland-vulkan.py --binary target/release/examples/backend_switch_probe
-```
-
-Install Weston and configure Vulkan first (CI uses Lavapipe). The runner defaults
-to a headless Pixman compositor, checks all handoff scenarios plus sustained
-About/editor workloads, and saves logs/traces under `target/vulkan-wayland/`.
-Use `--backend=x11` for a visible nested compositor. `--weston-root` supports
-locally extracted Debian amd64 Weston packages without system installation.
-The runner terminates its compositor and removes its private runtime directory
-afterward. Headless or nested software Vulkan does not prove physical-GPU Linux
-presentation. Local WSLg's older Weston crashes with signal 11 in some release
-captures; Weston 14.0.2 passes the strengthened checks. See `VULKAN_RENDERING.md`
-for the retained crash logs and limits of that comparison.
-
-For diagnostics against the older basic configure task, run the probe in
-configure mode:
-
-```powershell
-cargo run --example backend_switch_probe -- --mode=configure
-```
-
-or set `FRAGILE_BACKEND_SWITCH_PROBE_MODE=configure`.
-
-The probe also supports lifecycle scenarios with `--scenario=` or
-`FRAGILE_BACKEND_SWITCH_PROBE_SCENARIO`:
-
-```powershell
-cargo run --example backend_switch_probe -- --scenario=single-window
-cargo run --example backend_switch_probe -- --scenario=multi-window
-cargo run --example backend_switch_probe -- --scenario=resize-during-preparing
-cargo run --example backend_switch_probe -- --scenario=close-during-preparing
-cargo run --example backend_switch_probe -- --scenario=close-during-commit-pending
-```
-
-`single-window` is the default strict scenario and reports `result=ok` on
-current Windows validation when trace evidence proves warm-up completion and
-frame ordering. `multi-window` opens an additional window before switching and
-requires a post-switch frame from every live window; current Windows validation
-reports `result=ok` with Wgpu/Vulkan presented evidence for both live windows
-and non-null warm evidence. The resize and close scenarios set
-`FRAGILE_NOTEPAD_RENDER_PREPARE_DELAY_MS=250` when no delay is already present
-so the requested lifecycle operation has a chance to occur during preparation.
-`close-during-preparing` reports `result=ok` for the intentional
-`Cancelled + Preparing + NotNeeded` cancellation path.
-`close-during-commit-pending` enables trace collection when needed, waits for
-the `backend_handoff_commit_pending` phase marker, and uses the probe-only
-`FRAGILE_NOTEPAD_RENDER_COMMIT_PENDING_DELAY_MS=250` diagnostic hook when no
-delay is already present so the close request can be processed before commit.
-If trace evidence cannot prove exact timing, it reports `indeterminate` instead
-of silently passing.
+## Renderer diagnostics
 
 Runtime rendering policy can be forced without changing saved settings:
 
@@ -515,90 +342,13 @@ $env:FRAGILE_NOTEPAD_RENDER_BACKEND='lazy-gpu'              # request lazy boost
 $env:FRAGILE_NOTEPAD_RENDER_BACKEND='hardware-diagnostic'   # diagnostic boost
 ```
 
-Saved settings use the same policy with `hardware_acceleration` modes exposed in
-Settings: software, lazy hardware, and hardware diagnostic. The environment
-override wins over saved settings for startup and runtime boost decisions.
+The environment override wins over saved hardware-acceleration settings.
+See [the rendering architecture](SEAMLESS_HYBRID_RENDERING.md) for the handoff
+state flow, resource ownership, and platform limitations.
 
-Hybrid rendering is enabled by default. With `--no-default-features`, the
-example still compiles and prints a skip marker explaining that the feature is
-required. Stable CLI markers include
-`BACKEND_SWITCH_PROBE_START`, `BACKEND_SWITCH_PROBE_INITIAL_FRAME`,
-`BACKEND_SWITCH_PROBE_HANDOFF_COMMIT_REQUESTED`,
-`BACKEND_SWITCH_PROBE_POST_SWITCH_FRAME`, `BACKEND_SWITCH_PROBE_DONE`, and
-timeout or switch-failure markers when the probe cannot complete. Configure
-mode additionally emits `BACKEND_SWITCH_PROBE_CONFIGURED`. Scenario runs emit
-`BACKEND_SWITCH_PROBE_SCENARIO_*` markers, and every completed run attempts to
-write a JSON result log before exit:
-
-```text
-target/hybrid-rendering-probes/<mode>-<scenario>-<failure>.json
-```
-
-Set `FRAGILE_BACKEND_SWITCH_PROBE_RESULT_DIR` to write these logs elsewhere.
-Each JSON result includes the mode, scenario, failure injection, OS, arch,
-result (`ok`, `failed`, `skipped`, or `indeterminate`), reason, state,
-`strict_outcome`, frame count, window open/close counts, resize observations,
-trace path when used, and trace-derived timing or renderer evidence when
-available. Strict trace evidence includes:
-
-- `warm_complete_us`
-- `warm_elapsed_us`
-- `warm_renderer_family`
-- `warm_backend`
-- `warm_adapter`
-- `warm_passes`
-- `warm_submission_completed`
-- `warm_timeout_ms`
-- `warm_failure`
-
-For a strict success run, `trace_evidence.warm_complete_us` must be present,
-`warm_renderer_family` must be `Wgpu`, `warm_submission_completed` must be
-`true`, warm completion must occur before commit pending, software frame
-evidence must be present during prepare and commit-pending, and the first
-post-commit backend must be hardware. Missing timing or trace proof is
-`indeterminate`; wrong renderer family or failed warm-up submission is `failed`.
-
-Failure injection is opt-in and inactive by default. To exercise failure
-handling in the prepare/warm/commit path:
-
-```powershell
-cargo run --example backend_switch_probe -- --fail=prepare
-cargo run --example backend_switch_probe -- --fail=warm
-cargo run --example backend_switch_probe -- --fail=commit
-cargo run --example backend_switch_probe -- --fail=first-present
-```
-
-The probe prints `BACKEND_SWITCH_PROBE_INJECTED_FAILURE_OBSERVED` when the
-requested failure reaches the app boundary. Equivalent environment switches are
-`FRAGILE_BACKEND_SWITCH_PROBE_FAILURE` for the probe and
-`FRAGILE_NOTEPAD_RENDER_INJECT_FAILURE=prepare|warm|commit|first-present` for
-the runtime. `FRAGILE_NOTEPAD_RENDER_PREPARE_DELAY_MS=<milliseconds>` can delay
-the prepare phase for diagnostics.
-`FRAGILE_NOTEPAD_RENDER_COMMIT_PENDING_DELAY_MS=<milliseconds>` can delay the
-commit-pending phase for the backend switch lifecycle probe; leave it unset
-outside diagnostics.
-
-Set `FRAGILE_PERF_TRACE=1` to write the renderer trace CSV, and optionally set
-`FRAGILE_PERF_TRACE_DIR` to choose the output directory. When trace collection
-is enabled and no explicit trace directory is provided, `backend_switch_probe`
-uses `CARGO_TARGET_DIR/perf/<scenario>/<mode>-<failure>/fragile-perf.csv`.
-Application and renderer loggers append to the shared trace; use a fresh
-directory or remove the old trace before launching a new capture. The probe
-resets its trace before starting Iced, and profiling runners use fresh directories.
-The CSV should include the Phase 1 trace markers `fallback_present_start`,
-`fallback_present`, and the existing `winit_redraw_frame` event. In this repo's
-fallback ordering, `Primary` maps to wgpu and `Secondary` maps to tiny-skia, so
-trace backend identity is available through the `backend=wgpu` or
-`backend=tiny-skia` fields.
-Strict warm-up evidence is emitted as `backend_handoff_warm_complete` on
-success or `backend_handoff_warm_failed` on failure. The detail fields include
-the warm-up elapsed time, renderer family, adapter, backend, pass count,
-submission completion, timeout, and failure text when applicable.
-
-In prepare/warm/commit mode, `result=ok` is strict evidence for the selected
-scenario only; it is not a release claim by itself. Current Windows
-single-window and multi-window strict probes pass with warm-up and first GPU
-frame evidence. The lifecycle scenarios add structured evidence for local runs,
-but they are not a substitute for the full platform matrix in
-`SEAMLESS_HYBRID_RENDERING.md`. Cargo commands may emit vendored `encoding_rs`
-lifetime syntax warnings.
+Set `FRAGILE_PERF_TRACE=1` to collect CSV events and optionally set
+`FRAGILE_PERF_TRACE_DIR` to choose the output directory. Application and renderer
+loggers append to the shared trace; use a fresh directory for each capture.
+Warm-up events include renderer family, adapter, backend, pass count, submission
+completion, elapsed time, and failure details. Tracing adds formatting and I/O
+overhead, so traced timings are diagnostic measurements.

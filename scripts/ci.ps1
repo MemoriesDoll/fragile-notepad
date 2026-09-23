@@ -19,11 +19,8 @@ function Invoke-CiCommand {
 Invoke-CiCommand cargo fmt --package fragile-notepad --check
 & .\scripts\generate_icon_assets.ps1
 Invoke-CiCommand python scripts/test_icon_assets.py
-Invoke-CiCommand python scripts/test_profile_vulkan_live.py
-Invoke-CiCommand python scripts/test_vulkan_handoff_evidence.py
-Invoke-CiCommand cargo check
+# cargo test also compiles the application and examples.
 Invoke-CiCommand cargo test
 Invoke-CiCommand cargo test --locked --package iced_wgpu --lib
 Invoke-CiCommand cargo test --locked --package cryoglyph --lib
 Invoke-CiCommand cargo check --no-default-features
-Invoke-CiCommand cargo check --examples

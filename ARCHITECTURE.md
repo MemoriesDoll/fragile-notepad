@@ -109,7 +109,6 @@ Callers of `ui::view` now construct a `WorkbenchView`.
 ## Validation
 
 Run `scripts/ci.ps1` on Windows or `scripts/ci.sh` on Unix for the standard checks.
-`cargo test --locked --all-targets` additionally includes example tests.
 The existing suites cover document edits, wrapping, search, session recovery,
 load generations, outline parsing, window behavior, renderer parity, and prompt
 fade/decision timing. The refactoring preserves their behavioral assertions;

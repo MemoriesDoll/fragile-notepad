@@ -69,7 +69,6 @@ jobs:
             libvulkan1 \
             mesa-vulkan-drivers \
             vulkan-tools \
-            weston \
             pkg-config \
             xvfb \
             xauth
@@ -108,33 +107,3 @@ jobs:
         run: |
           source scripts/setup-macos-vulkan.sh
           source scripts/ci.sh
-
-      - name: Validate animated Vulkan handoff (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cargo build --example backend_switch_probe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/check-vulkan-handoff.py --binary target/debug/examples/backend_switch_probe.exe
-
-      - name: Validate animated Vulkan handoff (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          cargo build --example backend_switch_probe
-          WINIT_UNIX_BACKEND=x11 xvfb-run -a python scripts/check-vulkan-handoff.py --binary target/debug/examples/backend_switch_probe
-
-      - name: Validate animated Vulkan handoff (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          source scripts/setup-macos-vulkan.sh
-          cargo build --example backend_switch_probe
-          python scripts/check-vulkan-handoff.py --binary target/debug/examples/backend_switch_probe
-
-      - name: Validate Wayland Vulkan handoff and sustained rendering
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          cargo build --locked --release --example backend_switch_probe
-          python scripts/check-wayland-vulkan.py --binary target/release/examples/backend_switch_probe

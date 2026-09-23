@@ -65,18 +65,18 @@ On Linux or macOS:
 bash scripts/ci.sh
 ```
 
-The CI scripts run formatting, asset generation, and the following Cargo checks.
-For a manual equivalent, run:
+The CI scripts run formatting, asset generation, Python asset checks, and the
+following Cargo checks:
 
 ```powershell
-cargo check
 cargo test
-cargo check --examples
+cargo test --locked -p iced_wgpu --lib
+cargo test --locked -p cryoglyph --lib
 cargo check --no-default-features
 ```
 
-Vendored package regression tests and live backend-switch scenarios are additional
-checks, not part of these scripts. Commands and environment requirements are in
+`cargo test` also compiles the application and examples. Additional renderer
+diagnostics and environment requirements are in
 [DEVELOPMENT.md](DEVELOPMENT.md). On Linux, `scripts/ci.sh` uses `xvfb-run` when
 available. Both GitHub workflows install Mesa Lavapipe and select its Vulkan ICD
 with `scripts/setup-ci-vulkan.sh`, which runs `vulkaninfo --summary` before
@@ -102,10 +102,7 @@ source scripts/ci.sh
 ```
 
 Source the CI script here: launching another system shell can cause macOS SIP
-to remove `DYLD_LIBRARY_PATH`. CI additionally runs all nine animated handoff
-scenarios and preserves their JSON results and traces. macOS CI execution is
-still required to establish native validation; preparing the workflow is not
-that evidence.
+to remove `DYLD_LIBRARY_PATH`.
 
 ## Release Build
 

@@ -74,11 +74,6 @@ transforms, groups with inherited paint, gradients, or arbitrary SVG markup.
 Filled multi-subpath artwork uses even-odd filling; declare `fill-rule="evenodd"`
 if adding a shape with holes. Keep new sources within this subset.
 
-Run `python scripts/preview_icons.py` after regeneration and open
-`target/icon-review/index.html`. This standalone offline gallery compares actual
-embedded pixels with vectors at 12, 14 (tabs), 18 (toolbar), 22 (source bitmap),
-and 44px on light/dark backgrounds.
-
 `python -m unittest discover -s scripts -p test_icon_assets.py` checks paint,
 mask geometry, and clipping. `cargo test --test render_icon_parity` covers all
 embedded assets at 100%, 150%, and 200% display scale with CPU/GPU renderers.

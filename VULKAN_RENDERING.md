@@ -117,7 +117,7 @@ selecting this path.
 
 ### Upload trace
 
-`gpu-profiling` enables wgpu API tracing and counters for diagnostic builds.
+The historical upload captures used wgpu API tracing and counters.
 Two 240-frame, single-window captures compare uniforms and push constants.
 After the first 96 frames (one animation cycle), the remaining 144 frames had:
 
@@ -138,9 +138,9 @@ trace does not support adding a separate image-retention API. Glyph vertices
 dominate recurring transfer volume in this scene.
 
 Captures: `target/vulkan-upload-baseline/trace.ron` and
-`target/vulkan-upload-immediates/trace.ron`, summarized by
-`scripts/analyze-vulkan-trace.py --from-frame 96`. The analyzer targets wgpu 29's
-trace format. Tracing adds overhead and its timings are not performance evidence.
+`target/vulkan-upload-immediates/trace.ron`. The recorded upload summary uses
+wgpu 29 trace data from frame 96 onward. Tracing adds overhead and its timings
+are not performance evidence.
 
 Release `preview_branding --vulkan --profile`, same 900 x 640 scene, 92 samples
 after warm-up on the RTX 5070 Laptop GPU:
@@ -152,7 +152,7 @@ after warm-up on the RTX 5070 Laptop GPU:
 
 Readback results include CPU synchronization and image transfer; they do not
 establish a GPU speedup. Direct GPU timestamps are measured separately by
-`profile_vulkan_resources`, with no image readback (only 16 timestamp bytes),
+The former resource profiler, with no image readback (only 16 timestamp bytes),
 one/two independent scenes, 120 frames per scale, first 12 omitted. It serializes
 completion to collect timings, so these are GPU command costs, not production
 end-to-end frame latency or throughput.
@@ -337,21 +337,18 @@ startup improvement claim.
 
 ### Sustained live cadence and redraw costs
 
-The strict handoff probe now supports `--sustain-seconds=12`, `--editor`, and
-`--plain-text`. It switches from its lifecycle subscriptions to the workload only
+The former strict handoff probe supported sustained About, editor, and plain-text
+workloads. It switched from its lifecycle subscriptions to the workload only
 after verified first Vulkan presentation. The sustained view has no changing
 probe labels or frame subscription that would force extra redraws. About keeps
 its own 24 Hz scheduler; editor scrolling advances three rows per 24 Hz timer
 tick. About pauses on focus loss, so its sustained capture uses one window.
 
-`scripts/profile-vulkan-live.py` runs the release binary in an isolated trace
-directory, discards two seconds after handoff, and summarizes the next ten.
-It requires strict Vulkan warm-up/first-presentation evidence and a successful
-Vulkan presentation within every accepted redraw. It rejects software fallback,
-failed presentation, missing windows, incomplete intervals, and insufficient samples. Six analyzer
-regressions cover buffered trace order and invalid/missing evidence; both CI
-scripts run them. The CSV writers flush independently, so analysis uses
-timestamps rather than physical file order.
+The historical sustained captures discarded two seconds after handoff and
+summarized the next ten, requiring successful Vulkan presentation within every
+accepted redraw. Analysis used timestamps rather than physical CSV order because
+writers buffer independently. The profiling runner and its regression tests
+have since been removed.
 
 Sequential RTX 5070 Laptop GPU runs at 150% scaling (1350 x 960 physical pixels),
 240 measured redraws per window:
@@ -410,12 +407,11 @@ than the requested size, respecting window-system clamping/rejection. Async
 resize requests continue through their normal window events.
 
 Before/after evidence is in `target/vulkan-resize-{before,after}/`: the stronger
-probe rejects the old behavior and observes 700 x 440 after the fix. The matrix
-runner additionally requires successful software presentation at the requested
+probe rejected the old behavior and observed 700 x 440 after the fix. The former
+matrix runner also required successful software presentation at the requested
 logical size before warm-up, with the same physical dimensions used by Vulkan.
-A Rust probe regression rejects initial/wrong-window resize events; a Python
-evidence regression rejects stale dimensions, failed presentation, and software
-frames outside the prepare interval. Both CI scripts run the Python check.
+Probe regressions rejected initial/wrong-window resize events. The handoff
+probe, matrix runner, and their evidence regressions have since been removed.
 
 The separate release Wayland connection error has now been traced to WSLg's
 compositor, which exits with signal 11 after the first software frame. The app's
@@ -431,12 +427,10 @@ About/editor captures (`target/weston14-loh1q22z/`). About retains 24.00 fps ove
 240 measured redraws, with 3.587/4.550 ms median/p95 CPU redraw cost. This is
 Lavapipe software Vulkan, not a physical-GPU measurement.
 
-`scripts/check-wayland-vulkan.py` now reproduces this validation with a private
-socket/runtime directory and automatic compositor teardown. Its default
-headless Weston/Pixman path also passes all nine handoff scenarios and the
-About/editor captures (`target/vulkan-wayland/run-88hjeg7a/`). Linux CI and nightly
-validation install Weston, build the release probe, run this path in addition to
-X11 tests, and retain the compositor logs alongside handoff/live traces.
+The headless Weston/Pixman path also passed all nine handoff scenarios and the
+About/editor captures (`target/vulkan-wayland/run-88hjeg7a/`).
+These are historical captures; the Wayland runner and its CI/nightly gates
+have since been removed.
 
 ## Platform validation and distribution
 
@@ -559,25 +553,12 @@ Useful reproduction commands:
 
 ```text
 cargo run --release --example preview_branding -- --vulkan --profile
-cargo run --release --features wgpu/counters --example profile_vulkan_resources
-cargo run --release --features wgpu/counters --example profile_vulkan_resources -- --editor
-cargo run --release --features wgpu/counters --example profile_vulkan_resources -- --plain-text
-cargo run --release --features wgpu/counters --example profile_vulkan_resources -- --low-power
-cargo run --release --features gpu-profiling --example profile_vulkan_resources -- --single-scene --frames=240 --trace-dir=target/new-vulkan-trace
-python scripts/analyze-vulkan-trace.py target/new-vulkan-trace/trace.ron --from-frame 96
-cargo build --example backend_switch_probe
-python scripts/check-vulkan-handoff.py --binary target/debug/examples/backend_switch_probe.exe
-cargo build --release --example backend_switch_probe
-python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe
-python scripts/profile-vulkan-live.py --binary target/release/examples/backend_switch_probe.exe --workload editor --windows 2
-python scripts/check-wayland-vulkan.py --binary target/release/examples/backend_switch_probe
 cargo test --locked -p iced_wgpu --lib
-python scripts/profile-startup.py --binary target/release/fragile-notepad.exe
 ```
 
 Use the Unix executable path without `.exe` on Linux/macOS, after configuring
-the relevant loader/ICD. Raw local logs are under `target/vulkan-*.log` and each
-matrix execution has its own directory under `target/vulkan-handoff/`.
+the relevant loader/ICD. Raw local logs are under `target/vulkan-*.log`;
+historical handoff matrix captures remain under `target/vulkan-handoff/`.
 
 ## Quad and image transform push constants
 
