@@ -371,16 +371,6 @@ fn search_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
             ShortcutCommand::ToggleFind,
             Message::ToggleFind,
         ),
-        menu::item(
-            "Find in Open Documents...",
-            Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::FindInFiles),
-        ),
-        menu::item("Find Next", Message::FindNext),
-        menu::item("Find Previous", Message::FindPrevious),
-        menu::item("Select and Find Next", Message::SelectAndFindNext),
-        menu::item("Select and Find Previous", Message::SelectAndFindPrevious),
-        menu::item("Find (Volatile) Next", Message::VolatileFindNext),
-        menu::item("Find (Volatile) Previous", Message::VolatileFindPrevious),
         menu::item("Replace...", Message::ShowInlineReplace),
         menu_item(
             settings,
@@ -393,10 +383,6 @@ fn search_menu_entries(settings: &EditorSettings) -> Vec<MenuNode> {
             "Advanced Replace...",
             ShortcutCommand::AdvancedReplace,
             Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::Replace),
-        ),
-        menu::item(
-            "Replace in Open Documents...",
-            Message::ToggleAdvancedSearch(crate::message::AdvancedSearchTab::ReplaceInFiles),
         ),
         menu_item(
             settings,
