@@ -412,13 +412,13 @@ fn vulkan_mesh_pipelines_are_lazy_shared_and_preserve_msaa_after_resize() {
         let meshes = vec![
             mesh::Mesh::Solid {
                 buffers: mesh::Indexed {
-                    vertices: [[0.0, 0.0], [32.0, 0.0], [0.0, 32.0]]
+                    vertices: [[32.0, 32.0], [32.0, 0.0], [0.0, 32.0], [0.0, 0.0]]
                         .map(|position| mesh::SolidVertex2D {
                             position,
                             color: color::pack(Color::from_rgb(1.0, 0.0, 0.0)),
                         })
                         .into(),
-                    indices: vec![0, 1, 2],
+                    indices: vec![3, 1, 2, 1, 0, 2],
                 },
                 transformation: Transformation::IDENTITY,
                 clip_bounds: bounds,
@@ -454,7 +454,16 @@ fn vulkan_mesh_pipelines_are_lazy_shared_and_preserve_msaa_after_resize() {
             compiled,
             "first draw reuses warmed mesh pipelines"
         );
-        assert_eq!(pixel(&first, 2, 2), [255, 0, 0, 255]);
+        assert_eq!(
+            pixel(&first, 2, 2),
+            [255, 0, 0, 255],
+            "first mesh draw: antialiasing={antialiasing:?}, adapter={:?}, gradient_pixel={:?}",
+            adapter.get_info(),
+            pixel(&first, 34, 2),
+        );
+        // The second triangle reuses vertices and has a different index count
+        // from the gradient mesh that follows it in the shared index buffer.
+        assert_eq!(pixel(&first, 30, 30), [255, 0, 0, 255]);
         let gradient_pixel = pixel(&first, 34, 2);
         assert_eq!(gradient_pixel[0], 0);
         assert!(gradient_pixel[1] > 0 && gradient_pixel[2] > 0);

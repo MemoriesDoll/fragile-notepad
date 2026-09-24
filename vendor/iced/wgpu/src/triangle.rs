@@ -343,13 +343,31 @@ fn render<'a>(
 #[derive(Debug)]
 pub struct Layer {
     index_buffer: Buffer<u32>,
+    indirect_buffer: Option<Buffer<wgpu::util::DrawIndexedIndirectArgs>>,
     solid: solid::Layer,
     gradient: gradient::Layer,
 }
 
 impl Layer {
     fn new(device: &wgpu::Device, solid: &solid::Pipeline, gradient: &gradient::Pipeline) -> Self {
+        let adapter = device.adapter_info();
+        // Direct indexed draws produce no fragments on Apple's virtual GPU
+        // through MoltenVK (reproduced with 1.3.0, 1.4.1, and 1.4.2). Indirect
+        // indexed draws work with the same vertices, indices, and pipelines.
+        let indirect_buffer = (adapter.backend == wgpu::Backend::Vulkan
+            && adapter.driver == "MoltenVK"
+            && adapter.name == "Apple Paravirtual device")
+            .then(|| {
+                Buffer::new(
+                    device,
+                    "iced_wgpu.triangle.indirect_buffer",
+                    1,
+                    wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+                )
+            });
+
         Self {
+            indirect_buffer,
             index_buffer: Buffer::new(
                 device,
                 "iced_wgpu.triangle.index_buffer",
@@ -379,6 +397,9 @@ impl Layer {
         // place to calculate mesh diff, or to know whether or not that would be more performant for
         // the majority of use cases. Therefore we will write GPU data every frame (for now).
         let _ = self.index_buffer.resize(device, count.indices);
+        if let Some(indirect) = &mut self.indirect_buffer {
+            let _ = indirect.resize(device, meshes.len());
+        }
         let _ = self.solid.vertices.resize(device, count.solid_vertices);
         let _ = self
             .gradient
@@ -404,7 +425,7 @@ impl Layer {
         let mut gradient_uniform_offset = 0;
         let mut index_offset = 0;
 
-        for mesh in meshes {
+        for (mesh_index, mesh) in meshes.iter().enumerate() {
             let clip_bounds = mesh.clip_bounds() * transformation;
             let snap_distance = clip_bounds
                 .snap()
@@ -421,6 +442,22 @@ impl Layer {
             );
 
             let indices = mesh.indices();
+
+            if let Some(indirect) = &mut self.indirect_buffer {
+                let _ = indirect.write(
+                    encoder,
+                    belt,
+                    mesh_index * std::mem::size_of::<wgpu::util::DrawIndexedIndirectArgs>(),
+                    &[wgpu::util::DrawIndexedIndirectArgs {
+                        index_count: indices.len() as u32,
+                        instance_count: 1,
+                        // Each draw binds only this mesh's index/vertex slices.
+                        first_index: 0,
+                        base_vertex: 0,
+                        first_instance: 0,
+                    }],
+                );
+            }
 
             index_offset += self
                 .index_buffer
@@ -475,7 +512,7 @@ impl Layer {
         let mut index_offset = 0;
         let mut last_is_solid = None;
 
-        for mesh in meshes {
+        for (mesh_index, mesh) in meshes.iter().enumerate() {
             let Some(clip_bounds) = bounds
                 .intersection(&(mesh.clip_bounds() * transformation))
                 .and_then(Rectangle::snap)
@@ -555,7 +592,15 @@ impl Layer {
                 wgpu::IndexFormat::Uint32,
             );
 
-            render_pass.draw_indexed(0..mesh.indices().len() as u32, 0, 0..1);
+            if let Some(indirect) = &self.indirect_buffer {
+                render_pass.draw_indexed_indirect(
+                    &indirect.raw,
+                    (mesh_index * std::mem::size_of::<wgpu::util::DrawIndexedIndirectArgs>())
+                        as u64,
+                );
+            } else {
+                render_pass.draw_indexed(0..mesh.indices().len() as u32, 0, 0..1);
+            }
 
             index_offset += mesh.indices().len();
         }
