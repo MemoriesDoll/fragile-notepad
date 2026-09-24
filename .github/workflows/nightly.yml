@@ -161,6 +161,9 @@ jobs:
 
       - name: Validate release gates
         if: runner.os == 'Windows'
+        env:
+          # Keep parity checks when an adapter exists; permit headless Windows runners.
+          FRAGILE_ALLOW_WGPU_PARITY_SKIP: "1"
         run: |
           cargo test
           cargo check --no-default-features

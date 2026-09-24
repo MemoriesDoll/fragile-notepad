@@ -94,6 +94,9 @@ jobs:
       - name: Validate
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          # Hosted Windows runners may have no usable wgpu adapter, even with SwiftShader.
+          FRAGILE_ALLOW_WGPU_PARITY_SKIP: "1"
         run: .\scripts\ci.ps1
 
       - name: Validate
