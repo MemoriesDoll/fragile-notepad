@@ -190,6 +190,7 @@ pub fn view<'a>(menu: Menu, tree: MenuTree, active_path: &'a [String]) -> Elemen
                 ),
                 flyout.x,
                 flyout.y,
+                flyout.row_offset,
             )
         })
         .collect();
@@ -234,17 +235,24 @@ struct Flyout {
     width: f32,
     x: f32,
     y: f32,
+    row_offset: f32,
 }
 
 struct PositionedLayer<'a> {
     element: Element<'a, Message>,
     x: f32,
     y: f32,
+    row_offset: f32,
 }
 
 impl<'a> PositionedLayer<'a> {
-    fn new(element: Element<'a, Message>, x: f32, y: f32) -> Self {
-        Self { element, x, y }
+    fn new(element: Element<'a, Message>, x: f32, y: f32, row_offset: f32) -> Self {
+        Self {
+            element,
+            x,
+            y,
+            row_offset,
+        }
     }
 }
 
@@ -293,20 +301,46 @@ impl Widget<Message, iced::Theme, iced::Renderer> for MenuCascade<'_> {
         let base_size = base.size();
         let available = limits.max();
 
+        let mut parent_x = 0.0;
+        let mut parent_y = 0.0;
+        let mut parent_width = base_size.width;
         let layer_nodes =
             self.layers
                 .iter_mut()
                 .zip(&mut tree.children[1..])
                 .map(|(layer, tree)| {
-                    let max_size = Size::new(
-                        (available.width - layer.x).max(base_size.width),
-                        (available.height - layer.y).max(base_size.height),
+                    // Measure against the full available area first. Positioning is
+                    // resolved below, so an edge-adjacent flyout is still measured at
+                    // its configured width before it is flipped to the other side.
+                    let max_size = Size::new(available.width, available.height);
+                    let node = layer.element.as_widget_mut().layout(
+                        tree,
+                        renderer,
+                        &layout::Limits::new(Size::ZERO, max_size),
                     );
-                    layer
-                        .element
-                        .as_widget_mut()
-                        .layout(tree, renderer, &layout::Limits::new(Size::ZERO, max_size))
-                        .move_to(Point::new(layer.x, layer.y))
+                    let size = node.size();
+
+                    let right_x = parent_x + parent_width;
+                    let left_x = parent_x - size.width;
+                    let right_fits = right_x + size.width <= available.width;
+                    let left_fits = left_x >= 0.0;
+                    let x = if right_fits || !left_fits {
+                        right_x
+                    } else {
+                        left_x
+                    }
+                    .clamp(0.0, (available.width - size.width).max(0.0));
+
+                    let y = (parent_y + layer.row_offset)
+                        .clamp(0.0, (available.height - size.height).max(0.0));
+
+                    layer.x = x;
+                    layer.y = y;
+                    parent_x = x;
+                    parent_y = y;
+                    parent_width = size.width;
+
+                    node.move_to(Point::new(x, y))
                 });
 
         layout::Node::with_children(
@@ -461,6 +495,7 @@ fn active_flyouts(entries: &[MenuNode], active_path: &[String], min_width: f32) 
             width,
             x,
             y,
+            row_offset: submenu_y(entries, row_index),
         });
 
         parent_x = x;
