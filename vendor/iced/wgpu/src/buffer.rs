@@ -8,6 +8,11 @@ mod tests;
 pub const MAX_WRITE_SIZE: usize = 100 * 1024;
 pub const STAGING_CHUNK_SIZE: u64 = 4 * 1024;
 
+// Apple's virtual GPU chooses a compact draw command before adding the index
+// buffer's parentResourceOffset, then truncates that sum to 16 bits. A public
+// index-buffer offset above u16::MAX forces the correct, wide command encoding.
+const WIDE_INDEX_OFFSET: u64 = 1 << 16;
+
 const MAX_WRITE_SIZE_U64: NonZeroU64 =
     NonZeroU64::new(MAX_WRITE_SIZE as u64).expect("MAX_WRITE_SIZE must be non-zero");
 
@@ -15,6 +20,7 @@ const MAX_WRITE_SIZE_U64: NonZeroU64 =
 pub struct Buffer<T> {
     label: &'static str,
     size: u64,
+    offset: u64,
     usage: wgpu::BufferUsages,
     pub(crate) raw: wgpu::Buffer,
     type_: PhantomData<T>,
@@ -27,11 +33,27 @@ impl<T: bytemuck::Pod> Buffer<T> {
         amount: usize,
         usage: wgpu::BufferUsages,
     ) -> Self {
+        let offset = if usage.contains(wgpu::BufferUsages::INDEX) {
+            index_buffer_offset(&device.adapter_info())
+        } else {
+            0
+        };
+
+        Self::with_offset(device, label, amount, usage, offset)
+    }
+
+    fn with_offset(
+        device: &wgpu::Device,
+        label: &'static str,
+        amount: usize,
+        usage: wgpu::BufferUsages,
+        offset: u64,
+    ) -> Self {
         let size = next_copy_size::<T>(amount);
 
         let raw = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
-            size,
+            size: offset + size,
             usage,
             mapped_at_creation: false,
         });
@@ -39,6 +61,7 @@ impl<T: bytemuck::Pod> Buffer<T> {
         Self {
             label,
             size,
+            offset,
             usage,
             raw,
             type_: PhantomData,
@@ -51,7 +74,7 @@ impl<T: bytemuck::Pod> Buffer<T> {
         if self.size < new_size {
             self.raw = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(self.label),
-                size: new_size,
+                size: self.offset + new_size,
                 usage: self.usage,
                 mapped_at_creation: false,
             });
@@ -90,7 +113,7 @@ impl<T: bytemuck::Pod> Buffer<T> {
             belt.write_buffer(
                 encoder,
                 &self.raw,
-                (offset + bytes_written) as u64,
+                self.offset + (offset + bytes_written) as u64,
                 MAX_WRITE_SIZE_U64,
             )
             .copy_from_slice(&bytes[bytes_written..bytes_written + MAX_WRITE_SIZE]);
@@ -108,7 +131,7 @@ impl<T: bytemuck::Pod> Buffer<T> {
         belt.write_buffer(
             encoder,
             &self.raw,
-            (offset + bytes_written) as u64,
+            self.offset + (offset + bytes_written) as u64,
             bytes_left,
         )
         .copy_from_slice(&bytes[bytes_written..]);
@@ -117,7 +140,7 @@ impl<T: bytemuck::Pod> Buffer<T> {
     }
 
     pub fn slice(&self, bounds: impl RangeBounds<wgpu::BufferAddress>) -> wgpu::BufferSlice<'_> {
-        self.raw.slice(bounds)
+        self.raw.slice(self.offset..).slice(bounds)
     }
 
     pub fn range(&self, start: usize, end: usize) -> wgpu::BufferSlice<'_> {
@@ -125,6 +148,17 @@ impl<T: bytemuck::Pod> Buffer<T> {
             start as u64 * std::mem::size_of::<T>() as u64
                 ..end as u64 * std::mem::size_of::<T>() as u64,
         )
+    }
+}
+
+fn index_buffer_offset(adapter: &wgpu::AdapterInfo) -> u64 {
+    if adapter.backend == wgpu::Backend::Vulkan
+        && adapter.driver == "MoltenVK"
+        && adapter.name == "Apple Paravirtual device"
+    {
+        WIDE_INDEX_OFFSET
+    } else {
+        0
     }
 }
 

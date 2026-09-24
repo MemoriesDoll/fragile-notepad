@@ -469,6 +469,29 @@ fn vulkan_mesh_pipelines_are_lazy_shared_and_preserve_msaa_after_resize() {
         assert!(gradient_pixel[1] > 0 && gradient_pixel[2] > 0);
         assert_eq!(pixel(&first, 60, 60), [0, 0, 0, 255]);
 
+        // Grow the shared index allocation while keeping the image identical.
+        // Both draws still have fewer than 65536 indices, so on Apple's virtual
+        // GPU the buffer binding offset must continue to select wide encoding.
+        active.reset(bounds);
+        for mesh in &meshes {
+            let mut grown = mesh.clone();
+            match &mut grown {
+                mesh::Mesh::Solid { buffers, .. } => {
+                    buffers.indices = buffers.indices.repeat(1024);
+                }
+                mesh::Mesh::Gradient { buffers, .. } => {
+                    buffers.indices = buffers.indices.repeat(1024);
+                }
+            }
+            active.draw_mesh(grown);
+        }
+        assert_eq!(active.screenshot(&viewport, Color::BLACK), first);
+        active.reset(bounds);
+        for mesh in &meshes {
+            active.draw_mesh(mesh.clone());
+        }
+        assert_eq!(active.screenshot(&viewport, Color::BLACK), first);
+
         // A renderer cloned before first mesh use must share the new pipelines.
         other.reset(bounds);
         other.draw_mesh_cache(mesh::Cache::new(meshes.into()));
