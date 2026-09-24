@@ -207,6 +207,17 @@ impl State {
         }
     }
 
+    /// Forces the next MSAA pass to refresh its resolve ratio uniform.
+    ///
+    /// A warm-up submission can complete on a different command-buffer path
+    /// than the first presented frame. Refreshing this small uniform at that
+    /// boundary avoids relying on the driver's visibility of the warm-up copy.
+    pub fn invalidate_msaa_ratio(&mut self) {
+        if let Some(msaa) = &mut self.msaa {
+            msaa.invalidate_ratio();
+        }
+    }
+
     pub fn render(
         &mut self,
         pipeline: &Pipeline,

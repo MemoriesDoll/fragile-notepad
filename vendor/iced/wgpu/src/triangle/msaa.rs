@@ -305,6 +305,10 @@ impl State {
         Transformation::orthographic(targets.size.width, targets.size.height)
     }
 
+    pub fn invalidate_ratio(&mut self) {
+        self.last_ratio = None;
+    }
+
     pub fn render(
         &self,
         pipeline: &Pipeline,

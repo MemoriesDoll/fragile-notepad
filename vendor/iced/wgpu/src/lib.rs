@@ -325,6 +325,9 @@ impl Renderer {
                 let mut warm_up = self.offscreen_warm_up.take().expect("pending warm-up");
                 warm_up.evidence.elapsed_us = warm_up.started.elapsed().as_micros();
                 warm_up.evidence.submission_completed = true;
+                if let Some(triangle) = &mut self.triangle {
+                    triangle.invalidate_msaa_ratio();
+                }
                 Ok(Some(warm_up.evidence))
             }
             Ok(false) => Ok(None),
