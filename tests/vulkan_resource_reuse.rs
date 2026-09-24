@@ -10,8 +10,19 @@ const WIDTH: u32 = 256;
 const HEIGHT: u32 = 128;
 const CELLS: usize = 64 * 64;
 
+fn lock_vulkan_test() -> std::sync::MutexGuard<'static, ()> {
+    // Serialize Vulkan device and image-worker lifetimes, including teardown.
+    // The parallel suite has segfaulted under MoltenVK in macOS CI; keep these
+    // tests independent without overlapping driver initialization/destruction.
+    // Declare the guard first in each test so it is dropped after GPU resources.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn vulkan_atlas_limits_spill_and_recover_without_losing_existing_images() {
+    let _guard = lock_vulkan_test();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::VULKAN,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -214,6 +225,7 @@ fn pixel(bytes: &[u8], x: u32, y: u32) -> &[u8] {
 
 #[test]
 fn vulkan_quad_buffers_grow_reuse_and_keep_windows_and_layers_independent() {
+    let _guard = lock_vulkan_test();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::VULKAN,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -338,6 +350,7 @@ fn vulkan_quad_buffers_grow_reuse_and_keep_windows_and_layers_independent() {
 
 #[test]
 fn vulkan_mesh_pipelines_are_lazy_shared_and_preserve_msaa_after_resize() {
+    let _guard = lock_vulkan_test();
     for antialiasing in [None, Some(Antialiasing::MSAAx4)] {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
@@ -468,6 +481,7 @@ fn vulkan_mesh_pipelines_are_lazy_shared_and_preserve_msaa_after_resize() {
 
 #[test]
 fn vulkan_image_storage_is_lazy_and_preserves_async_allocations_and_atlas_growth() {
+    let _guard = lock_vulkan_test();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::VULKAN,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
