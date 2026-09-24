@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartupOptions {
@@ -74,7 +74,6 @@ pub fn parse_arguments(
     Ok(StartupCommand::Launch(options))
 }
 
-pub const UI_READY_BUDGET: Duration = Duration::from_millis(200);
 pub const STARTUP_PROBE_ENV: &str = "FRAGILE_NOTEPAD_STARTUP_PROBE";
 pub const STARTUP_PROBE_OUTPUT_PREFIX: &str = "FRAGILE_NOTEPAD_FIRST_VIEW_READY_MS=";
 pub const STARTUP_FRAME_OUTPUT_PREFIX: &str = "FRAGILE_NOTEPAD_FIRST_FRAME_READY_MS=";

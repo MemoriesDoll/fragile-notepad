@@ -485,8 +485,8 @@ Compact-icon-atlas validation is recorded in
 `target/vulkan-icon-linux-tests.log`, and
 `target/vulkan-icon-{rtx,swiftshader,linux}-handoff.log`. The vendor regression
 also passes. Two earlier Windows runs failed: the startup check measured a
-520 ms first view against its 200 ms budget during concurrent validation (the
-isolated retry was 31.7 ms), and a later hardware run could not initialize a
+520 ms first view during concurrent validation (the isolated retry was 31.7 ms),
+and a later hardware run could not initialize a
 Vulkan adapter in one test (`active_backends=0`). The four targeted hardware
 Vulkan tests then passed, followed by the NVIDIA handoff matrix. The cause of
 the one adapter-initialization failure is unconfirmed; those failed logs remain

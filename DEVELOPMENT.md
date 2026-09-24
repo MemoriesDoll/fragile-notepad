@@ -246,16 +246,6 @@ On Unix, session snapshots are written with owner-only file permissions. Clean
 file tabs store paths rather than copying disk contents; unsaved recovery text is
 stored in the session file.
 
-## Startup timing tests
-
-Startup tests report first-view entry and a separate screenshot-completion
-milestone after layout/rendering; screenshot completion is not an OS presentation
-timestamp. The debug startup test allows 200 ms on local native systems, 750 ms
-on hosted Windows/Linux runners, and 2 s on hosted macOS runners. These wall-clock
-measurements include native window setup. The first-view and first-frame probes
-each retain a five-second timeout, and diagnostics report both timings and the
-budget.
-
 ## Vendored Dependencies
 
 See [vendor/README.md](vendor/README.md) for upstream revisions, licenses, and

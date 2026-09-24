@@ -344,10 +344,6 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
                     "Startup probe",
                     format!("{startup_probe} ({})", crate::startup::STARTUP_PROBE_ENV),
                 ),
-                (
-                    "First-view budget",
-                    format!("{} ms", crate::startup::UI_READY_BUDGET.as_millis()),
-                ),
             ],
         ),
         debug_section(
