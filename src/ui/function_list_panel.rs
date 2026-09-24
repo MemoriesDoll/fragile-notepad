@@ -48,20 +48,28 @@ pub fn view<'a>(
     };
 
     let header = row![
-        text(FUNCTION_LIST_PANEL_TITLE).size(13).font(Font {
-            weight: iced::font::Weight::Semibold,
-            ..Font::DEFAULT
-        }),
+        // Let the title absorb font-dependent overflow after the count and
+        // close button have received their space. A trailing fill spacer cannot
+        // stop an intrinsically sized title from squeezing the button to zero.
+        text(FUNCTION_LIST_PANEL_TITLE)
+            .size(13)
+            .font(Font {
+                weight: iced::font::Weight::Semibold,
+                ..Font::DEFAULT
+            })
+            .width(Fill)
+            .wrapping(text::Wrapping::None)
+            .ellipsis(text::Ellipsis::End),
         container(text(count).size(11))
             .padding([2, 6])
             .style(styles::function_list_count),
-        space::horizontal(),
         icon_button(
             HeroIcon::XMark,
             "Close function list",
             Message::ToggleFunctionList
         ),
     ]
+    .width(Fill)
     .spacing(7)
     .align_y(Center);
 

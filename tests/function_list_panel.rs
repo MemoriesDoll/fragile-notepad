@@ -59,10 +59,15 @@ fn filtered_sidebar_navigates_clears_closes_and_renders_a_focused_caret() {
         Some("tiny-skia"),
     ))
     .expect("software renderer");
-    let size = Size::new(280.0, 520.0);
-    let viewport = Rectangle::with_size(size);
-
-    for theme in [Theme::Light, Theme::Dark] {
+    // Constrained widths also exercise header overflow with ordinary local fonts.
+    for (width, theme) in [
+        (280, Theme::Light),
+        (280, Theme::Dark),
+        (160, Theme::Light),
+        (160, Theme::Dark),
+    ] {
+        let size = Size::new(width as f32, 520.0);
+        let viewport = Rectangle::with_size(size);
         let mut element = function_list_panel::view(&document, Some(&outline), " OUTLINE ");
         let mut tree = Tree::new(element.as_widget());
         tree.diff(element.as_widget_mut());
@@ -72,7 +77,12 @@ fn filtered_sidebar_navigates_clears_closes_and_renders_a_focused_caret() {
                 .layout(&mut tree, &renderer, &layout::Limits::new(size, size));
         let mut messages = Vec::new();
         let header = header_layout(&node);
-        let close = header.child(0).child(3).bounds();
+        let close = header.child(0).children().next_back().unwrap().bounds();
+        assert_eq!(
+            close.size(),
+            Size::new(24.0, 24.0),
+            "header must reserve space for the close button: {close:?}"
+        );
         let filter = header.child(2);
         // Two filtered rows, clear, close, then focus the filter before pressing Enter.
         // Use the laid-out widget bounds: system font metrics differ across runners.
@@ -136,8 +146,8 @@ fn filtered_sidebar_navigates_clears_closes_and_renders_a_focused_caret() {
             mouse::Cursor::Unavailable,
             &viewport,
         );
-        let pixels = renderer.screenshot(Size::new(280, 520), 1.0, Color::TRANSPARENT);
-        assert_eq!(pixels.len(), 280 * 520 * 4);
+        let pixels = renderer.screenshot(Size::new(width, 520), 1.0, Color::TRANSPARENT);
+        assert_eq!(pixels.len(), width as usize * 520 * 4);
     }
 }
 
