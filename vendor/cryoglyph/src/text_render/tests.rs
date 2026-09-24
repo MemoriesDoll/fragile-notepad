@@ -122,12 +122,15 @@ fn pixels(device: &Device, readback: &Buffer) -> Vec<u8> {
 #[test]
 fn retained_text_matches_fresh_uploads_and_recovers_after_atlas_full() {
     let instance = instance();
-    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+    let Ok(adapter) = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference:
             wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
         ..Default::default()
-    }))
-    .unwrap();
+    })) else {
+        // Hosted Windows runners may have no Vulkan implementation.
+        eprintln!("Skipping Vulkan text validation: no Vulkan adapter");
+        return;
+    };
     eprintln!("GLYPH_ADAPTER {:?}", adapter.get_info());
     let (device, queue) = block_on(adapter.request_device(&Default::default())).unwrap();
     let cache = Cache::new(&device);
@@ -257,12 +260,15 @@ fn retained_text_matches_fresh_uploads_and_recovers_after_atlas_full() {
 #[test]
 fn vertex_growth_keeps_pending_draws_alive() {
     let instance = instance();
-    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+    let Ok(adapter) = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference:
             wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
         ..Default::default()
-    }))
-    .unwrap();
+    })) else {
+        // Hosted Windows runners may have no Vulkan implementation.
+        eprintln!("Skipping Vulkan text validation: no Vulkan adapter");
+        return;
+    };
     eprintln!("GLYPH_GROWTH_ADAPTER {:?}", adapter.get_info());
     let (device, queue) = block_on(adapter.request_device(&Default::default())).unwrap();
     let cache = Cache::new(&device);
