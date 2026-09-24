@@ -6,16 +6,24 @@ fn large_uploads_release_staging_and_preserve_padded_fragment_pixels() {
         backends: wgpu::Backends::VULKAN,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
-    let adapter =
+    let Some(adapter) =
         futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference:
                 wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
             ..Default::default()
         }))
-        .unwrap();
+        .ok()
+    else {
+        eprintln!("Skipping Vulkan atlas upload validation: no Vulkan adapter");
+        return;
+    };
     eprintln!("UPLOAD_ADAPTER {:?}", adapter.get_info());
-    let (device, queue) =
-        futures::executor::block_on(adapter.request_device(&Default::default())).unwrap();
+    let Ok((device, queue)) =
+        futures::executor::block_on(adapter.request_device(&Default::default()))
+    else {
+        eprintln!("Skipping Vulkan atlas upload validation: device unavailable");
+        return;
+    };
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
         entries: &[wgpu::BindGroupLayoutEntry {

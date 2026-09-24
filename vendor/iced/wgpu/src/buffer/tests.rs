@@ -25,16 +25,24 @@ fn retained_instances_survive_partial_writes_growth_and_pending_submissions() {
         backends: wgpu::Backends::VULKAN,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
-    let adapter =
+    let Some(adapter) =
         futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference:
                 wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
             ..Default::default()
         }))
-        .unwrap();
+        .ok()
+    else {
+        eprintln!("Skipping Vulkan retained instances validation: no Vulkan adapter");
+        return;
+    };
     eprintln!("RETAINED_ADAPTER {:?}", adapter.get_info());
-    let (device, queue) =
-        futures::executor::block_on(adapter.request_device(&Default::default())).unwrap();
+    let Ok((device, queue)) =
+        futures::executor::block_on(adapter.request_device(&Default::default()))
+    else {
+        eprintln!("Skipping Vulkan retained instances validation: device unavailable");
+        return;
+    };
     let mut buffer = Cached::<u32>::new(
         &device,
         "retained instances test",
