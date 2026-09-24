@@ -14,6 +14,22 @@ use iced::advanced::{
 };
 use iced::{Color, Event, Point, Rectangle, Size, Theme, keyboard};
 
+fn header_layout(node: &layout::Node) -> Layout<'_> {
+    // Panel container -> column -> header container -> header column.
+    Layout::new(node).child(0).child(0).child(0)
+}
+
+fn symbol_row_center(node: &layout::Node, index: usize) -> Point {
+    // Panel container -> column -> scrollable -> rows -> symbol button.
+    Layout::new(node)
+        .child(0)
+        .child(1)
+        .child(0)
+        .child(index)
+        .bounds()
+        .center()
+}
+
 #[test]
 fn filtered_sidebar_navigates_clears_closes_and_renders_a_focused_caret() {
     let document = Document::from_path(DocumentId::new(1), "example.rs", &"\n".repeat(100));
@@ -55,14 +71,22 @@ fn filtered_sidebar_navigates_clears_closes_and_renders_a_focused_caret() {
                 .as_widget_mut()
                 .layout(&mut tree, &renderer, &layout::Limits::new(size, size));
         let mut messages = Vec::new();
+        let header = header_layout(&node);
+        let close = header.child(0).child(3).bounds();
+        let filter = header.child(2);
         // Two filtered rows, clear, close, then focus the filter before pressing Enter.
+        // Use the laid-out widget bounds: system font metrics differ across runners.
         for point in [
-            Point::new(70.0, 125.0),
-            Point::new(70.0, 160.0),
-            Point::new(256.0, 80.0),
-            Point::new(256.0, 22.0),
-            Point::new(70.0, 80.0),
+            symbol_row_center(&node, 0),
+            symbol_row_center(&node, 1),
+            filter.child(1).bounds().center(),
+            close.center(),
+            filter.child(0).bounds().center(),
         ] {
+            assert!(
+                viewport.contains(point),
+                "click target outside sidebar: {point:?}"
+            );
             for event in [
                 mouse::Event::ButtonPressed(mouse::Button::Left),
                 mouse::Event::ButtonReleased(mouse::Button::Left),
@@ -152,7 +176,7 @@ fn parsed_impl_parent_is_visible_and_navigable_even_when_filtering_methods() {
     .unwrap();
     let size = Size::new(280.0, 520.0);
     let viewport = Rectangle::with_size(size);
-    for (query, parent_y) in [("", 160.0), ("update", 125.0)] {
+    for (query, parent_index) in [("", 1), ("update", 0)] {
         let mut element = function_list_panel::view(&document, Some(&outline), query);
         let mut tree = Tree::new(element.as_widget());
         tree.diff(element.as_widget_mut());
@@ -169,7 +193,7 @@ fn parsed_impl_parent_is_visible_and_navigable_even_when_filtering_methods() {
                 &mut tree,
                 &Event::Mouse(event),
                 Layout::new(&node),
-                mouse::Cursor::Available(Point::new(100.0, parent_y)),
+                mouse::Cursor::Available(symbol_row_center(&node, parent_index)),
                 &renderer,
                 &mut Shell::new(&iced::window::Headless, Waker::noop(), &mut messages),
                 &viewport,
@@ -212,12 +236,12 @@ fn enum_only_document_has_a_navigable_row_when_filtered_by_its_name() {
     .unwrap();
     let size = Size::new(280.0, 520.0);
     let viewport = Rectangle::with_size(size);
-    for (query, y, expected) in [
-        ("", 125.0, EditorPosition::new(2, 0)),
-        (" CLOSEGOAL ", 125.0, EditorPosition::new(2, 0)),
-        ("", 160.0, members[0].range.start),
-        ("", 194.0, members[1].range.start),
-        ("ExitApp", 160.0, members[1].range.start),
+    for (query, row_index, expected) in [
+        ("", 0, EditorPosition::new(2, 0)),
+        (" CLOSEGOAL ", 0, EditorPosition::new(2, 0)),
+        ("", 1, members[0].range.start),
+        ("", 2, members[1].range.start),
+        ("ExitApp", 1, members[1].range.start),
     ] {
         let mut element = function_list_panel::view(&document, Some(&outline), query);
         let mut tree = Tree::new(element.as_widget());
@@ -235,7 +259,7 @@ fn enum_only_document_has_a_navigable_row_when_filtered_by_its_name() {
                 &mut tree,
                 &Event::Mouse(event),
                 Layout::new(&node),
-                mouse::Cursor::Available(Point::new(100.0, y)),
+                mouse::Cursor::Available(symbol_row_center(&node, row_index)),
                 &renderer,
                 &mut Shell::new(&iced::window::Headless, Waker::noop(), &mut messages),
                 &viewport,
