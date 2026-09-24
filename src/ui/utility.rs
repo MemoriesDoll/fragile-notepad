@@ -33,7 +33,7 @@ pub fn navigation(label: &str, selected: bool, message: Message) -> Element<'_, 
     button(text(label).size(13).font(semibold()))
         .padding([10, 12])
         .width(Fill)
-        .style(styles::settings_category_button(selected))
+        .style(styles::settings_navigation_button(selected))
         .on_press(message)
         .into()
 }

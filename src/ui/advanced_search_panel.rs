@@ -16,7 +16,7 @@ pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
 
     container(
         column![
-            container(navigation(dialog.active_tab)).padding([8, 16]),
+            container(navigation(dialog.active_tab)).padding([4, 16]),
             rule::horizontal(1),
             container(body).padding(16).width(Fill).height(Fill),
             rule::horizontal(1),
@@ -40,20 +40,24 @@ pub fn view(dialog: &SearchDialogState) -> Element<'_, Message> {
 
 fn navigation(active: AdvancedSearchTab) -> Element<'static, Message> {
     let open = open_scope(active);
-    [
+    let tabs = [
         ("Find", search_tab(false, open)),
         ("Replace", search_tab(true, open)),
     ]
     .into_iter()
-    .fold(row![].spacing(4), |tabs, (label, tab)| {
+    .fold(row![].spacing(2), |tabs, (label, tab)| {
         tabs.push(
             button(text(label).size(13).font(utility::semibold()))
                 .padding([8, 16])
-                .style(styles::settings_category_button(active == tab))
+                .style(styles::dialog_tab_button(active == tab))
                 .on_press(Message::AdvancedSearchTabSelected(tab)),
         )
-    })
-    .into()
+    });
+
+    container(tabs)
+        .padding(3)
+        .style(styles::dialog_tab_group)
+        .into()
 }
 
 fn search_form(dialog: &SearchDialogState) -> Element<'_, Message> {

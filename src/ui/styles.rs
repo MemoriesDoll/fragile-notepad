@@ -1051,6 +1051,82 @@ pub fn settings_category_button(
     }
 }
 
+/// Compact segmented tabs used by utility dialogs such as Find/Replace.
+pub fn dialog_tab_group(theme: &Theme) -> container::Style {
+    let palette = VisualPalette::from_theme(theme);
+
+    container::Style {
+        background: Some(Background::Color(palette.surface_low)),
+        border: border(1.0, palette.border_soft, 8.0),
+        ..container::Style::default()
+    }
+}
+
+pub fn dialog_tab_button(is_active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let palette = VisualPalette::from_theme(theme);
+        let background = match (is_active, status) {
+            (true, _) => palette.accent_soft,
+            (false, button::Status::Hovered) => palette.surface_high,
+            (false, button::Status::Pressed) => palette.accent_soft,
+            _ => Color::TRANSPARENT,
+        };
+
+        button::Style {
+            background: Some(Background::Color(background)),
+            text_color: if is_active {
+                palette.accent
+            } else {
+                palette.muted_text
+            },
+            border: border(
+                1.0,
+                if is_active {
+                    palette.accent.scale_alpha(0.44)
+                } else {
+                    Color::TRANSPARENT
+                },
+                CONTROL_RADIUS,
+            ),
+            ..button::Style::default()
+        }
+    }
+}
+
+/// Navigation tabs in the Preferences sidebar.
+pub fn settings_navigation_button(
+    is_active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let palette = VisualPalette::from_theme(theme);
+        let background = match (is_active, status) {
+            (true, _) => palette.accent_soft,
+            (false, button::Status::Hovered) => palette.surface_high,
+            (false, button::Status::Pressed) => palette.accent_soft,
+            _ => Color::TRANSPARENT,
+        };
+
+        button::Style {
+            background: Some(Background::Color(background)),
+            text_color: if is_active {
+                palette.accent
+            } else {
+                palette.muted_text
+            },
+            border: border(
+                1.0,
+                if is_active {
+                    palette.accent.scale_alpha(0.35)
+                } else {
+                    Color::TRANSPARENT
+                },
+                CONTROL_RADIUS,
+            ),
+            ..button::Style::default()
+        }
+    }
+}
+
 pub fn command_button(theme: &Theme, status: button::Status) -> button::Style {
     let palette = VisualPalette::from_theme(theme);
     let background = match status {
