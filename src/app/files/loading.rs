@@ -18,18 +18,22 @@ impl App {
                 self.file_status = None;
                 let opened_path = opened.path.clone();
                 if let Some(document_id) = self.loading_document_id_for_path(&opened.path) {
+                    let auto_save = self.auto_save_before_switch(Some(document_id));
                     if let Some(document) = self.workspace.document_mut(document_id)
                         && let Some(generation) = document.load_generation()
                     {
                         document.complete_loading(generation, opened.contents.as_ref().clone());
                     }
                     self.workspace.select(document_id);
+                    let history = self.record_open_history(opened_path);
+                    Task::batch([auto_save, history])
                 } else {
+                    let auto_save = self.auto_save_before_switch(None);
                     self.workspace
                         .insert_decoded_file(opened.path, opened.contents.as_ref().clone());
-                };
-
-                self.record_open_history(opened_path)
+                    let history = self.record_open_history(opened_path);
+                    Task::batch([auto_save, history])
+                }
             }
             Err(error) => {
                 self.file_status = Some(format!("Open failed: {}", error.summary()));
@@ -82,23 +86,27 @@ impl App {
             })
             .map(|doc| doc.id)
         {
+            let auto_save = self.auto_save_before_switch(Some(id));
             self.workspace.select(id);
-            return self.activate_document(id);
+            let activate = self.activate_document(id);
+            return Task::batch([auto_save, activate]);
         }
         self.files.is_loading = true;
         self.file_status = None;
 
+        let auto_save = self.auto_save_before_switch(None);
         let (document_id, generation) = self.workspace.insert_loading_file(path.clone());
         if let Some(document) = self.workspace.document_mut(document_id) {
             document.defer_analysis = true;
         }
 
-        self.start_load_request(FileLoadRequest {
+        let load = self.start_load_request(FileLoadRequest {
             document_id,
             generation,
             path,
             chunk_size: services::DEFAULT_CHUNK_SIZE,
-        })
+        });
+        Task::batch([auto_save, load])
     }
 
     pub(super) fn reload_active_from_disk(&mut self) -> Task<Message> {

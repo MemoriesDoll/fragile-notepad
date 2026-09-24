@@ -14,6 +14,10 @@ mod test_support {
         app.files.pending_save_all().iter().copied().collect()
     }
 
+    pub(super) fn pending_auto_save_ids(app: &App) -> Vec<crate::core::DocumentId> {
+        app.files.pending_auto_saves().iter().copied().collect()
+    }
+
     pub(super) fn set_active_document_text(app: &mut App, text: &str, selection: EditorSelection) {
         let document = app
             .workspace

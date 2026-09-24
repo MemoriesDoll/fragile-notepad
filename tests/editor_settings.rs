@@ -10,6 +10,7 @@ fn editor_settings_defaults_enable_core_editor_decorations() {
     let settings = EditorSettings::default();
 
     assert!(settings.word_wrap);
+    assert!(!settings.auto_save);
     assert_eq!(settings.zoom, EditorSettings::DEFAULT_ZOOM);
     assert_eq!(settings.scroll_speed, EditorSettings::DEFAULT_SCROLL_SPEED);
     assert_eq!(
@@ -61,7 +62,7 @@ fn editor_settings_parse_xml_decoration_toggles_indentation_and_shortcuts() {
         "\
 <?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <fragile-notepad-settings version=\"1\">
-  <general appearance=\"dark\" hardware-acceleration=\"diagnostic\" syntax-theme=\"Solarized Dark\" />
+  <general appearance=\"dark\" hardware-acceleration=\"diagnostic\" auto-save=\"true\" syntax-theme=\"Solarized Dark\" />
   <editor word-wrap=\"false\" indentation=\"tabs\" scroll-speed=\"2.750\" />
   <appearance zoom=\"2.250\" />
   <decorations line-numbers=\"false\" spaces=\"true\" tabs=\"true\" eol-markers=\"true\" indentation-guides=\"false\" folding-controls=\"false\" />
@@ -74,6 +75,7 @@ fn editor_settings_parse_xml_decoration_toggles_indentation_and_shortcuts() {
     );
 
     assert!(!settings.word_wrap);
+    assert!(settings.auto_save);
     assert_eq!(settings.zoom, 2.25);
     assert_eq!(settings.scroll_speed, 2.75);
     assert_eq!(settings.indentation, IndentationMode::Tabs);
@@ -172,6 +174,7 @@ fn editor_settings_round_trip_preserves_xml_escaped_open_history() {
 fn editor_settings_persist_all_decoration_keys_as_xml() {
     let mut settings = EditorSettings::default();
     settings.set_word_wrap(false);
+    settings.set_auto_save(true);
     settings.set_zoom(1.5);
     settings.set_scroll_speed(2.25);
     settings.set_indentation(IndentationMode::spaces(2));
@@ -189,6 +192,7 @@ fn editor_settings_persist_all_decoration_keys_as_xml() {
     assert!(persisted.contains("<fragile-notepad-settings version=\"1\">"));
     assert!(persisted.contains("<general appearance=\"light\""));
     assert!(persisted.contains("hardware-acceleration=\"lazy\""));
+    assert!(persisted.contains("auto-save=\"true\""));
     assert!(persisted.contains("<editor word-wrap=\"false\" indentation=\"spaces:2\""));
     assert!(persisted.contains("<appearance zoom=\"1.500\""));
     assert!(persisted.contains("line-numbers=\"false\""));
@@ -215,6 +219,7 @@ fn editor_settings_round_trip_preserves_decoration_controls() {
     let parsed = EditorSettings::from_xml_str(&settings.to_xml_string());
 
     assert_eq!(parsed.word_wrap, settings.word_wrap);
+    assert_eq!(parsed.auto_save, settings.auto_save);
     assert_eq!(parsed.zoom, settings.zoom);
     assert_eq!(parsed.scroll_speed, settings.scroll_speed);
     assert_eq!(parsed.indentation, settings.indentation);

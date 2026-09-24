@@ -57,11 +57,24 @@ impl SettingsPersistence {
     ) {
         // Frequent zoom/display edits compare Copy fields. Only applying the full
         // dialog needs to compare shortcut maps and path history.
-        let before = (settings.zoom, settings.word_wrap, settings.decorations);
+        let before = (
+            settings.zoom,
+            settings.word_wrap,
+            settings.auto_save,
+            settings.decorations,
+        );
         let before_all = matches!(edit, SettingsEdit::All).then(|| settings.clone());
         apply(settings);
         self.changed |= before_all.map_or_else(
-            || before != (settings.zoom, settings.word_wrap, settings.decorations),
+            || {
+                before
+                    != (
+                        settings.zoom,
+                        settings.word_wrap,
+                        settings.auto_save,
+                        settings.decorations,
+                    )
+            },
             |before| before != *settings,
         );
         if !self.loaded {
@@ -107,6 +120,10 @@ impl App {
             }
             SettingsMessage::DraftWordWrapToggled(word_wrap) => {
                 self.settings_dialog.draft.set_word_wrap(word_wrap);
+                Task::none()
+            }
+            SettingsMessage::DraftAutoSaveToggled(auto_save) => {
+                self.settings_dialog.draft.set_auto_save(auto_save);
                 Task::none()
             }
             SettingsMessage::DraftAppearanceSelected(appearance) => {
@@ -495,6 +512,7 @@ pub(super) fn merge_initial_settings(
     macro_rules! keep_edits { ($($field:ident),*) => { $(if current.$field != defaults.$field { loaded.$field = current.$field.clone(); })* }; }
     keep_edits!(
         word_wrap,
+        auto_save,
         zoom,
         scroll_speed,
         indentation,
@@ -508,6 +526,9 @@ pub(super) fn merge_initial_settings(
     }
     if edits & 2 != 0 {
         loaded.word_wrap = current.word_wrap;
+    }
+    if edits & 256 != 0 {
+        loaded.auto_save = current.auto_save;
     }
     macro_rules! decoration_edit {
         ($field:ident, $mask:expr) => {

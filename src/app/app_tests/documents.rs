@@ -996,6 +996,167 @@ fn save_all_stops_after_failed_save() {
 }
 
 #[test]
+fn auto_save_on_tab_switch_saves_named_dirty_document_without_save_as() {
+    let (mut app, _) = App::new();
+    app.settings.auto_save = true;
+    let first = app.workspace.active_document_id();
+    let second = app.workspace.create_untitled();
+    app.workspace.select(first);
+
+    let path = PathBuf::from("auto-save.txt");
+    let document = app.workspace.document_mut(first).expect("first document");
+    document.set_path(path.clone());
+    document.mark_dirty();
+
+    let _ = app.update(Message::TabSelected(second));
+
+    assert_eq!(app.workspace.active_document_id(), second);
+    let request = app.files.pending_save().expect("auto-save request");
+    assert_eq!(request.document_id, first);
+    assert_eq!(request.snapshot.as_ref(), b"");
+    assert!(app.files.pending_auto_saves().is_empty());
+}
+
+#[test]
+fn auto_save_does_not_open_save_as_for_untitled_document() {
+    let (mut app, _) = App::new();
+    app.settings.auto_save = true;
+    let first = app.workspace.active_document_id();
+    let second = app.workspace.create_untitled();
+    app.workspace.select(first);
+    app.workspace
+        .document_mut(first)
+        .expect("first document")
+        .mark_dirty();
+
+    let _ = app.update(Message::TabSelected(second));
+
+    assert!(app.files.pending_save().is_none());
+    assert!(app.files.pending_auto_saves().is_empty());
+}
+
+#[test]
+fn auto_save_queues_tab_switches_while_a_write_is_in_flight() {
+    let (mut app, _) = App::new();
+    app.settings.auto_save = true;
+    let first = app.workspace.active_document_id();
+    let second = app.workspace.create_untitled();
+    let third = app.workspace.create_untitled();
+    app.workspace.select(first);
+
+    let first_path = PathBuf::from("first-auto-save.txt");
+    let second_path = PathBuf::from("second-auto-save.txt");
+    {
+        let document = app.workspace.document_mut(first).expect("first document");
+        document.set_path(first_path.clone());
+        document.mark_dirty();
+    }
+    {
+        let document = app.workspace.document_mut(second).expect("second document");
+        document.set_path(second_path.clone());
+        document.mark_dirty();
+    }
+
+    let _ = app.update(Message::TabSelected(second));
+    let first_request = app.files.pending_save().cloned().expect("first save");
+    let _ = app.update(Message::TabSelected(third));
+
+    assert_eq!(pending_auto_save_ids(&app), vec![second]);
+    let _ = app.update(Message::FileSaved(first_request, Ok(first_path)));
+
+    assert_eq!(
+        app.files.pending_save().map(|request| request.document_id),
+        Some(second)
+    );
+    assert!(app.files.pending_auto_saves().is_empty());
+}
+
+#[test]
+fn auto_save_continues_after_save_copy_completes() {
+    let (mut app, _) = App::new();
+    app.settings.auto_save = true;
+    let first = app.workspace.active_document_id();
+    let second = app.workspace.create_untitled();
+    app.workspace.select(first);
+
+    let path = PathBuf::from("copy-source.txt");
+    let document = app.workspace.document_mut(first).expect("first document");
+    document.set_path(path);
+    document.mark_dirty();
+
+    let _ = app.update(Message::SaveCopyAs);
+    let copy_request = app.files.pending_save().cloned().expect("copy request");
+
+    let _ = app.update(Message::TabSelected(second));
+    assert_eq!(pending_auto_save_ids(&app), vec![first]);
+
+    let _ = app.update(Message::FileCopySaved(
+        copy_request,
+        Ok(PathBuf::from("copy-target.txt")),
+    ));
+
+    assert_eq!(
+        app.files.pending_save().map(|request| request.document_id),
+        Some(first)
+    );
+    assert!(app.files.pending_auto_saves().is_empty());
+}
+
+#[test]
+fn auto_save_continues_after_encoding_failure() {
+    let (mut app, _) = App::new();
+    app.settings.auto_save = true;
+    let first = app.workspace.active_document_id();
+    let second = app.workspace.create_untitled();
+    let third = app.workspace.create_untitled();
+    let fourth = app.workspace.create_untitled();
+
+    {
+        let document = app.workspace.document_mut(first).expect("first document");
+        document.buffer = EditorBuffer::from_text("\u{20ac}");
+        document.refresh_after_text_change();
+        document.set_encoding(crate::core::TextEncoding::Iso8859_1);
+        document.set_path("encoding-failure.txt");
+        document.mark_dirty();
+    }
+    {
+        let document = app.workspace.document_mut(second).expect("second document");
+        document.set_path("queued-after-failure.txt");
+        document.mark_dirty();
+    }
+    {
+        let document = app.workspace.document_mut(third).expect("third document");
+        document.set_path("copy-source-for-failure.txt");
+        document.mark_dirty();
+    }
+
+    app.workspace.select(third);
+    let _ = app.update(Message::SaveCopyAs);
+    let copy_request = app.files.pending_save().cloned().expect("copy request");
+
+    let _ = app.update(Message::TabSelected(first));
+    let _ = app.update(Message::TabSelected(second));
+    let _ = app.update(Message::TabSelected(fourth));
+    assert_eq!(pending_auto_save_ids(&app), vec![third, first, second]);
+
+    let _ = app.update(Message::FileCopySaved(
+        copy_request,
+        Ok(PathBuf::from("copy-target-for-failure.txt")),
+    ));
+    let third_request = app.files.pending_save().cloned().expect("third save");
+    let _ = app.update(Message::FileSaved(
+        third_request,
+        Ok(PathBuf::from("copy-source-for-failure.txt")),
+    ));
+
+    assert_eq!(
+        app.files.pending_save().map(|request| request.document_id),
+        Some(second)
+    );
+    assert!(app.files.pending_auto_saves().is_empty());
+}
+
+#[test]
 fn close_all_but_active_keeps_active_document_and_closes_clean_neighbors() {
     let (mut app, _) = App::new();
     let first = app.workspace.active_document_id();

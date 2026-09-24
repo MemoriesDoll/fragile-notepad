@@ -23,6 +23,7 @@ pub(super) enum CloseGoal {
 pub(super) struct FileOperations {
     is_loading: bool,
     pending_save: Option<SaveRequest>,
+    pending_auto_saves: VecDeque<DocumentId>,
     pending_reloads: HashMap<DocumentId, Document>,
     pending_save_all: VecDeque<DocumentId>,
     pending_close_after_save: Option<DocumentId>,
@@ -37,6 +38,7 @@ impl FileOperations {
             handle.abort();
         }
         self.pending_reloads.remove(&id);
+        self.pending_auto_saves.retain(|pending| *pending != id);
     }
 }
 
@@ -51,6 +53,9 @@ impl FileOperations {
     }
     pub(super) fn pending_save_all(&self) -> &VecDeque<DocumentId> {
         &self.pending_save_all
+    }
+    pub(super) fn pending_auto_saves(&self) -> &VecDeque<DocumentId> {
+        &self.pending_auto_saves
     }
     pub(super) fn pending_close_after_save(&self) -> Option<DocumentId> {
         self.pending_close_after_save
@@ -84,10 +89,13 @@ impl App {
         match message {
             FileMessage::TabSelected(document_id) => {
                 self.menu.close();
-                if self.workspace.select(document_id) {
-                    let load = self.activate_document(document_id);
+                if self.workspace.document(document_id).is_some() {
+                    let auto_save = self.auto_save_before_switch(Some(document_id));
+                    if self.workspace.select(document_id) {
+                        let load = self.activate_document(document_id);
 
-                    return load;
+                        return Task::batch([auto_save, load]);
+                    }
                 }
 
                 Task::none()
@@ -109,10 +117,13 @@ impl App {
                 self.menu.close();
                 self.dragged_tab = Some(document_id);
                 self.hovered_drop_tab = Some(document_id);
-                if self.workspace.select(document_id) {
-                    let load = self.activate_document(document_id);
+                if self.workspace.document(document_id).is_some() {
+                    let auto_save = self.auto_save_before_switch(Some(document_id));
+                    if self.workspace.select(document_id) {
+                        let load = self.activate_document(document_id);
 
-                    return load;
+                        return Task::batch([auto_save, load]);
+                    }
                 }
                 Task::none()
             }
@@ -141,9 +152,10 @@ impl App {
             }
             FileMessage::NewFile => {
                 self.menu.close();
+                let auto_save = self.auto_save_before_switch(None);
                 self.workspace.create_untitled();
 
-                Task::none()
+                auto_save
             }
             FileMessage::OpenFile => {
                 self.menu.close();

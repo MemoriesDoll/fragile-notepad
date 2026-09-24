@@ -9,6 +9,71 @@ use iced::{Task, window};
 use std::sync::Arc;
 
 impl App {
+    pub(in crate::app) fn auto_save_before_switch(
+        &mut self,
+        target: Option<DocumentId>,
+    ) -> Task<Message> {
+        let active = self.workspace.active_document_id();
+        if target == Some(active) {
+            return Task::none();
+        }
+
+        self.queue_auto_save(active)
+    }
+
+    pub(in crate::app) fn queue_auto_save(&mut self, document_id: DocumentId) -> Task<Message> {
+        if !self.settings.auto_save
+            || self.close_prompt.is_closing()
+            || self.files.pending_auto_saves.contains(&document_id)
+        {
+            return Task::none();
+        }
+
+        let eligible = self
+            .workspace
+            .document(document_id)
+            .is_some_and(|document| {
+                document.is_dirty && document.path.is_some() && document.has_complete_text_index()
+            });
+        if !eligible {
+            return Task::none();
+        }
+
+        self.files.pending_auto_saves.push_back(document_id);
+        self.continue_auto_save()
+    }
+
+    fn continue_auto_save(&mut self) -> Task<Message> {
+        if !self.settings.auto_save || self.should_exit() {
+            self.files.pending_auto_saves.clear();
+            return Task::none();
+        }
+        if self.files.pending_save.is_some() || !self.files.pending_save_all.is_empty() {
+            return Task::none();
+        }
+
+        while let Some(document_id) = self.files.pending_auto_saves.pop_front() {
+            let eligible = self
+                .workspace
+                .document(document_id)
+                .is_some_and(|document| {
+                    document.is_dirty
+                        && document.path.is_some()
+                        && document.has_complete_text_index()
+                });
+            if !eligible {
+                continue;
+            }
+
+            let task = self.save_one(document_id, false);
+            if self.files.pending_save.is_some() {
+                return task;
+            }
+        }
+
+        Task::none()
+    }
+
     pub(super) fn save_active(&mut self, force_save_as: bool) -> Task<Message> {
         self.files.pending_save_all.clear();
         self.save_one(self.workspace.active_document_id(), force_save_as)
@@ -105,7 +170,7 @@ impl App {
             self.files.pending_save_all.pop_front();
         }
 
-        Task::none()
+        self.continue_auto_save()
     }
 
     pub(super) fn save_one(
@@ -248,6 +313,7 @@ impl App {
             }
         }
 
+        tasks.push(self.continue_auto_save());
         Task::batch(tasks)
     }
 
@@ -267,7 +333,7 @@ impl App {
             }
         }
 
-        Task::none()
+        self.continue_auto_save()
     }
 
     pub(super) fn save_failed(&mut self, document_id: DocumentId, error: FileError) {

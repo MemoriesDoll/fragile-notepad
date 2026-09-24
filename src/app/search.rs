@@ -167,9 +167,13 @@ impl App {
                 self.replace_all_in(SearchScope::OpenDocuments)
             }
             SearchMessage::AdvancedSearchResultSelected(document_id, selection) => {
-                if self.workspace.select(document_id) {
+                if self.workspace.document(document_id).is_some() {
+                    let auto_save = self.auto_save_before_switch(Some(document_id));
+                    if !self.workspace.select(document_id) {
+                        return Task::none();
+                    }
                     self.refresh_find_matches();
-                    let _ = self.update_editor(
+                    let editor_task = self.update_editor(
                         document_id,
                         crate::editor::EditorAction::SelectRegion(selection),
                     );
@@ -177,6 +181,7 @@ impl App {
                         document_id,
                         selection.range().normalized().start,
                     );
+                    return Task::batch([auto_save, editor_task]);
                 }
                 Task::none()
             }

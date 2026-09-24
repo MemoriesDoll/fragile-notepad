@@ -55,6 +55,31 @@ fn caption_state_follows_native_focus_and_rejects_closed_window_results() {
 }
 
 #[test]
+fn auto_save_on_main_window_unfocus_saves_the_active_named_document() {
+    let (mut app, _) = App::new();
+    app.settings.auto_save = true;
+    let main = app.main_window_id.unwrap();
+    let document_id = app.workspace.active_document_id();
+    let path = PathBuf::from("unfocused-auto-save.txt");
+    {
+        let document = app.workspace.document_mut(document_id).unwrap();
+        document.set_path(path);
+        document.mark_dirty();
+    }
+
+    let _ = app.update(Message::RuntimeEvent(
+        Event::Window(iced::window::Event::Unfocused),
+        Status::Captured,
+        main,
+    ));
+
+    assert_eq!(
+        app.files.pending_save().map(|request| request.document_id),
+        Some(document_id)
+    );
+}
+
+#[test]
 #[cfg(debug_assertions)]
 fn caption_preview_toggle_does_not_modify_settings_or_recovery() {
     let (mut app, _) = App::new();

@@ -40,6 +40,9 @@ impl App {
             if self.focused_window_id == Some(window_id) {
                 self.focused_window_id = None;
             }
+            if self.main_window_id == Some(window_id) {
+                return self.queue_auto_save(self.workspace.active_document_id());
+            }
             return Task::none();
         }
         if matches!(event, Event::Window(window::Event::Resized(_))) {

@@ -55,6 +55,7 @@ impl IndentationMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorSettings {
     pub word_wrap: bool,
+    pub auto_save: bool,
     pub zoom: f32,
     pub scroll_speed: f32,
     pub indentation: IndentationMode,
@@ -115,6 +116,10 @@ impl EditorSettings {
 
     pub fn set_word_wrap(&mut self, word_wrap: bool) {
         self.word_wrap = word_wrap;
+    }
+
+    pub fn set_auto_save(&mut self, auto_save: bool) {
+        self.auto_save = auto_save;
     }
 
     pub fn set_indentation(&mut self, indentation: IndentationMode) {
@@ -223,6 +228,7 @@ impl EditorSettings {
                         "hardware-acceleration",
                         hardware_acceleration_key(self.hardware_acceleration),
                     )
+                    .attribute("auto-save", self.auto_save)
                     .attribute("syntax-theme", self.syntax_theme.to_string()),
             )
             .child(open_history)
@@ -275,6 +281,9 @@ impl EditorSettings {
                 .and_then(parse_hardware_acceleration)
             {
                 settings.hardware_acceleration = hardware_acceleration;
+            }
+            if let Some(auto_save) = general.attribute("auto-save").and_then(parse_bool) {
+                settings.auto_save = auto_save;
             }
         }
 
@@ -372,6 +381,7 @@ impl Default for EditorSettings {
     fn default() -> Self {
         Self {
             word_wrap: true,
+            auto_save: false,
             zoom: Self::DEFAULT_ZOOM,
             scroll_speed: Self::DEFAULT_SCROLL_SPEED,
             indentation: IndentationMode::Spaces(IndentationMode::DEFAULT_SPACE_WIDTH),

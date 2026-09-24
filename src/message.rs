@@ -123,6 +123,7 @@ message_catalog! {
     Settings(SettingsMessage) {
         DraftThemeSelected(arg0: highlighter::Theme) => Reject,
         DraftWordWrapToggled(arg0: bool) => Reject,
+        DraftAutoSaveToggled(arg0: bool) => Reject,
         DraftAppearanceSelected(arg0: AppearanceMode) => Reject,
         DraftHardwareAccelerationSelected(arg0: HardwareAccelerationMode) => Reject,
         DraftIndentationSelected(arg0: IndentationMode) => Reject,

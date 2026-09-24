@@ -170,6 +170,19 @@ fn general_pane(settings: &EditorSettings) -> Element<'_, Message> {
                 Message::SettingsScrollSpeedIncrease, Message::SettingsScrollSpeedReset,
                 settings.scroll_speed > EditorSettings::MIN_SCROLL_SPEED, settings.scroll_speed < EditorSettings::MAX_SCROLL_SPEED),
         )),
+        section(
+            "Saving",
+            column![
+                toggle_row(
+                    "Auto-save named files",
+                    settings.auto_save,
+                    Message::DraftAutoSaveToggled,
+                ),
+                utility::description("Save changes when switching tabs or leaving the window."),
+            ]
+            .spacing(5)
+            .into(),
+        ),
     ].spacing(14).into()
 }
 
