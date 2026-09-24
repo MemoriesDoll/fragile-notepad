@@ -94,7 +94,7 @@ impl PrimaryInstance {
 pub fn claim_or_signal(config: &SingleInstanceConfig, files: &[PathBuf]) -> io::Result<Startup> {
     let (sid, session) = current_user_identity()?;
     let scoped = format!("{}.{}.{}", config.sanitized_app_id(), sid, session);
-    let pipe_name = wide_null(format!(r"\\.\pipe\{scoped}.files-v3"));
+    let pipe_name = wide_null(format!(r"\\.\pipe\{scoped}.files"));
     match claim_instance_lock(&scoped)? {
         InstanceLock::Primary(mutex) => {
             let pipe = create_pipe(&pipe_name, &sid)?;
