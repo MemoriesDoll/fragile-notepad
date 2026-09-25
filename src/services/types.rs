@@ -11,6 +11,19 @@ pub type FileLoadResult = Result<FileLoadFinished, FileLoadFailure>;
 pub type FileSaveResult = Result<PathBuf, FileError>;
 pub type SettingsLoadResult = Result<Option<EditorSettings>, SettingsError>;
 pub type SettingsSaveResult = Result<(), SettingsError>;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SaveFileDialogOptions {
+    pub file_name: Option<String>,
+    pub filter: Option<SaveFileDialogFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveFileDialogFilter {
+    pub name: String,
+    pub extension: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct OpenedFile {
     pub path: PathBuf,

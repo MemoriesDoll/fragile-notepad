@@ -1,12 +1,46 @@
 //! Saving snapshots and handling completion or failure.
 
 use crate::app::{App, CloseGoal};
-use crate::core::{DocumentId, DocumentLoadState};
+use crate::core::{Document, DocumentId, DocumentLoadState};
 use crate::message::{Message, SaveRequest};
 use crate::services;
-use crate::services::types::{FileError, FileSaveResult};
-use iced::{Task, window};
+use crate::services::types::{
+    FileError, FileSaveResult, SaveFileDialogFilter, SaveFileDialogOptions,
+};
+use iced::{Task, highlighter, window};
 use std::sync::Arc;
+
+fn save_dialog_options(document: &Document) -> SaveFileDialogOptions {
+    if !document.uses_syntax_highlighting() {
+        return SaveFileDialogOptions::default();
+    }
+
+    let Some(syntax) = highlighter::syntaxes()
+        .iter()
+        .find(|syntax| syntax.token.eq_ignore_ascii_case(&document.syntax_token))
+    else {
+        return SaveFileDialogOptions::default();
+    };
+
+    let mut file_name = document
+        .path
+        .as_deref()
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("Untitled {}", document.id));
+    let mut suggested_path = std::path::PathBuf::from(&file_name);
+    suggested_path.set_extension(&syntax.token);
+    file_name = suggested_path.to_string_lossy().into_owned();
+
+    SaveFileDialogOptions {
+        file_name: Some(file_name),
+        filter: Some(SaveFileDialogFilter {
+            name: syntax.name.clone(),
+            extension: syntax.token.clone(),
+        }),
+    }
+}
 
 impl App {
     pub(in crate::app) fn auto_save_before_switch(
@@ -126,15 +160,21 @@ impl App {
             revision: document.revision(),
             snapshot: Arc::new(snapshot),
         };
+        let dialog_options = save_dialog_options(document);
         self.files.pending_save = Some(request.clone());
         let contents = request.snapshot.as_ref().clone();
 
         window::oldest()
             .and_then(move |id| {
                 let contents = contents.clone();
+                let dialog_options = dialog_options.clone();
 
                 window::run(id, move |window| {
-                    services::file_system::save_file_copy_as(window, contents)
+                    services::file_system::save_file_copy_as_with_options(
+                        window,
+                        contents,
+                        dialog_options,
+                    )
                 })
             })
             .then(Task::future)
@@ -220,6 +260,7 @@ impl App {
             revision: document.revision(),
             snapshot: Arc::new(snapshot),
         };
+        let dialog_options = save_dialog_options(document);
         document.history.break_group();
         self.files.pending_save = Some(request.clone());
 
@@ -238,8 +279,11 @@ impl App {
         window::oldest()
             .and_then(move |id| {
                 let contents = contents.clone();
+                let dialog_options = dialog_options.clone();
 
-                window::run(id, move |window| services::save_file_as(window, contents))
+                window::run(id, move |window| {
+                    services::save_file_as_with_options(window, contents, dialog_options)
+                })
             })
             .then(Task::future)
             .map(move |result| Message::FileSaved(request.clone(), result))
@@ -349,5 +393,65 @@ impl App {
             self.clear_close();
             self.files.close_goal = CloseGoal::KeepOpen;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_save_dialog_suggests_extension_and_filter() {
+        let mut document = Document::untitled(DocumentId::new(7));
+        document.set_syntax_token("rs");
+
+        let options = save_dialog_options(&document);
+
+        assert_eq!(options.file_name.as_deref(), Some("Untitled 7.rs"));
+        assert_eq!(
+            options.filter,
+            Some(SaveFileDialogFilter {
+                name: "Rust".into(),
+                extension: "rs".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn language_save_dialog_replaces_existing_extension() {
+        let mut document = Document::from_path(DocumentId::new(8), "notes.txt", "body");
+        document.set_syntax_token("py");
+
+        let options = save_dialog_options(&document);
+
+        assert_eq!(options.file_name.as_deref(), Some("notes.py"));
+        assert_eq!(
+            options
+                .filter
+                .as_ref()
+                .map(|filter| filter.extension.as_str()),
+            Some("py")
+        );
+    }
+
+    #[test]
+    fn plain_text_save_dialog_has_no_suggestion() {
+        let document = Document::untitled(DocumentId::new(9));
+
+        assert_eq!(
+            save_dialog_options(&document),
+            SaveFileDialogOptions::default()
+        );
+    }
+
+    #[test]
+    fn unknown_syntax_does_not_create_a_filter() {
+        let mut document = Document::untitled(DocumentId::new(10));
+        document.set_syntax_token("not-a-real-language");
+
+        assert_eq!(
+            save_dialog_options(&document),
+            SaveFileDialogOptions::default()
+        );
     }
 }
