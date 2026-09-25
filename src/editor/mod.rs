@@ -54,5 +54,5 @@ pub use render::{
     visible_marker_columns,
 };
 pub use viewport::{RowSegment, ViewportModel, VisibleRow};
-pub use widget::{AdvancedEditor, AdvancedEditorState, key_action};
+pub use widget::{AdvancedEditor, AdvancedEditorState};
 pub use word::word_range_at_position;

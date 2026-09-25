@@ -216,7 +216,7 @@ impl App {
             document_id: id,
             generation,
             path,
-            chunk_size: crate::services::DEFAULT_CHUNK_SIZE,
+            chunk_size: crate::services::chunked_file::DEFAULT_CHUNK_SIZE,
         })
     }
 
@@ -329,7 +329,8 @@ impl SessionState {
         workspace: &mut crate::core::Workspace,
         work: &mut super::events::PendingWork,
     ) {
-        use super::events::{Event, Work, WorkspaceEvent as W};
+        use super::events::{Event, Work};
+        use crate::core::workspace::changes::WorkspaceEvent as W;
         match event {
             Event::SessionReady if self.dirty => work.request(Work::Session),
             Event::Workspace(W::DocumentClosed(id)) => {

@@ -4,9 +4,21 @@ use iced::widget::{button, container, text};
 use iced::{Element, Fill};
 
 use crate::message::Message;
-use crate::ui::{
-    centered_button_content, centered_button_label, centered_fill_button_label, styles,
-};
+use crate::ui::styles;
+
+pub fn centered_button_content<'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    container(content).center(Fill).into()
+}
+
+pub fn centered_button_label<'a>(label: &'a str, size: u32) -> Element<'a, Message> {
+    text(label).size(size).into()
+}
+
+pub fn centered_fill_button_label<'a>(label: &'a str, size: u32) -> Element<'a, Message> {
+    container(text(label).size(size)).center_x(Fill).into()
+}
 
 pub fn command_button<'a>(
     label: &'static str,

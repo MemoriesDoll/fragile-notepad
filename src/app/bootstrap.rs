@@ -12,11 +12,12 @@ use std::collections::HashMap;
 
 impl App {
     pub(super) fn bootstrap(options: crate::startup::StartupOptions) -> (Self, Task<Message>) {
-        let (main_window_id, open) = window::open(windowing::custom_chrome(window::Settings {
-            min_size: Some(iced::Size::new(640.0, 400.0)),
-            exit_on_close_request: false,
-            ..window::Settings::default()
-        }));
+        let (main_window_id, open) =
+            window::open(windowing::operations::custom_chrome(window::Settings {
+                min_size: Some(iced::Size::new(640.0, 400.0)),
+                exit_on_close_request: false,
+                ..window::Settings::default()
+            }));
 
         let mut app = Self {
             workspace: Workspace::new(),
@@ -75,7 +76,10 @@ impl App {
             Task::batch([
                 open.map(Message::WindowOpened),
                 iced::widget::operation::focus(crate::ui::editor::EDITOR_ID),
-                Task::perform(crate::services::load_settings(), Message::SettingsLoaded),
+                Task::perform(
+                    crate::services::settings_store::load_settings(),
+                    Message::SettingsLoaded,
+                ),
                 initial_work,
                 session_task,
             ]),

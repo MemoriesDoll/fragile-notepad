@@ -2,7 +2,7 @@
 
 use super::{
     App, rendering,
-    windowing::{ManagedWindow, Title},
+    windowing::{managed::ManagedWindow, title::Title},
 };
 use crate::{message::Message, ui};
 use iced::{Element, Theme, window};
@@ -22,7 +22,7 @@ impl App {
         {
             search_window.view(&self.search_dialog)
         } else {
-            ui::view(ui::WorkbenchView {
+            ui::workbench::view(ui::view_model::WorkbenchView {
                 workspace: &self.workspace,
                 find: &self.find,
                 settings: &self.settings,
@@ -113,14 +113,14 @@ impl App {
         ui::styles::modern_theme(self.settings.appearance)
     }
 
-    pub(super) fn chrome_animation_info(&self) -> ui::ChromeAnimationInfo {
+    pub(super) fn chrome_animation_info(&self) -> ui::view_model::ChromeAnimationInfo {
         let animation = self.chrome_animation;
         let find = animation.find;
         let inline_replace = animation.inline_replace;
         let function_list = animation.function_list;
         let about = animation.about;
 
-        ui::ChromeAnimationInfo {
+        ui::view_model::ChromeAnimationInfo {
             find_rendered_visible: find.rendered_visible(),
             find_progress: find.progress(),
             inline_replace_rendered_visible: inline_replace.rendered_visible(),

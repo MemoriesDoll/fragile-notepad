@@ -13,8 +13,7 @@ use super::viewport::{RowSegment, ViewportModel};
 use iced::{Color, Rectangle, highlighter};
 use std::ops::Range;
 
-mod syntax;
-pub(crate) use syntax::SyntaxParseRequest;
+pub(crate) mod syntax;
 pub use syntax::{SyntaxLineCache, SyntaxParseResult};
 
 const DEFAULT_SYNTAX_TOKEN: &str = "txt";

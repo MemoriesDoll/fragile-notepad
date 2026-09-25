@@ -1,6 +1,6 @@
 use super::OutlineBodyKind;
 use super::fsm::ByteRange;
-pub(super) use super::source::CodeToken;
+use super::source::CodeToken;
 use super::source::{OutlineSource, SyntaxSymbol};
 
 pub(super) fn matching_code_brace(

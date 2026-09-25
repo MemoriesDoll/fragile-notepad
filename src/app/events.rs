@@ -2,7 +2,7 @@
 
 use super::bus::BusEvent;
 use crate::core::DocumentId;
-pub(super) use crate::core::workspace::changes::WorkspaceEvent;
+use crate::core::workspace::changes::WorkspaceEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Event {

@@ -1,11 +1,14 @@
 mod test_support {
-    pub(super) use crate::app::windowing::ManagedWindow;
+    pub(super) use crate::app::windowing::managed::ManagedWindow;
     pub(super) use crate::app::{App, CloseGoal};
+    pub(super) use crate::core::DirtyCloseDecision;
     pub(super) use crate::core::{HardwareAccelerationMode, IndentationMode};
     pub(super) use crate::editor::{EditorAction, EditorBuffer, EditorPosition, EditorSelection};
     pub(super) use crate::message::{
-        AboutTab, ClipboardMode, DirtyCloseDecision, FileLoadChunk, FileLoadFailure,
-        FileLoadFinished, Menu, Message, OpenedFile, PasteRequest, SaveRequest,
+        AboutTab, ClipboardMode, Menu, Message, PasteRequest, SaveRequest,
+    };
+    pub(super) use crate::services::types::{
+        FileLoadChunk, FileLoadFailure, FileLoadFinished, OpenedFile,
     };
     pub(super) use std::path::PathBuf;
     pub(super) use std::sync::{Arc, Mutex, MutexGuard, OnceLock};

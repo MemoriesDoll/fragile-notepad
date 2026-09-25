@@ -5,8 +5,9 @@ use crate::core::Document;
 use crate::editor::outline::{OutlineNode, OutlineNodeKind};
 use crate::editor::{EditorRange, FunctionKind, OutlineState, OutlineStatus};
 use crate::message::Message;
+use crate::ui::controls::centered_button_content;
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
-use crate::ui::{centered_button_content, styles};
+use crate::ui::styles;
 
 pub const FUNCTION_LIST_PANEL_WIDTH: f32 = 280.0;
 pub const FUNCTION_LIST_PANEL_TITLE: &str = "Function List";

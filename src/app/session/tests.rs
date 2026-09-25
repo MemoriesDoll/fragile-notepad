@@ -1,7 +1,8 @@
 use super::*;
+use crate::core::DirtyCloseDecision;
 use crate::core::{DecodedText, EditorSettings, TextEncoding};
 use crate::editor::EditorAction;
-use crate::message::{DirtyCloseDecision, FileLoadChunk, FileLoadFinished};
+use crate::services::types::{FileLoadChunk, FileLoadFinished};
 use std::sync::Arc;
 
 fn ready(saved: Session) -> App {
@@ -309,11 +310,11 @@ fn missing_file_keeps_session_metadata_and_can_retry_after_failure() {
     let id = doc.id;
     let generation = doc.load_generation().unwrap();
     let _ = app.update(Message::FileLoadFinished(Err(
-        crate::message::FileLoadFailure {
+        crate::services::types::FileLoadFailure {
             document_id: id,
             generation,
             path,
-            error: crate::message::FileError::Io(std::io::ErrorKind::NotFound),
+            error: crate::services::types::FileError::Io(std::io::ErrorKind::NotFound),
         },
     )));
     assert_eq!(app.snapshot_session().documents[0], entry);
@@ -562,11 +563,11 @@ fn failed_restoration_is_read_only_and_legacy_edits_are_snapshotted() {
     let id = document.id;
     let generation = document.load_generation().unwrap();
     let _ = app.update(Message::FileLoadFinished(Err(
-        crate::message::FileLoadFailure {
+        crate::services::types::FileLoadFailure {
             document_id: id,
             generation,
             path,
-            error: crate::message::FileError::Io(std::io::ErrorKind::NotFound),
+            error: crate::services::types::FileError::Io(std::io::ErrorKind::NotFound),
         },
     )));
     let _ = app.update(Message::EditorAction(

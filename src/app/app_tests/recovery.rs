@@ -109,7 +109,7 @@ fn failed_load_completion_is_replayed_after_failed_exit() {
         document_id: id,
         generation,
         path,
-        error: crate::message::FileError::Io(std::io::ErrorKind::NotFound),
+        error: crate::services::types::FileError::Io(std::io::ErrorKind::NotFound),
     })));
     fail_exit(&mut app);
     assert!(matches!(

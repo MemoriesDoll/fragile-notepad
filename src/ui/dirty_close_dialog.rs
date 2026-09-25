@@ -1,9 +1,11 @@
 use iced::widget::{button, column, container, opaque, row, space, stack, text};
 use iced::{Alignment, Center, Element, Fill, Length};
 
+use crate::core::DirtyCloseDecision;
 use crate::core::Document;
-use crate::message::{DirtyCloseDecision, Message};
-use crate::ui::{centered_button_label, motion, styles};
+use crate::message::Message;
+use crate::ui::controls::centered_button_label;
+use crate::ui::{motion, styles};
 
 #[cfg(test)]
 mod tests;

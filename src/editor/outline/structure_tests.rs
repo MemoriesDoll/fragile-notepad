@@ -1,5 +1,6 @@
 use super::*;
 use crate::editor::outline::source::OutlineSource;
+use crate::editor::outline::structure_support::containing_container;
 use crate::editor::outline::{OutlineNodeKind, OutlineRegistry};
 
 fn discover_for_syntax(text: &str, syntax_token: &str) -> StructurePassOutput {

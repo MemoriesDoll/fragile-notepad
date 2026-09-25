@@ -1,7 +1,7 @@
+use crate::app::editor_ops::navigation::move_document_position;
 use crate::app::editor_ops::{
-    add_adjacent_caret, backspace, delete, delete_line, indent, line_span_text,
-    move_document_position, paste_selection, replace_ranges_for_search, replace_selection,
-    selected_text,
+    add_adjacent_caret, backspace, delete, delete_line, indent, line_span_text, paste_selection,
+    replace_ranges_for_search, replace_selection, selected_text,
 };
 use crate::core::DocumentId;
 use crate::core::document::Document;

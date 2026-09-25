@@ -1,6 +1,6 @@
 use fragile_notepad::core::{Document, DocumentId, DocumentLoadGeneration};
-use fragile_notepad::message::{FileLoadEvent, FileLoadRequest};
-use fragile_notepad::services::{DEFAULT_CHUNK_SIZE, load_file_chunks};
+use fragile_notepad::services::chunked_file::{DEFAULT_CHUNK_SIZE, load_file_chunks};
+use fragile_notepad::services::types::{FileLoadEvent, FileLoadRequest};
 use fragile_notepad::ui::status_bar::document_status_label;
 use futures::{StreamExt, pin_mut};
 use iced::widget::text_editor::LineEnding;

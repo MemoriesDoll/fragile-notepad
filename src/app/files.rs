@@ -166,7 +166,7 @@ impl App {
                     self.file_status = None;
 
                     window::oldest()
-                        .and_then(|id| window::run(id, services::pick_file))
+                        .and_then(|id| window::run(id, services::file_dialogs::pick_file))
                         .then(Task::future)
                         .map(Message::FilePicked)
                 }
@@ -324,7 +324,8 @@ impl FileOperations {
         event: super::events::Event,
         work: &mut super::events::PendingWork,
     ) {
-        use super::events::{Event, WorkspaceEvent as W};
+        use super::events::Event;
+        use crate::core::workspace::changes::WorkspaceEvent as W;
         if let Event::Workspace(W::DocumentClosed(id)) = event {
             self.forget_document(id);
         }

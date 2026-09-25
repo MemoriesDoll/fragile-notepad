@@ -6,17 +6,8 @@ use crate::editor::{
 };
 use crate::message::ClipboardMode;
 
-mod folds;
-mod navigation;
-
-pub(super) use folds::{
-    set_all_folds_collapsed, set_current_fold_collapsed, toggle_current_fold, toggle_fold,
-};
-pub(super) use navigation::{
-    go_to_matching_delimiter, go_to_next_function, go_to_previous_function, move_document_position,
-    select_current_function, select_current_function_body, select_delimiter_in_place,
-    select_matching_delimiter, select_word_at,
-};
+pub(super) mod folds;
+pub(super) mod navigation;
 
 #[derive(Debug, Clone)]
 struct ConcreteReplacement {
@@ -844,7 +835,7 @@ pub(super) fn selection_set_is_all_carets(
 pub(super) fn add_adjacent_caret(document: &mut crate::core::Document, motion: CaretMotion) {
     let before = document.selection_set().clone();
     let main = before.main_range();
-    let target = move_document_position(document, main.cursor, motion);
+    let target = navigation::move_document_position(document, main.cursor, motion);
     let target = document.buffer.clamp_position(target);
 
     if target == main.cursor {

@@ -1,14 +1,26 @@
 //! Inputs required to render the workbench; independent of application state ownership.
 
-use super::{
-    ChromeAnimationInfo, about_dialog, toolbar::WindowMenuState,
-    window_list_dialog::WindowListEntry,
-};
+use super::{about_dialog, toolbar::WindowMenuState, window_list_dialog::WindowListEntry};
 use crate::core::{Document, DocumentId, EditorSettings, FindState, Workspace};
 use crate::editor::OutlineState;
 use crate::message::{AboutTab, Menu};
 
-pub struct WorkbenchView<'a> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ChromeAnimationInfo {
+    pub find_rendered_visible: bool,
+    pub find_progress: f32,
+    pub inline_replace_rendered_visible: bool,
+    pub inline_replace_progress: f32,
+    pub function_list_rendered_visible: bool,
+    pub function_list_progress: f32,
+    pub about_rendered_visible: bool,
+    pub about_progress: f32,
+    pub about_interactive: bool,
+    pub dirty_close_progress: f32,
+    pub dirty_close_interactive: bool,
+}
+
+pub(crate) struct WorkbenchView<'a> {
     pub workspace: &'a Workspace,
     pub find: &'a FindState,
     pub settings: &'a EditorSettings,

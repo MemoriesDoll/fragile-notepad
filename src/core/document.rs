@@ -519,7 +519,7 @@ impl Document {
         }
 
         // Non-UTF encoders operate on scalar values and may report unmappable
-        // characters, so they still materialize the compatibility string.
+        // characters, so they still materialize the complete text.
         encode_text(&self.text_for_save(), self.encoding)
     }
 

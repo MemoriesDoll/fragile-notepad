@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::time::Instant as StdInstant;
 
 use crate::core::ShortcutMap;
+use crate::editor::action::EditorAction;
 
 use super::buffer::EditorBuffer;
 use super::decoration::DecorationModel;
@@ -39,14 +40,13 @@ mod cache;
 mod draw;
 mod font;
 mod interaction;
-mod line_cache;
+pub(crate) mod line_cache;
 mod markers;
 mod rich_text;
 mod scrollbar;
 mod state;
 mod style;
 
-pub use crate::editor::action::{CaretMotion, EditorAction};
 pub use actions::key_action;
 #[cfg(test)]
 use cache::{RichParagraphCache, SyntaxSpanKey};
@@ -55,7 +55,6 @@ pub use font::{EDITOR_FONT, EDITOR_FONT_ROUTE, EDITOR_TEXT_SHAPING, EditorFontRo
 #[cfg(test)]
 use interaction::scroll_delta_lines;
 use interaction::{InteractionContext, UpdateOutcome, handle_event};
-pub(crate) use line_cache::measured_position_point;
 use line_cache::{LineGeometry, LineGeometryCache, measured_caret_x};
 #[cfg(test)]
 use line_cache::{byte_to_grapheme_table, measured_selection_x_and_width};

@@ -2,8 +2,9 @@ use iced::widget::{button, column, container, opaque, row, rule, scrollable, spa
 use iced::{Center, Element, Fill, Length};
 
 use crate::message::{AboutTab, Message};
+use crate::ui::controls::{centered_button_label, centered_fill_button_label};
 use crate::ui::motion::{fade_button, fade_container};
-use crate::ui::{centered_button_label, centered_fill_button_label, info_vfx, motion, styles};
+use crate::ui::{info_vfx, motion, styles};
 
 const APP_NAME: &str = "Fragile Notepad";
 const AUTHOR: &str = "Rachel Fragile";

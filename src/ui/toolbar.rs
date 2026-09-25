@@ -8,13 +8,11 @@ use iced::{Center, Element, Fill, Length};
 use crate::core::{Document, EditorSettings, ShortcutCommand, TextEncoding};
 use crate::editor::EditorAction;
 use crate::message::{Menu, Message};
+use crate::ui::controls::centered_button_content;
 use crate::ui::icons::colored::{self, ColoredIcon};
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
+use crate::ui::menu::{self, MenuNode, MenuTree};
 use crate::ui::styles;
-use crate::ui::{
-    centered_button_content,
-    menu::{self, MenuNode, MenuTree},
-};
 
 const MENU_BAR_PADDING: [u16; 2] = [1, 4];
 const MENU_LABEL_PADDING: [u16; 2] = [2, 8];

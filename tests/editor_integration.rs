@@ -8,7 +8,8 @@ use fragile_notepad::editor::{
     EditorSelection, FoldRange, FunctionEntry, FunctionKind, OutlineParseResult, SelectionSet,
     outline_registry_hash, parse_outline_snapshot, position_after_text,
 };
-use fragile_notepad::message::{ClipboardMode, Menu, Message, OpenedFile, PasteRequest};
+use fragile_notepad::message::{ClipboardMode, Menu, Message, PasteRequest};
+use fragile_notepad::services::types::OpenedFile;
 use iced::widget::text_editor::LineEnding;
 use std::sync::Arc;
 

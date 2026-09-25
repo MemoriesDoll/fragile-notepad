@@ -35,17 +35,12 @@ impl EditorBuffer {
         }
     }
 
-    /// Compatibility copy of the complete buffer text.
+    /// Materializes the complete buffer text.
     ///
-    /// The rope is the authoritative storage. New code that can operate
+    /// The rope is the authoritative storage. Code that can operate
     /// incrementally should prefer `chunks`, `slice_text`, or `line_text`.
     pub fn text(&self) -> String {
         self.rope.to_string()
-    }
-
-    /// Compatibility copy of the complete buffer text for existing save paths.
-    pub fn text_for_save(&self) -> String {
-        self.text()
     }
 
     pub fn chunks(&self) -> impl Iterator<Item = &str> {

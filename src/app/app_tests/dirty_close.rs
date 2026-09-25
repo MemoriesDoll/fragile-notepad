@@ -67,7 +67,7 @@ fn decisions_wait_for_fade_and_ignore_repeat_clicks_and_early_completion() {
                 assert!(app.workspace.document(document).is_some());
                 let _ = app.update(Message::FileSaved(
                     request,
-                    Err(crate::message::FileError::DialogClosed),
+                    Err(crate::services::types::FileError::DialogClosed),
                 ));
                 assert!(app.workspace.document(document).is_some());
                 assert_eq!(app.files.pending_close_after_save(), None);

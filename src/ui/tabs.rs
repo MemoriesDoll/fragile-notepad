@@ -10,10 +10,11 @@ use iced::{Background, Border, Center, Color, Element, Event, Fill, Length, Rect
 
 use crate::core::{Document, DocumentId, Workspace};
 use crate::message::Message;
+use crate::ui::controls::centered_button_content;
 use crate::ui::icons::colored::{self, ColoredIcon};
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
 use crate::ui::icons::shortcut;
-use crate::ui::{centered_button_content, styles};
+use crate::ui::styles;
 
 const TAB_HEIGHT: f32 = 27.0;
 const TAB_SCROLLBAR_HEIGHT: f32 = 10.0;

@@ -3,7 +3,7 @@
 use crate::app::App;
 use crate::core::{DocumentId, DocumentIndexState, DocumentLoadGeneration, DocumentLoadState};
 use crate::message::Message;
-use crate::services;
+use crate::services::chunked_file::{self, DEFAULT_CHUNK_SIZE};
 use crate::services::types::{
     FileLoadChunk, FileLoadFailure, FileLoadFinished, FileLoadProgress, FileLoadRequest,
     FileOpenResult, FileResult,
@@ -104,7 +104,7 @@ impl App {
             document_id,
             generation,
             path,
-            chunk_size: services::DEFAULT_CHUNK_SIZE,
+            chunk_size: DEFAULT_CHUNK_SIZE,
         });
         Task::batch([auto_save, load])
     }
@@ -149,7 +149,7 @@ impl App {
             document_id,
             generation,
             path,
-            chunk_size: services::DEFAULT_CHUNK_SIZE,
+            chunk_size: DEFAULT_CHUNK_SIZE,
         })
     }
 
@@ -302,7 +302,7 @@ impl App {
     pub(in crate::app) fn start_load_request(&mut self, request: FileLoadRequest) -> Task<Message> {
         let id = request.document_id;
         let (task, handle) =
-            Task::run(services::load_file_chunks(request), Message::from).abortable();
+            Task::run(chunked_file::load_file_chunks(request), Message::from).abortable();
         if let Some(previous) = self.files.load_handles.insert(id, handle) {
             previous.abort();
         }

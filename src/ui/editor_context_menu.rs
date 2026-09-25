@@ -217,7 +217,7 @@ impl Widget<Message, Theme, Renderer> for EditorContextMenu<'_> {
                 bounds.height,
             );
             let caret = self.document.main_selection().cursor;
-            let caret_point = crate::editor::widget::measured_position_point(
+            let caret_point = crate::editor::widget::line_cache::measured_position_point(
                 &self.document.buffer,
                 &self.document.viewport,
                 &self.document.decorations,

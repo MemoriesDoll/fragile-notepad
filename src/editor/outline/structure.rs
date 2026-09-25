@@ -3,9 +3,7 @@ use super::callable_statements::{
 };
 use super::fsm::{ByteRange, DeclarationEvent, StructuralEvent, StructuralEventKind};
 use super::scan::*;
-use super::source::{OutlineSource, SyntaxSymbol};
-#[cfg(test)]
-pub(super) use super::structure_support::containing_container;
+use super::source::{CodeToken, OutlineSource, SyntaxSymbol};
 use super::{OutlineBodyKind, OutlineNameCapture, OutlinePlan, OutlineRulePlan, OutlineScanMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

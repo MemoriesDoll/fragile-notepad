@@ -8,15 +8,19 @@ use crate::editor::{
 };
 use crate::message::{ClipboardReadResult, Message, PasteRequest};
 
+use super::editor_ops::folds::{
+    set_all_folds_collapsed, set_current_fold_collapsed, toggle_current_fold, toggle_fold,
+};
+use super::editor_ops::navigation::{
+    go_to_matching_delimiter, go_to_next_function, go_to_previous_function, move_document_position,
+    select_current_function, select_current_function_body, select_delimiter_in_place,
+    select_matching_delimiter, select_word_at,
+};
 use super::editor_ops::{
     add_adjacent_caret, backspace, convert_selection_to_rectangle, delete, delete_line,
-    duplicate_line, go_to_matching_delimiter, go_to_next_function, go_to_previous_function, indent,
-    join_lines, line_span_text, lowercase_selection, move_document_position, paste_clipboard_mode,
-    paste_selection, replace_selection, select_current_function, select_current_function_body,
-    select_delimiter_in_place, select_matching_delimiter, select_word_at, selected_text,
-    selection_set_is_all_carets, set_all_folds_collapsed, set_current_fold_collapsed,
-    split_selection_into_lines, toggle_current_fold, toggle_fold, trim_trailing_spaces, unindent,
-    uppercase_selection,
+    duplicate_line, indent, join_lines, line_span_text, lowercase_selection, paste_clipboard_mode,
+    paste_selection, replace_selection, selected_text, selection_set_is_all_carets,
+    split_selection_into_lines, trim_trailing_spaces, unindent, uppercase_selection,
 };
 
 impl App {

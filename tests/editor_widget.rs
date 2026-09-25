@@ -7,15 +7,15 @@ use fragile_notepad::editor::layout::{
     visual_column_for_byte_column,
 };
 use fragile_notepad::editor::widget::{
-    EDITOR_TEXT_SHAPING, EditorStyle, scrollbar_row_for_position, vertical_scrollbar_geometry,
+    EDITOR_TEXT_SHAPING, EditorStyle, key_action, scrollbar_row_for_position,
+    vertical_scrollbar_geometry,
 };
 use fragile_notepad::editor::{
     CaretMotion, DecorationModel, DecorationSettings, EditorAction, EditorBuffer, EditorLayout,
     EditorMetrics, EditorPosition, EditorSelection, FoldModel, FoldRange, HitTarget, IndentGuide,
     ScrollOffset, SelectionSet, SyntaxLineCache, ViewportModel, build_render_plan,
     build_render_plan_for_selection_set_with_cache, build_render_plan_with_cache, hit_test,
-    key_action, line_number_left_x, line_number_text_x, planned_text_draws,
-    planned_text_draws_with_markers,
+    line_number_left_x, line_number_text_x, planned_text_draws, planned_text_draws_with_markers,
 };
 use iced::Rectangle;
 use iced::Theme;

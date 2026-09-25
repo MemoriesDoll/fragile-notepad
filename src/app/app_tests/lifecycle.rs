@@ -632,7 +632,7 @@ fn save_cancel_keeps_app_open() {
         .expect("dirty close save should start a save");
     let task = app.update(Message::FileSaved(
         request,
-        Err(crate::message::FileError::DialogClosed),
+        Err(crate::services::types::FileError::DialogClosed),
     ));
 
     assert_eq!(task.units(), 0);
@@ -645,7 +645,7 @@ fn settings_persist_error_sets_visible_status() {
     let (mut app, _) = App::new();
 
     let _ = app.update(Message::SettingsPersisted(Err(
-        crate::message::SettingsError::Io(std::io::ErrorKind::PermissionDenied),
+        crate::services::types::SettingsError::Io(std::io::ErrorKind::PermissionDenied),
     )));
 
     assert_eq!(

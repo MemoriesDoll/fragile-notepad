@@ -56,8 +56,9 @@ flowchart LR
   document through `remove` or resets analysis through `clear`, rather than
   updating a cache map and task map separately. Only current document/revision/
   language/registry results are admitted.
-- Presentation converts application state into `WorkbenchView`. `ui::view`
-  receives that named contract instead of a positional list of unrelated values.
+- Presentation converts application state into `WorkbenchView`.
+  `ui::workbench::view` receives that named contract instead of a positional
+  list of unrelated values.
 - Use traits for actual contracts shared by implementations, such as `Title`
   and the existing folding/outline interfaces. Concrete state owners and typed
   events are sufficient where there is only one implementation.
@@ -94,17 +95,17 @@ The compiled XML cache is versioned independently of the source schema and is
 rebuilt when its version or source hash changes. See
 [outline XML configuration](assets/syntax/README.md) for supported rule fields.
 
-## Import compatibility
+## Imports
 
-Existing service result/error imports through `message` remain available as
-re-exports. `editor::EditorAction`, `editor::CaretMotion`, and their former
-`editor::widget` paths also remain available. Native file dialog entry points
-retain their `services` and `services::file_system` convenience paths.
-
-New code should import types from their owning modules. The old
-`services::load_file_request` task helper has been replaced by
-`Task::run(services::load_file_chunks(request), Message::from)` in the application.
-Callers of `ui::view` now construct a `WorkbenchView`.
+Types and operations are imported from the module that owns them. Service
+results and file dialog adapters live under `services::types` and
+`services::file_dialogs`; close decisions live under `core`; editor actions
+live under `editor::action`. The application maps service events into
+`message::Message`, so the message module does not re-export service contracts.
+The streaming load task is constructed with
+`Task::run(services::load_file_chunks(request), Message::from)` in the
+application. The workbench renderer receives a `ui::view_model::WorkbenchView`
+through `ui::workbench::view`.
 
 ## Validation
 

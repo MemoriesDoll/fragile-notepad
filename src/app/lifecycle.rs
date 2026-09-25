@@ -2,6 +2,7 @@
 
 use super::App;
 use crate::message::{Message, ShutdownDelivery};
+use crate::services::settings_store;
 use iced::{Task, window};
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -77,7 +78,7 @@ impl App {
         }
         self.lifecycle.begin_shutdown();
         let settings = (!self.settings_persistence.read_failed())
-            .then(|| crate::services::save_settings(self.settings.clone()));
+            .then(|| settings_store::save_settings(self.settings.clone()));
         let session = crate::services::session_store::save_session(self.snapshot_session());
         let preserve_settings = self.settings_persistence.read_failed();
         Task::perform(
@@ -91,7 +92,7 @@ impl App {
                 if preserve_settings {
                     Ok(())
                 } else {
-                    crate::services::flush_settings()
+                    settings_store::flush_settings()
                         .await
                         .map_err(|e| e.summary().to_owned())
                 }
@@ -125,7 +126,7 @@ impl App {
             return iced::exit();
         }
         self.lifecycle.begin_shutdown();
-        let save = crate::services::save_settings(self.settings.clone());
+        let save = settings_store::save_settings(self.settings.clone());
         Task::perform(
             async move { save.await.map_err(|error| error.summary().to_owned()) },
             Message::ShutdownPersisted,

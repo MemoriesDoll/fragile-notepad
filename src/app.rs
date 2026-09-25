@@ -17,7 +17,7 @@ use animation::ChromeAnimation;
 use close_prompt::ClosePrompt;
 use files::CloseGoal;
 
-use windowing::{AdvancedSearchWindow, SettingsWindow};
+use windowing::managed::{AdvancedSearchWindow, SettingsWindow};
 
 mod analysis;
 mod animation;

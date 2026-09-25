@@ -4,7 +4,7 @@ use iced::Task;
 use super::App;
 use crate::core::EditorSettings;
 use crate::message::Message;
-use crate::services;
+use crate::services::settings_store;
 
 #[derive(Clone, Copy)]
 #[repr(u32)]
@@ -497,7 +497,7 @@ impl App {
             return Task::none();
         }
         Task::perform(
-            services::save_settings(self.settings.clone()),
+            settings_store::save_settings(self.settings.clone()),
             Message::SettingsPersisted,
         )
     }
@@ -559,7 +559,8 @@ pub(super) fn apply_to_workspace(
     settings: &EditorSettings,
     workspace: &mut crate::core::Workspace,
 ) {
-    use super::events::{Event, WorkspaceEvent};
+    use super::events::Event;
+    use crate::core::workspace::changes::WorkspaceEvent;
     let apply = |document: &mut crate::core::Document| {
         document.set_decoration_settings(settings.decoration_settings());
         document.set_word_wrap(settings.word_wrap);

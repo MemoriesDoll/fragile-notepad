@@ -3,10 +3,10 @@
 use crate::app::{App, CloseGoal};
 use crate::core::{Document, DocumentId, DocumentLoadState};
 use crate::message::{Message, SaveRequest};
-use crate::services;
 use crate::services::types::{
     FileError, FileSaveResult, SaveFileDialogFilter, SaveFileDialogOptions,
 };
+use crate::services::{file_dialogs, file_system};
 use iced::{Task, highlighter, window};
 use std::sync::Arc;
 
@@ -170,11 +170,7 @@ impl App {
                 let dialog_options = dialog_options.clone();
 
                 window::run(id, move |window| {
-                    services::file_system::save_file_copy_as_with_options(
-                        window,
-                        contents,
-                        dialog_options,
-                    )
+                    file_dialogs::save_file_copy_as_with_options(window, contents, dialog_options)
                 })
             })
             .then(Task::future)
@@ -268,7 +264,7 @@ impl App {
             if let Some(path) = document.path.clone() {
                 let contents = request.snapshot.as_ref().clone();
 
-                return Task::perform(services::save_file(path, contents), move |result| {
+                return Task::perform(file_system::save_file(path, contents), move |result| {
                     Message::FileSaved(request, result)
                 });
             }
@@ -282,7 +278,7 @@ impl App {
                 let dialog_options = dialog_options.clone();
 
                 window::run(id, move |window| {
-                    services::save_file_as_with_options(window, contents, dialog_options)
+                    file_dialogs::save_file_as_with_options(window, contents, dialog_options)
                 })
             })
             .then(Task::future)

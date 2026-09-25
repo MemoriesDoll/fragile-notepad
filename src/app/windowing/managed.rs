@@ -6,7 +6,7 @@ use crate::search_dialog::SearchDialogState;
 use crate::settings_dialog::SettingsDialogState;
 use crate::ui;
 
-use super::Title;
+use super::title::Title;
 
 pub(crate) trait ManagedWindow: Title {
     fn id(&self) -> window::Id;
@@ -29,7 +29,7 @@ impl SettingsWindow {
     }
 
     pub(crate) fn settings() -> window::Settings {
-        super::custom_chrome(window::Settings {
+        super::operations::custom_chrome(window::Settings {
             size: Size::new(820.0, 560.0),
             min_size: Some(Size::new(720.0, 460.0)),
             resizable: true,
@@ -82,7 +82,7 @@ impl AdvancedSearchWindow {
     }
 
     pub(crate) fn settings() -> window::Settings {
-        super::custom_chrome(window::Settings {
+        super::operations::custom_chrome(window::Settings {
             size: Size::new(800.0, 640.0),
             min_size: Some(Size::new(720.0, 560.0)),
             resizable: true,

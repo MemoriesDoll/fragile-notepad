@@ -1,7 +1,8 @@
 use super::App;
 use crate::core::{Document, DocumentId, Workspace};
 use crate::editor::EditorBuffer;
-use crate::editor::render::{SyntaxParseRequest, SyntaxParseResult};
+use crate::editor::render::SyntaxParseResult;
+use crate::editor::render::syntax::SyntaxParseRequest;
 use crate::message::Message;
 use iced::{Task, highlighter};
 use std::sync::Arc;
@@ -477,7 +478,8 @@ impl SyntaxParsing {
         active: DocumentId,
         work: &mut super::events::PendingWork,
     ) {
-        use super::events::{Event, Work, WorkspaceEvent as W};
+        use super::events::{Event, Work};
+        use crate::core::workspace::changes::WorkspaceEvent as W;
         let needed = match event {
             Event::Started | Event::SettingsChanged | Event::SyntaxAvailable => true,
             Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => true,

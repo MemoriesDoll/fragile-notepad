@@ -166,7 +166,8 @@ impl OutlineParsing {
         active: DocumentId,
         work: &mut super::events::PendingWork,
     ) {
-        use super::events::{Event, Work, WorkspaceEvent as W};
+        use super::events::{Event, Work};
+        use crate::core::workspace::changes::WorkspaceEvent as W;
         if let Event::Workspace(W::DocumentClosed(id)) = event {
             self.remove(id);
         }

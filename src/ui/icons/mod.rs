@@ -6,7 +6,3 @@ pub mod colored;
 pub mod hero;
 mod mask;
 pub mod shortcut;
-
-pub use colored::ColoredIcon;
-pub use hero::{HeroIcon, IconTone};
-pub use shortcut::ShortcutIcon;

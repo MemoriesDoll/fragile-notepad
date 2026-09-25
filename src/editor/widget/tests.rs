@@ -1,5 +1,6 @@
 use super::super::render::SyntaxRenderSpan;
 use super::*;
+use crate::editor::action::EditorAction;
 use crate::editor::{DecorationSettings, EditorPosition, EditorSelection, FoldModel};
 use iced::advanced::graphics::core::shell::Waker;
 use std::cell::Cell;

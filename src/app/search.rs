@@ -755,7 +755,8 @@ pub(super) fn observe(
     active: crate::core::DocumentId,
     work: &mut super::events::PendingWork,
 ) {
-    use super::events::{Event, Work, WorkspaceEvent as W};
+    use super::events::{Event, Work};
+    use crate::core::workspace::changes::WorkspaceEvent as W;
     match event {
         Event::SearchRequested => work.request(Work::Search),
         Event::Started | Event::Workspace(W::ActiveDocumentChanged(_) | W::DocumentOpened(_)) => {

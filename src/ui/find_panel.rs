@@ -3,8 +3,9 @@ use iced::{Center, Element, Fill, FillPortion, Length};
 
 use crate::core::FindState;
 use crate::message::Message;
+use crate::ui::controls::centered_button_content;
 use crate::ui::icons::hero::{self, HeroIcon, IconTone};
-use crate::ui::{centered_button_content, controls, motion, styles};
+use crate::ui::{controls, motion, styles};
 
 pub const FIND_INPUT_ID: &str = "fragile-notepad-find-input";
 const BODY_TEXT_SIZE: u32 = 14;

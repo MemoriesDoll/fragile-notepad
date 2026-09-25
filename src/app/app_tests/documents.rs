@@ -46,7 +46,7 @@ fn stale_load_progress_does_not_update_matching_generation_progress() {
     let stale_generation = crate::core::DocumentLoadGeneration::next();
 
     let _ = app.update(Message::FileLoadProgress(
-        crate::message::FileLoadProgress {
+        crate::services::types::FileLoadProgress {
             document_id,
             generation,
             path: PathBuf::from("loading.txt"),
@@ -55,7 +55,7 @@ fn stale_load_progress_does_not_update_matching_generation_progress() {
         },
     ));
     let _ = app.update(Message::FileLoadProgress(
-        crate::message::FileLoadProgress {
+        crate::services::types::FileLoadProgress {
             document_id,
             generation: stale_generation,
             path: PathBuf::from("loading.txt"),
@@ -328,7 +328,7 @@ fn failed_load_sets_status_without_leaving_document_indexing() {
         document_id,
         generation,
         path: PathBuf::from("missing.txt"),
-        error: crate::message::FileError::Io(std::io::ErrorKind::NotFound),
+        error: crate::services::types::FileError::Io(std::io::ErrorKind::NotFound),
     })));
 
     let document = app.workspace.document(document_id).expect("document");
@@ -376,7 +376,7 @@ fn failed_reload_preserves_original_text_history_and_save_snapshot() {
         document_id,
         generation,
         path,
-        error: crate::message::FileError::Io(std::io::ErrorKind::UnexpectedEof),
+        error: crate::services::types::FileError::Io(std::io::ErrorKind::UnexpectedEof),
     })));
     let document = app.workspace.document(document_id).unwrap();
     assert_eq!(document.text(), "original");
@@ -405,7 +405,7 @@ fn failed_initial_load_blocks_save_and_save_copy() {
         document_id,
         generation,
         path,
-        error: crate::message::FileError::Io(std::io::ErrorKind::UnexpectedEof),
+        error: crate::services::types::FileError::Io(std::io::ErrorKind::UnexpectedEof),
     })));
     for message in [Message::SaveFile, Message::SaveFileAs, Message::SaveCopyAs] {
         let _ = app.update(message);
@@ -889,9 +889,9 @@ fn dirty_close_save_encoding_failure_keeps_document_open_and_clears_pending_clos
 fn file_open_error_sets_visible_status() {
     let (mut app, _) = App::new();
 
-    let _ = app.update(Message::FileOpened(Err(crate::message::FileError::Io(
-        std::io::ErrorKind::PermissionDenied,
-    ))));
+    let _ = app.update(Message::FileOpened(Err(
+        crate::services::types::FileError::Io(std::io::ErrorKind::PermissionDenied),
+    )));
 
     assert_eq!(app.file_status.as_deref(), Some("Open failed: I/O error"));
     assert!(!app.files.is_loading());
@@ -986,7 +986,9 @@ fn save_all_stops_after_failed_save() {
         .expect("first save request");
     let _ = app.update(Message::FileSaved(
         first_request,
-        Err(crate::message::FileError::Io(std::io::ErrorKind::Other)),
+        Err(crate::services::types::FileError::Io(
+            std::io::ErrorKind::Other,
+        )),
     ));
 
     assert!(app.files.pending_save().is_none());

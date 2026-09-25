@@ -140,7 +140,6 @@ fn editor_model_buffer_preserves_text_and_exposes_lines_without_endings() {
     let buffer = EditorBuffer::from_text("one\r\ntwo\nthree");
 
     assert_eq!(buffer.text(), "one\r\ntwo\nthree");
-    assert_eq!(buffer.text_for_save(), "one\r\ntwo\nthree");
     assert_eq!(buffer.line_count(), 3);
     assert_eq!(buffer.line(0).as_deref(), Some("one"));
     assert_eq!(buffer.line(1).as_deref(), Some("two"));
