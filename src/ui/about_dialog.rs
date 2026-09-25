@@ -309,12 +309,14 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
     } else {
         "release"
     };
+
     let panic_strategy = if cfg!(panic = "abort") {
         "abort"
     } else {
         "unwind"
     };
-    let startup_probe = if std::env::var_os(crate::startup::STARTUP_PROBE_ENV).is_some() {
+
+    let startup_probe = if crate::startup::startup_probe_enabled() {
         "enabled"
     } else {
         "disabled"
@@ -340,10 +342,7 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
                 ("Operating system", std::env::consts::OS.to_owned()),
                 ("Architecture", std::env::consts::ARCH.to_owned()),
                 ("Platform family", std::env::consts::FAMILY.to_owned()),
-                (
-                    "Startup probe",
-                    format!("{startup_probe} ({})", crate::startup::STARTUP_PROBE_ENV),
-                ),
+                ("Startup probe", format!("{startup_probe}"),),
             ],
         ),
         debug_section(

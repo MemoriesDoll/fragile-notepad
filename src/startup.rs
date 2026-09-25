@@ -74,9 +74,9 @@ pub fn parse_arguments(
     Ok(StartupCommand::Launch(options))
 }
 
-pub const STARTUP_PROBE_ENV: &str = "FRAGILE_NOTEPAD_STARTUP_PROBE";
-pub const STARTUP_PROBE_OUTPUT_PREFIX: &str = "FRAGILE_NOTEPAD_FIRST_VIEW_READY_MS=";
-pub const STARTUP_FRAME_OUTPUT_PREFIX: &str = "FRAGILE_NOTEPAD_FIRST_FRAME_READY_MS=";
+const STARTUP_PROBE_ENV: &str = "FRAGILE_NOTEPAD_STARTUP_PROBE";
+const STARTUP_PROBE_OUTPUT_PREFIX: &str = "FRAGILE_NOTEPAD_FIRST_VIEW_READY_MS=";
+const STARTUP_FRAME_OUTPUT_PREFIX: &str = "FRAGILE_NOTEPAD_FIRST_FRAME_READY_MS=";
 
 static STARTED_AT: OnceLock<Instant> = OnceLock::new();
 static REPORTED_FIRST_VIEW: AtomicBool = AtomicBool::new(false);
