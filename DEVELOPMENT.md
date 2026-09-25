@@ -29,8 +29,8 @@ The prompt and backdrop fade over 140 ms with a small vertical motion; closing
 keeps the editor blocked until the transition ends and focus returns.
 
 Preferences groups rendering and scrolling under General, color mode and syntax
-under Appearance, and editing and document markers under Editor. The appearance
-preview uses the draft color mode, real syntax highlighting, and draft zoom.
+under Appearance, and editing, saving, and document markers under Editor. The
+appearance preview uses the draft color mode, real syntax highlighting, and draft zoom.
 Select a shortcut binding to record a replacement; Cancel recording leaves the
 binding unchanged. Apply, Save, and Cancel retain their existing behavior and
 remain visible while a page scrolls. Switching categories resets the page scroll.
