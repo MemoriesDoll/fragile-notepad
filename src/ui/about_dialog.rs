@@ -351,27 +351,6 @@ fn debug_content(rendering: RenderingDebugInfo, progress: f32) -> Element<'stati
             &[
                 ("Current renderer", rendering.current_renderer),
                 ("Rendering policy", rendering.rendering_policy),
-                ("Iced startup backend", "software".to_owned()),
-                ("Startup renderer", "tiny-skia".to_owned()),
-                ("Antialiasing", "disabled at startup".to_owned()),
-                ("VSync", "disabled at startup".to_owned()),
-            ],
-        ),
-        debug_section(
-            progress,
-            "Bundled Data",
-            &[
-                (
-                    "Outline parsers",
-                    "assets/syntax/outline-parsers.xml".to_owned()
-                ),
-                (
-                    "Folding hints",
-                    "assets/syntax/folding-hints.xml".to_owned()
-                ),
-                ("Toolbar icons", "assets/icons/colored".to_owned()),
-                ("Shortcut icons", "assets/icons/bootstrap".to_owned()),
-                ("Dialog icons", "assets/icons/heroicons".to_owned()),
             ],
         ),
     ]
