@@ -1,6 +1,7 @@
 [package]
 name = "fragile-notepad"
 version = "0.1.0"
+authors = ["Rachel Fragile", "SoundRain"]
 edition = "2024"
 
 [features]
@@ -34,6 +35,10 @@ tiny-skia = "0.11"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
+
+[package.metadata.winresource]
+FileDescription = "Fragile Notepad is a desktop text editor for notes and source files."
+LegalCopyright = "Copyright (c) 2026, Fragile Notepad authors"
 
 [profile.release]
 lto = "thin"

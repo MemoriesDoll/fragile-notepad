@@ -7,8 +7,6 @@ use crate::ui::motion::{fade_button, fade_container};
 use crate::ui::{info_vfx, motion, styles};
 
 const APP_NAME: &str = "Fragile Notepad";
-const AUTHOR: &str = "Rachel Fragile";
-const AUTHOR_EMAIL: &str = "rabbit0w0@outlook.com";
 
 fn fade_scrollable(mut style: scrollable::Style, opacity: f32) -> scrollable::Style {
     style.container = fade_container(style.container, opacity);
@@ -32,6 +30,22 @@ pub struct RenderingDebugInfo {
     pub rendering_policy: String,
     pub title_bar_style: crate::ui::title_bar::ControlStyle,
 }
+
+struct AuthorEntry {
+    name: &'static str,
+    email: &'static str,
+}
+
+const AUTHORS: &[AuthorEntry] = &[
+    AuthorEntry {
+        name: "Rachel Fragile",
+        email: "rabbit0w0@outlook.com",
+    },
+    AuthorEntry {
+        name: "SoundRain",
+        email: "soundstarrain@outlook.com",
+    },
+];
 
 struct LicenseEntry {
     name: &'static str,
@@ -262,27 +276,52 @@ fn about_content(progress: f32) -> Element<'static, Message> {
             muted(text("Quick notes, source code, and everything in between.\nSimple tools for working with local text files.")
                 .size(14).line_height(1.55), progress),
         ].spacing(10),
-        container(row![
-            container(space().width(3).height(56))
-                .style(move |theme: &iced::Theme| fade_container(container::Style {
-                    background: Some(theme.palette().primary.base.color.scale_alpha(0.4).into()),
-                    border: iced::Border::default().rounded(2),
-                    ..container::Style::default()
-                }, progress)),
-            column![
-            muted(text("CREATED BY").size(11), progress),
-            text(AUTHOR).size(16).font(iced::Font {
-                weight: iced::font::Weight::Medium,
-                ..iced::Font::DEFAULT
-            }),
-            muted(text(AUTHOR_EMAIL).size(13), progress),
-        ].spacing(6)].spacing(16).align_y(Center)).padding(20).width(Fill)
-            .style(move |theme| fade_container(styles::info_card(theme), progress)),
+        container(
+            row![
+                container(space()).width(3).height(Fill)
+                    .style(move |theme: &iced::Theme| fade_container(container::Style {
+                        background: Some(theme.palette().primary.base.color.scale_alpha(0.4).into()),
+                        border: iced::Border::default().rounded(2),
+                        ..container::Style::default()
+                    }, progress)),
+                column![
+                    muted(text("CREATED BY").size(11), progress),
+                    column(
+                        AUTHORS
+                                .iter()
+                                .map(|x| author_entry(x.name, x.email, progress))
+                                .collect::<Vec<_>>(),
+                    ).spacing(8).width(Fill),
+                ]
+                .spacing(6),
+            ]
+            .spacing(16)
+            .align_y(Center)
+            .height(Length::Shrink),
+        )
+        .padding(20)
+        .width(Fill)
+        .style(move |theme| fade_container(styles::info_card(theme), progress)),
     ].spacing(22).padding([2, 0]).width(Fill)).smooth_scroll(true)
         .style(move |theme, status| fade_scrollable(scrollable::default(theme, status), progress))
         .height(Fill)
         .width(Fill)
         .into()
+}
+
+fn author_entry(
+    name: &'static str,
+    email: &'static str,
+    progress: f32,
+) -> Element<'static, Message> {
+    container(column![
+        text(name).size(16).font(iced::Font {
+            weight: iced::font::Weight::Medium,
+            ..iced::Font::DEFAULT
+        }),
+        muted(text(email).size(13), progress),
+    ])
+    .into()
 }
 
 fn muted(
