@@ -275,11 +275,17 @@ mod tests {
             self.interaction
         }
 
-        fn overlay<'a>(&'a mut self, _: Layout<'a>, _: &()) -> Option<overlay::Element<'a, (), (), ()>> {
-            self.child.map(|interaction| overlay::Element::new(Box::new(Self {
-                interaction,
-                child: None,
-            })))
+        fn overlay<'a>(
+            &'a mut self,
+            _: Layout<'a>,
+            _: &(),
+        ) -> Option<overlay::Element<'a, (), (), ()>> {
+            self.child.map(|interaction| {
+                overlay::Element::new(Box::new(Self {
+                    interaction,
+                    child: None,
+                }))
+            })
         }
     }
 

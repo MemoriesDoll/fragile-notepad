@@ -81,9 +81,7 @@ pub fn application<State, Message, Theme, Renderer>(
     boot: impl BootFn<State, Message>,
     update: impl UpdateFn<State, Message>,
     view: impl for<'a> ViewFn<'a, State, Message, Theme, Renderer>,
-) -> Application<
-    impl Program<State = State, Message = Message, Theme = Theme, Renderer = Renderer>,
->
+) -> Application<impl Program<State = State, Message = Message, Theme = Theme, Renderer = Renderer>>
 where
     State: 'static,
     Message: Send + 'static,

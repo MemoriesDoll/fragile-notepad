@@ -774,9 +774,9 @@ mod x_user_defined;
 
 mod ascii;
 mod data;
+mod handles;
 #[cfg(feature = "alloc")]
 pub mod oem;
-mod handles;
 mod variant;
 
 pub mod mem;
