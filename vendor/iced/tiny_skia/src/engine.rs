@@ -125,32 +125,40 @@ impl Engine {
                     visible_bounds.height,
                 )
             {
-                if trace::enabled() {
-                    trace::event(
-                        "tiny_skia_engine_quad_fast",
-                        0,
-                        format_args!(
-                            "physical={} visible={} clip={} mask=false",
-                            format_rect(physical_bounds),
-                            format_rect(visible_bounds),
-                            format_rect(clip_bounds)
-                        ),
+                // tiny-skia 0.11's anti-aliased rectangle rasterizer can
+                // round a fractional one-pixel edge into a zero-width inner
+                // span and trip a debug assertion. Keep the fast path for
+                // snapped quads and visible rectangles at least two pixels
+                // wide and high; let the path rasterizer handle thinner
+                // anti-aliased geometry.
+                if quad.snap || (visible_bounds.width >= 2.0 && visible_bounds.height >= 2.0) {
+                    if trace::enabled() {
+                        trace::event(
+                            "tiny_skia_engine_quad_fast",
+                            0,
+                            format_args!(
+                                "physical={} visible={} clip={} mask=false",
+                                format_rect(physical_bounds),
+                                format_rect(visible_bounds),
+                                format_rect(clip_bounds)
+                            ),
+                        );
+                    }
+
+                    pixels.fill_rect(
+                        rect,
+                        &tiny_skia::Paint {
+                            shader: tiny_skia::Shader::SolidColor(into_color(*color)),
+                            anti_alias: !quad.snap,
+                            ..tiny_skia::Paint::default()
+                        },
+                        tiny_skia::Transform::identity(),
+                        None,
                     );
+
+                    return;
                 }
-
-                pixels.fill_rect(
-                    rect,
-                    &tiny_skia::Paint {
-                        shader: tiny_skia::Shader::SolidColor(into_color(*color)),
-                        anti_alias: !quad.snap,
-                        ..tiny_skia::Paint::default()
-                    },
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
             }
-
-            return;
         }
 
         let transform = into_transform(transformation);
@@ -1032,6 +1040,36 @@ fn format_rect(rect: Rectangle) -> String {
 #[cfg(test)]
 mod clip_mask_tests {
     use super::*;
+
+    #[test]
+    fn fractional_hairline_quad_avoids_tiny_skia_aa_assertion() {
+        let mut pixmap = tiny_skia::Pixmap::new(16, 16).unwrap();
+        let mut pixels = pixmap.as_mut();
+        let mut mask = tiny_skia::Mask::new(16, 16).unwrap();
+        let mut clip_mask = ClipMask::new(&mut mask);
+        let mut engine = Engine::new();
+        let quad = Quad {
+            bounds: Rectangle {
+                x: 0.1,
+                y: 0.0,
+                width: 1.0,
+                height: 8.0,
+            },
+            snap: false,
+            ..Quad::default()
+        };
+
+        engine.draw_quad(
+            &quad,
+            &Background::Color(Color::BLACK),
+            Transformation::IDENTITY,
+            &mut pixels,
+            &mut clip_mask,
+            Rectangle::with_size(Size::new(16.0, 16.0)),
+        );
+
+        assert!(pixmap.data().chunks_exact(4).any(|pixel| pixel[3] != 0));
+    }
 
     #[test]
     fn reused_mask_matches_full_clear_for_fractional_and_clipped_rectangles() {
