@@ -41,7 +41,52 @@ pub(super) fn matching_end_keyword(
             && !member
             && (!includes(&body.conditional_openers, token_text) || statement_start)
             && (body.loop_body_keyword.as_deref() != Some(token_text) || !loop_header);
-        if opens {
+        let expression_definition = opens
+            && source.expression_rules.iter().any(|rule| {
+                if rule.keyword != token_text {
+                    return false;
+                }
+                let end = line_end_offset(text, token.end);
+                let name_end = if let Some(pattern) = &rule.name_pattern {
+                    let Some(captures) = pattern.captures(&text[token.end..end]) else {
+                        return false;
+                    };
+                    let Some(name) = pattern
+                        .capture_names()
+                        .flatten()
+                        .filter(|name| *name == "name" || name.starts_with("name_"))
+                        .find_map(|name| captures.name(name))
+                    else {
+                        return false;
+                    };
+                    token.end + name.end()
+                } else {
+                    let name_start = skip_non_code_whitespace(text, source, token.end);
+                    let Some(name) = parse_identifier_range(text, source, name_start) else {
+                        return false;
+                    };
+                    name.end
+                };
+                let mut cursor = name_end;
+                while let Some(candidate) = source
+                    .next_token(cursor)
+                    .filter(|candidate| candidate.start < end)
+                {
+                    if source.is_delimiter_open(text, candidate.start) {
+                        let Some(close) = source.matching_delimiter(candidate.start) else {
+                            return false;
+                        };
+                        let Some(close_token) = source.next_token(close) else {
+                            return false;
+                        };
+                        cursor = close_token.end;
+                        continue;
+                    }
+                    return candidate.text(text) == rule.marker;
+                }
+                false
+            });
+        if opens && !expression_definition {
             depth += 1;
             loop_header = includes(&body.loop_openers, token_text);
         } else if token_text == end_keyword && !member {
@@ -147,6 +192,48 @@ pub(super) fn matching_code_angle_before(
         }
     }
 
+    None
+}
+
+/// Match a configured generic delimiter without treating operators inside paired
+/// parameter, array, or const-expression delimiters as generic delimiters.
+pub(super) fn matching_code_angle_after(
+    text: &str,
+    source: &OutlineSource,
+    open: usize,
+) -> Option<usize> {
+    let first = text.get(open..)?.chars().next()?;
+    if source.symbol(first) != SyntaxSymbol::GenericsOpen || !source.is_code(open) {
+        return None;
+    }
+    let mut cursor = open;
+    let mut depth = 0usize;
+    while cursor < text.len() {
+        let ch = text[cursor..].chars().next()?;
+        if !source.is_code(cursor) {
+            cursor += ch.len_utf8();
+            continue;
+        }
+        if source.is_delimiter_open(text, cursor) {
+            let close = source.matching_delimiter(cursor)?;
+            if close > cursor {
+                cursor = source.next_token(close)?.end;
+                continue;
+            }
+        }
+        match source.symbol(ch) {
+            SyntaxSymbol::GenericsOpen => depth += 1,
+            SyntaxSymbol::GenericsClose => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(cursor);
+                }
+            }
+            SyntaxSymbol::StatementEnd | SyntaxSymbol::BodyClose => return None,
+            _ => {}
+        }
+        cursor += ch.len_utf8();
+    }
     None
 }
 

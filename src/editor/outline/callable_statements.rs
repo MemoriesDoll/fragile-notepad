@@ -1,6 +1,8 @@
+use super::OutlineRulePlan;
 use super::fsm::ByteRange;
-use super::scan::next_code_token;
+use super::scan::{next_code_token, previous_code_token};
 use super::source::{OutlineSource, SyntaxSymbol};
+use regex::Regex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CallableStatement {
@@ -19,17 +21,17 @@ pub(super) enum CallableStatementTerminator {
 pub(super) fn callable_statements(
     text: &str,
     source: &OutlineSource,
-    operator_tokens: &[String],
-    control_headers: &[String],
+    rule: &OutlineRulePlan,
+    brace_prefix: Option<&Regex>,
 ) -> Vec<CallableStatement> {
-    CallableStatementScanner::new(text, source, operator_tokens, control_headers).scan()
+    CallableStatementScanner::new(text, source, rule, brace_prefix).scan()
 }
 
 struct CallableStatementScanner<'a> {
     text: &'a str,
     source: &'a OutlineSource<'a>,
-    operator_tokens: &'a [String],
-    control_headers: &'a [String],
+    rule: &'a OutlineRulePlan,
+    brace_prefix: Option<&'a Regex>,
     statements: Vec<CallableStatement>,
     start: usize,
     cursor: usize,
@@ -42,14 +44,14 @@ impl<'a> CallableStatementScanner<'a> {
     fn new(
         text: &'a str,
         source: &'a OutlineSource<'a>,
-        operator_tokens: &'a [String],
-        control_headers: &'a [String],
+        rule: &'a OutlineRulePlan,
+        brace_prefix: Option<&'a Regex>,
     ) -> Self {
         Self {
             text,
             source,
-            operator_tokens,
-            control_headers,
+            rule,
+            brace_prefix,
             statements: Vec::new(),
             start: 0,
             cursor: 0,
@@ -100,6 +102,19 @@ impl<'a> CallableStatementScanner<'a> {
             _ if self.source.is_body_open(self.text, self.cursor)
                 && self.at_statement_boundary() =>
             {
+                if signature_brace_is_group(
+                    self.text,
+                    self.source,
+                    self.rule,
+                    self.brace_prefix,
+                    self.start,
+                    self.cursor,
+                ) {
+                    if let Some(close) = self.source.matching_delimiter(self.cursor) {
+                        self.cursor = self.source.next_token(close).unwrap().end - len;
+                        return;
+                    }
+                }
                 self.finish_statement(self.cursor + len, CallableStatementTerminator::Body);
             }
             _ if self.source.is_body_close(self.text, self.cursor)
@@ -124,7 +139,7 @@ impl<'a> CallableStatementScanner<'a> {
 
     fn is_assignment_marker(&self) -> bool {
         self.at_statement_boundary()
-            && !code_at_starts_with_any(self.text, self.cursor, self.operator_tokens)
+            && !code_at_starts_with_any(self.text, self.cursor, &self.rule.callable.operator_tokens)
     }
 
     fn finish_statement(&mut self, end: usize, terminator: CallableStatementTerminator) {
@@ -138,7 +153,7 @@ impl<'a> CallableStatementScanner<'a> {
                         self.text,
                         self.source,
                         start,
-                        self.control_headers,
+                        &self.rule.callable.control_headers,
                     ),
             });
         }
@@ -155,12 +170,65 @@ impl<'a> CallableStatementScanner<'a> {
     }
 }
 
+/// A brace can delimit a type or initializer inside a signature. Keep that
+/// group in the current statement so both declaration discovery and its range
+/// resolve to the subsequent executable body.
+pub(super) fn signature_brace_is_group(
+    text: &str,
+    source: &OutlineSource,
+    rule: &OutlineRulePlan,
+    brace_prefix: Option<&Regex>,
+    signature_start: usize,
+    open: usize,
+) -> bool {
+    if let Some(pattern) = brace_prefix {
+        let prefix = &text[signature_start..open];
+        if pattern.is_match(prefix) {
+            return true;
+        }
+        if prefix
+            .char_indices()
+            .any(|(offset, _)| !source.is_code(signature_start + offset))
+        {
+            let code_prefix: String = prefix
+                .char_indices()
+                .map(|(offset, ch)| {
+                    if source.is_code(signature_start + offset) {
+                        ch
+                    } else {
+                        ' '
+                    }
+                })
+                .collect();
+            if pattern.is_match(&code_prefix) {
+                return true;
+            }
+        }
+    }
+    if !rule.signature_type_braces {
+        return false;
+    }
+    let Some(previous) = previous_code_token(text, source, open) else {
+        return false;
+    };
+    let last = previous.text(text).chars().next_back();
+    if last.is_some_and(|ch| source.has_token_role(ch, "type-prefix")) {
+        return true;
+    }
+    // A generic type can contain an object type without a colon immediately
+    // before the brace, e.g. Promise<{ value: number }>.
+    if source.symbol_text(previous.text(text)) == SyntaxSymbol::GenericsOpen {
+        return true;
+    }
+    false
+}
+
 fn statement_start(text: &str, source: &OutlineSource, mut start: usize) -> usize {
     while start < text.len() {
         let Some(ch) = text[start..].chars().next() else {
             break;
         };
-        if source.is_code(start) && !ch.is_whitespace() {
+        if source.is_literal_start(start) || (source.is_code(start) && !ch.is_whitespace()) {
             break;
         }
         start += ch.len_utf8();

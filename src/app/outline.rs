@@ -8,9 +8,9 @@ use crate::message::Message;
 
 use iced::Task;
 
-use crate::core::{Document, DocumentId};
+use crate::core::{Document, DocumentId, DocumentLoadState};
 use crate::editor::{
-    FunctionEntry, OutlineParseResult, OutlineSnapshotMetadata, OutlineState,
+    FunctionEntry, OutlineParseResult, OutlineSnapshotMetadata, OutlineState, OutlineStatus,
     outline_registry_hash, outline_request_for_document, parse_outline_request,
 };
 
@@ -58,17 +58,24 @@ impl OutlineParsing {
 
         let metadata = OutlineSnapshotMetadata::from_document(document, self.registry_hash);
         if !document.can_run_full_document_analysis() {
-            self.states
-                .entry(document_id)
-                .and_modify(|state| {
-                    if !state.matches_metadata(&metadata) {
-                        *state = OutlineState::pending_metadata(metadata.clone());
-                    }
-                })
-                .or_insert_with(|| OutlineState::pending_metadata(metadata));
+            if let Some(handle) = self.handles.remove(&document_id) {
+                handle.abort();
+            }
+            let state = if document.has_complete_text_index()
+                || matches!(document.load_state, DocumentLoadState::Failed { .. })
+            {
+                OutlineState::unavailable_metadata(metadata)
+            } else {
+                OutlineState::pending_metadata(metadata)
+            };
+            self.states.insert(document_id, state);
             return Task::none();
         }
-        if self.state_for(document).is_some() {
+        if self.state_for(document).is_some_and(|state| {
+            state.status == OutlineStatus::Ready
+                || (state.status == OutlineStatus::Pending
+                    && self.handles.contains_key(&document_id))
+        }) {
             return Task::none();
         }
 
@@ -109,6 +116,95 @@ impl OutlineParsing {
         if let Some(handle) = self.handles.remove(&document) {
             handle.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::DocumentIndexState;
+    use crate::core::document::MAX_FULL_DOCUMENT_ANALYSIS_BYTES;
+
+    #[test]
+    fn oversized_documents_are_unavailable_without_starting_a_worker() {
+        let document = Document::from_path(
+            DocumentId::new(1),
+            "large.rs",
+            &" ".repeat(MAX_FULL_DOCUMENT_ANALYSIS_BYTES + 1),
+        );
+        let mut parsing = OutlineParsing::new();
+        for _ in 0..2 {
+            assert_eq!(parsing.schedule(&document).units(), 0);
+            assert_eq!(
+                parsing.state_for(&document).unwrap().status,
+                OutlineStatus::Unavailable
+            );
+            assert!(parsing.functions_for(&document).is_none());
+            assert!(parsing.handles.is_empty());
+        }
+    }
+
+    #[test]
+    fn finishing_a_load_resumes_parsing_even_without_a_revision_change() {
+        let mut document = Document::from_path(DocumentId::new(1), "loading.rs", "fn leaf() {}");
+        let generation = crate::core::DocumentLoadGeneration::next();
+        document.load_state = DocumentLoadState::Loading {
+            generation,
+            bytes_read: 0,
+            total_bytes: None,
+        };
+        document.index_state = DocumentIndexState::Pending { generation };
+        let mut parsing = OutlineParsing::new();
+        assert_eq!(parsing.schedule(&document).units(), 0);
+        assert_eq!(
+            parsing.state_for(&document).unwrap().status,
+            OutlineStatus::Pending
+        );
+        assert!(parsing.handles.is_empty());
+
+        document.load_state = DocumentLoadState::Complete;
+        document.index_state = DocumentIndexState::Complete;
+        let task = parsing.schedule(&document);
+        assert_eq!(task.units(), 1);
+        assert!(parsing.handles.contains_key(&document.id));
+        assert_eq!(parsing.schedule(&document).units(), 0);
+        let result = crate::editor::parse_outline_snapshot(outline_request_for_document(
+            &document,
+            parsing.registry_hash,
+        ));
+        parsing.complete(Some(&document), result);
+        assert_eq!(
+            parsing.state_for(&document).unwrap().status,
+            OutlineStatus::Ready
+        );
+        assert_eq!(parsing.functions_for(&document).unwrap()[0].name, "leaf");
+        assert!(parsing.handles.is_empty());
+        assert_eq!(parsing.schedule(&document).units(), 0);
+    }
+
+    #[test]
+    fn blocked_analysis_aborts_existing_workers_and_rejects_their_results() {
+        let mut document = Document::from_path(DocumentId::new(1), "loading.rs", "fn leaf() {}");
+        let mut parsing = OutlineParsing::new();
+        let task = parsing.schedule(&document);
+        assert_eq!(task.units(), 1);
+        let handle = parsing.handles[&document.id].clone();
+        assert!(!handle.is_aborted());
+        let result = crate::editor::parse_outline_snapshot(outline_request_for_document(
+            &document,
+            parsing.registry_hash,
+        ));
+        document.load_state = DocumentLoadState::Failed {
+            generation: crate::core::DocumentLoadGeneration::next(),
+        };
+        assert_eq!(parsing.schedule(&document).units(), 0);
+        assert!(parsing.handles.is_empty());
+        assert!(handle.is_aborted());
+        parsing.complete(Some(&document), result);
+        assert_eq!(
+            parsing.state_for(&document).unwrap().status,
+            OutlineStatus::Unavailable
+        );
     }
 }
 

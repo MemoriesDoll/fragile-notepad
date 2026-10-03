@@ -1050,12 +1050,12 @@ fn editor_model_outline_cascades_nested_rust_modules_impls_and_functions() {
             .map(|node| (node.name.as_str(), node.kind))
             .collect::<Vec<_>>(),
         vec![
-            ("Service", OutlineNodeKind::Impl),
-            ("helper", OutlineNodeKind::Function)
+            ("helper", OutlineNodeKind::Function),
+            ("Service", OutlineNodeKind::Impl)
         ]
     );
     assert_eq!(
-        result.tree.roots[0].children[0]
+        result.tree.roots[0].children[1]
             .children
             .iter()
             .map(|node| (node.name.as_str(), node.kind))
@@ -1065,6 +1065,10 @@ fn editor_model_outline_cascades_nested_rust_modules_impls_and_functions() {
             ("run", OutlineNodeKind::Method)
         ]
     );
+    let local = &result.tree.roots[0].children[1].children[1].children[0];
+    assert_eq!(local.name, "local");
+    assert_eq!(local.kind, OutlineNodeKind::Method);
+    assert_eq!(local.depth, 3);
 }
 
 #[test]

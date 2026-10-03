@@ -35,6 +35,14 @@ pub struct OutlineRulePlan {
     pub body: OutlineBodyKind,
     pub method_containers: Vec<OutlineNodeKind>,
     pub declaration_terminator: Option<String>,
+    pub name_pattern: Option<String>,
+    pub reject_previous: Vec<String>,
+    pub reject_next: Vec<String>,
+    pub require_statement_start: bool,
+    pub signature_type_braces: bool,
+    pub signature_brace_prefix_pattern: Option<String>,
+    pub nextline_body: bool,
+    pub expression_body: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +92,7 @@ pub struct OutlineCallablePlan {
     pub qualified_separators: Vec<String>,
     pub compound_prefixes: Vec<String>,
     pub container_name_previous: Vec<String>,
+    pub compact_constructor_containers: Vec<String>,
     pub assignment_continuations: Vec<String>,
     pub control_headers: Vec<String>,
     pub assignment_arrow: Option<String>,
@@ -92,9 +101,13 @@ pub struct OutlineCallablePlan {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OutlineLexicalPlan {
     pub line_comments: Vec<String>,
+    pub line_skip_patterns: Vec<String>,
     pub block_comments: Vec<OutlineBlockCommentPlan>,
     pub strings: Vec<OutlineStringPlan>,
     pub raw_strings: Vec<super::schema::RawRawString>,
+    pub regex_literals: Vec<super::schema::RawRegexLiteral>,
+    pub heredocs: Vec<super::schema::RawHeredoc>,
+    pub opaque_blocks: Vec<super::schema::RawOpaqueBlock>,
     pub identifier_prefix: Option<String>,
     pub word_character_extra: String,
     pub unicode_word_characters: bool,
@@ -318,6 +331,9 @@ fn compile_language(
                     | "statement-end"
                     | "assignment-reject-before"
                     | "assignment-reject-after"
+                    | "type-prefix"
+                    | "type-suffix"
+                    | "attribute-prefix"
             )
         {
             diagnostics.push(diagnostics::error(format!(
@@ -464,6 +480,34 @@ fn compile_rule(
     diagnostics: &mut Vec<OutlineDiagnostic>,
 ) -> Option<OutlineRulePlan> {
     let rule_label = role.label();
+    if let Some(pattern) = &rule.name_pattern {
+        match regex::Regex::new(pattern) {
+            Ok(pattern)
+                if !pattern.is_match("")
+                    && pattern
+                        .capture_names()
+                        .flatten()
+                        .any(|name| name == "name" || name.starts_with("name_")) => {}
+            Ok(_) => {
+                diagnostics.push(diagnostics::error(format!(
+                    "outline language {language_name} has empty-matching {rule_label} name-pattern or no named name capture"
+                )));
+                return None;
+            }
+            Err(error) => {
+                diagnostics.push(diagnostics::error(format!(
+                    "outline language {language_name} has invalid {rule_label} name-pattern: {error}"
+                )));
+                return None;
+            }
+        }
+    }
+    if let Some(pattern) = &rule.signature_brace_prefix_pattern {
+        if let Err(error) = regex::Regex::new(pattern) {
+            diagnostics.push(diagnostics::error(format!("outline language {language_name} has invalid {rule_label} signature-brace-prefix-pattern: {error}")));
+            return None;
+        }
+    }
     let Some(node_kind) = rule.kind.as_deref().and_then(parse_node_kind) else {
         diagnostics.push(diagnostics::error(format!(
             "outline language {language_name} has {rule_label} with unsupported node kind {:?}",
@@ -557,6 +601,7 @@ fn compile_rule(
             qualified_separators: rule.qualified_separators.clone(),
             compound_prefixes: rule.compound_prefixes.clone(),
             container_name_previous: rule.container_name_previous.clone(),
+            compact_constructor_containers: rule.compact_constructor_containers.clone(),
             assignment_continuations: rule.assignment_continuations.clone(),
             control_headers: rule.control_headers.clone(),
             assignment_arrow: rule.assignment_arrow.clone(),
@@ -574,6 +619,14 @@ fn compile_rule(
         body,
         method_containers,
         declaration_terminator: rule.declaration_terminator.clone(),
+        name_pattern: rule.name_pattern.clone(),
+        reject_previous: rule.keyword_reject_previous.clone(),
+        reject_next: rule.keyword_reject_next.clone(),
+        require_statement_start: rule.require_statement_start,
+        signature_type_braces: rule.signature_type_braces,
+        signature_brace_prefix_pattern: rule.signature_brace_prefix_pattern.clone(),
+        nextline_body: rule.nextline_body,
+        expression_body: rule.expression_body.clone(),
     })
 }
 
@@ -598,15 +651,69 @@ fn validate_lexical(
                 || raw.open.is_empty()
                 || raw.close.is_empty()
                 || raw.repeat.as_deref() == Some("")
+        })
+        || lexical.regex_literals.iter().any(|literal| {
+            literal.open.is_empty()
+                || literal.close.is_empty()
+                || literal.escape.as_deref() == Some("")
+                || literal.character_class_open.as_deref() == Some("")
+                || literal.character_class_close.as_deref() == Some("")
+                || literal.character_class_open.is_some() != literal.character_class_close.is_some()
         });
     if invalid {
         diagnostics.push(diagnostics::error(format!("outline language {language} has an empty lexical delimiter or incomplete raw-string rule")));
+    }
+    for pattern in lexical
+        .regex_literals
+        .iter()
+        .filter_map(|literal| literal.prefix_pattern.as_ref())
+    {
+        if let Err(error) = regex::Regex::new(pattern) {
+            diagnostics.push(diagnostics::error(format!(
+                "outline language {language} has invalid regex-literal prefix-pattern: {error}"
+            )));
+        }
+    }
+    for pattern in &lexical.line_skip_patterns {
+        if pattern.is_empty() {
+            diagnostics.push(diagnostics::error(format!(
+                "outline language {language} has empty line-skip-pattern"
+            )));
+        } else if let Err(error) = regex::Regex::new(pattern) {
+            diagnostics.push(diagnostics::error(format!(
+                "outline language {language} has invalid line-skip-pattern: {error}"
+            )));
+        }
+    }
+    for heredoc in &lexical.heredocs {
+        match regex::Regex::new(&heredoc.prefix_pattern) {
+            Ok(pattern) if !heredoc.prefix_pattern.is_empty() && !pattern.is_match("") && pattern.capture_names().flatten().any(|name| name == "delimiter" || name.starts_with("delimiter_")) => {}
+            Ok(_) => diagnostics.push(diagnostics::error(format!("outline language {language} has heredoc prefix-pattern without a named delimiter capture"))),
+            Err(error) => diagnostics.push(diagnostics::error(format!("outline language {language} has invalid heredoc prefix-pattern: {error}"))),
+        }
+    }
+    for block in &lexical.opaque_blocks {
+        if block.open.is_empty() || block.close.is_empty() || block.open == block.close {
+            diagnostics.push(diagnostics::error(format!(
+                "outline language {language} has empty or ambiguous opaque-block delimiters"
+            )));
+        }
+        match regex::Regex::new(&block.prefix_pattern) {
+            Ok(pattern) if !block.prefix_pattern.is_empty() && !pattern.is_match("") => {}
+            Ok(_) => diagnostics.push(diagnostics::error(format!(
+                "outline language {language} has empty-matching opaque-block prefix-pattern"
+            ))),
+            Err(error) => diagnostics.push(diagnostics::error(format!(
+                "outline language {language} has invalid opaque-block prefix-pattern: {error}"
+            ))),
+        }
     }
 }
 
 fn compile_lexical(lexical: &RawLexical) -> OutlineLexicalPlan {
     OutlineLexicalPlan {
         line_comments: lexical.line_comments.clone(),
+        line_skip_patterns: lexical.line_skip_patterns.clone(),
         block_comments: lexical
             .block_comments
             .iter()
@@ -618,6 +725,9 @@ fn compile_lexical(lexical: &RawLexical) -> OutlineLexicalPlan {
             .collect(),
         strings: lexical.strings.iter().map(compile_string).collect(),
         raw_strings: lexical.raw_strings.clone(),
+        regex_literals: lexical.regex_literals.clone(),
+        heredocs: lexical.heredocs.clone(),
+        opaque_blocks: lexical.opaque_blocks.clone(),
         identifier_prefix: lexical.identifier_prefix.clone(),
         word_character_extra: lexical.word_character_extra.clone().unwrap_or_default(),
         unicode_word_characters: lexical.unicode_word_characters,

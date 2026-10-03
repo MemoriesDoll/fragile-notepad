@@ -30,9 +30,9 @@ pub use navigation::{
 };
 pub use registry::OutlineRegistry;
 pub use schema::{
-    RawBlockComment, RawBody, RawDelimiter, RawFamily, RawLanguage, RawLexical, RawMemberRule,
-    RawOutlineSchema, RawRawString, RawRule, RawString, RawSyntaxToken, RawUseFamily,
-    parse_outline_schema,
+    RawBlockComment, RawBody, RawDelimiter, RawFamily, RawHeredoc, RawLanguage, RawLexical,
+    RawMemberRule, RawOpaqueBlock, RawOutlineSchema, RawRawString, RawRegexLiteral, RawRule,
+    RawString, RawSyntaxToken, RawUseFamily, parse_outline_schema,
 };
 pub use service::{
     OutlineSnapshotMetadata, OutlineState, OutlineStatus, outline_registry_hash,

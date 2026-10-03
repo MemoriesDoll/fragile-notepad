@@ -17,11 +17,13 @@ callable entries used by previous/next-function navigation.
 Overlapping container rules sharing a body prefer the earliest header and the
 longest keyword prefix, so a scoped enum is not also emitted as a class.
 Callable rules can use `require-non-container-previous-kind` to require an
-`identifier`, `qualified-identifier`, `template-type-tail`, or `array-type-tail`
+`identifier`, `qualified-identifier`, `template-type-tail`, `array-type-tail`, or
+`pointer-type-tail`
 before a method name while still admitting constructors. Array and generic
 suffixes use the configured syntax roles; qualified names use
 `qualified-separators`. Java uses these constraints to exclude enum constant
 arguments from the function list.
+Pointer and reference suffixes use repeated `type-suffix` syntax roles.
 
 ## Families and bodies
 
@@ -39,6 +41,10 @@ The roles are `parameters-open`, `parameters-close`, `brackets-open`,
 and `statement-end`. `assignment-reject-before` and `assignment-reject-after`
 may be repeated to exclude compound operators from plain assignments. Parameter
 and bracket pairs also need corresponding `delimiter` elements for matching.
+`type-prefix` identifies punctuation preceding signature type literals;
+`type-suffix` identifies pointer/reference punctuation.
+`attribute-prefix` identifies an attribute marker before a grouped attribute,
+which can precede a declaration at a statement boundary.
 For example:
 
 ```xml
@@ -73,8 +79,11 @@ original text; a range ends immediately after its closing delimiter or keyword.
 ## Lexical rules
 
 `word-characters` supplies extra identifier characters and whether Unicode
-letters/digits are accepted. These settings govern both tokenization and name
-capture. `lexical` may set `identifier-prefix` for an escaped identifier prefix.
+identifiers are accepted. Unicode uses the XID start/continue character classes,
+including combining marks in identifier continuations. These settings govern
+both tokenization and name capture. `lexical` may set `identifier-prefix` for an
+escaped identifier prefix. The prefix and identifier form one token, so a raw
+identifier whose name matches a keyword cannot introduce a declaration.
 
 Line comments, nested block comments, and strings retain their existing XML
 elements. The longest matching string opener wins regardless of XML order.
@@ -101,6 +110,29 @@ delimiter extends to `open` and excludes whitespace and any configured forbidden
 characters. `max-delimiter-length` limits its UTF-8 byte length. Unterminated
 recognized literals remain shielded through EOF.
 
+Additional lexical elements shield literal or directive contents:
+
+- `regex-literal` sets `open`, `close`, optional `escape`, paired
+  `character-class-open`/`character-class-close`, and an optional `prefix-pattern`.
+  The prefix pattern matches the previous significant token; a closing control
+  condition is represented by its keyword followed by `()`. A completed block
+  includes its preceding owner and `{}`, and member tokens retain their member
+  prefix. The bundled
+  JavaScript rule distinguishes expression starts from division operands.
+- `heredoc` supplies a `prefix-pattern` with a named `delimiter` capture, or
+  alternative captures prefixed `delimiter_`. `indented="true"` allows whitespace
+  before the closing delimiter. An optional participating `indent` capture
+  controls that allowance per opener, as in Ruby's `<<-` and `<<~` forms.
+- Lexical `line-skip-pattern` elements have a `value` regex and consume complete
+  directive lines at their first significant position. The C/C++ rule includes
+  escaped newlines, shielding macro bodies without evaluating conditional branches.
+- `opaque-block` supplies a `prefix-pattern` and balanced `open`/`close`
+  delimiters. Its contents are shielded after comments and strings have been
+  masked. Rust configures `macro_rules!` definition templates with brace,
+  parenthesis, and bracket delimiters, so unused generated function templates do
+  not become declarations. Macro invocation bodies remain available to existing
+  item recognition.
+
 ## Declaration rules
 
 Existing keyword, name-capture, method-container, terminator, and callable filters
@@ -110,6 +142,29 @@ A callable rule can set `assignment-arrow` to recognize assigned functions with
 block bodies. The bundled JavaScript/TypeScript rule sets it to `=&gt;`.
 Callable recognition retains its structural signature and expression scanning;
 these rules are not a parser-generator interface for arbitrary grammars.
+
+Keyword rules can specify `name-pattern`, an anchored regex with `name` or
+`name_` captures. Initial generic parameters are skipped with the configured
+generic delimiters before matching it. The bundled rules use this for Rust
+implementation headers, Kotlin receivers/backtick names, and Ruby singleton,
+setter, and operator names. Patterns can read a masked name's original spelling.
+Callable rules can also use `name-pattern` to match a name immediately before its
+parameter group, with ordinary callable names as fallback. The JavaScript rule
+captures quoted names and simple computed names using this form.
+`compact-constructor-containers` lists container keywords admitting constructor
+bodies without parameter groups; Java configures `record`.
+`keyword-reject-previous` and `keyword-reject-next` exclude adjacent tokens;
+values beginning with `@` name a syntax role, for example `@generics-open`.
+`require-statement-start="true"` restricts declaration context, as for Rust
+implementation blocks rather than parameter or return types.
+
+`signature-type-braces="true"` skips type literals in signatures.
+`signature-brace-prefix-pattern` skips a brace group when the preceding
+signature matches the configured regex, as for constructor initializers or
+annotation array defaults. `nextline-body="true"` permits a body to start after
+a newline when the rule otherwise uses a line terminator. `expression-body`
+sets the marker for a declaration whose body ends on its declaration line;
+Ruby configures `=` for endless methods, including inside classes/modules.
 
 Overlapping rules that identify the same declaration are merged before nesting
 is computed. Function-list depth counts enclosing declarations and containers;
@@ -167,6 +222,6 @@ the affected language plan. The compiled registry cache is stored in
 triggers a rebuild. Bundled definitions and cache round-trip tests cover the
 supported rule fields.
 
-Run `cargo test --locked --test outline_parsing --test outline_performance` for
+Run `cargo test --locked --test outline_parsing --test outline_configuration_regressions --test outline_performance` for
 cross-language regressions, custom XML rules, and large-document checks. Existing
 outline coverage also lives in `tests/editor_model.rs` and the outline unit tests.

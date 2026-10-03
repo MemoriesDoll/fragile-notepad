@@ -91,18 +91,51 @@ fn push_plan(xml: &mut String, plan: &OutlinePlan) {
 fn push_rules(xml: &mut String, depth: usize, tag: &str, rules: &[OutlineRulePlan]) {
     push_open(xml, depth, tag, &[]);
     for rule in rules {
-        push_open(
-            xml,
-            depth + 1,
-            "rule",
-            &[
-                ("node-kind", node_kind_to_str(rule.node_kind).to_owned()),
-                ("name", name_capture_to_str(rule.name).to_owned()),
-                ("scan", scan_mode_to_str(rule.scan).to_owned()),
-                ("body", body_kind_to_str(rule.body).to_owned()),
-            ],
-        );
+        let mut attributes = vec![
+            ("node-kind", node_kind_to_str(rule.node_kind).to_owned()),
+            ("name", name_capture_to_str(rule.name).to_owned()),
+            ("scan", scan_mode_to_str(rule.scan).to_owned()),
+            ("body", body_kind_to_str(rule.body).to_owned()),
+            (
+                "require-statement-start",
+                rule.require_statement_start.to_string(),
+            ),
+            (
+                "signature-type-braces",
+                rule.signature_type_braces.to_string(),
+            ),
+            ("nextline-body", rule.nextline_body.to_string()),
+        ];
+        for (name, value) in [
+            ("name-pattern", &rule.name_pattern),
+            ("expression-body", &rule.expression_body),
+            (
+                "signature-brace-prefix-pattern",
+                &rule.signature_brace_prefix_pattern,
+            ),
+        ] {
+            if let Some(value) = value {
+                attributes.push((name, value.clone()));
+            }
+        }
+        push_open(xml, depth + 1, "rule", &attributes);
         push_values(xml, depth + 2, "keyword", "part", "value", &rule.keyword);
+        push_values(
+            xml,
+            depth + 2,
+            "keyword-reject-previous",
+            "value",
+            "text",
+            &rule.reject_previous,
+        );
+        push_values(
+            xml,
+            depth + 2,
+            "keyword-reject-next",
+            "value",
+            "text",
+            &rule.reject_next,
+        );
         push_callable(xml, depth + 2, &rule.callable);
         push_node_kinds(xml, depth + 2, "method-containers", &rule.method_containers);
         if let Some(terminator) = &rule.declaration_terminator {
@@ -227,6 +260,14 @@ fn push_callable(xml: &mut String, depth: usize, callable: &OutlineCallablePlan)
     push_values(
         xml,
         depth + 1,
+        "compact-constructor-containers",
+        "value",
+        "text",
+        &callable.compact_constructor_containers,
+    );
+    push_values(
+        xml,
+        depth + 1,
         "assignment-continuations",
         "value",
         "text",
@@ -268,6 +309,14 @@ fn push_lexical(xml: &mut String, lexical: &OutlineLexicalPlan) {
         "open",
         &lexical.line_comments,
     );
+    push_values(
+        xml,
+        3,
+        "line-skip-patterns",
+        "pattern",
+        "value",
+        &lexical.line_skip_patterns,
+    );
     push_open(xml, 3, "block-comments", &[]);
     for comment in &lexical.block_comments {
         push_empty(
@@ -282,6 +331,52 @@ fn push_lexical(xml: &mut String, lexical: &OutlineLexicalPlan) {
         );
     }
     push_close(xml, 3, "block-comments");
+    push_open(xml, 3, "regex-literals", &[]);
+    for literal in &lexical.regex_literals {
+        let mut attributes = vec![
+            ("open", literal.open.clone()),
+            ("close", literal.close.clone()),
+        ];
+        for (name, value) in [
+            ("escape", &literal.escape),
+            ("character-class-open", &literal.character_class_open),
+            ("character-class-close", &literal.character_class_close),
+            ("prefix-pattern", &literal.prefix_pattern),
+        ] {
+            if let Some(value) = value {
+                attributes.push((name, value.clone()));
+            }
+        }
+        push_empty(xml, 4, "regex-literal", &attributes);
+    }
+    push_close(xml, 3, "regex-literals");
+    push_open(xml, 3, "heredocs", &[]);
+    for heredoc in &lexical.heredocs {
+        push_empty(
+            xml,
+            4,
+            "heredoc",
+            &[
+                ("prefix-pattern", heredoc.prefix_pattern.clone()),
+                ("indented", heredoc.indented.to_string()),
+            ],
+        );
+    }
+    push_close(xml, 3, "heredocs");
+    push_open(xml, 3, "opaque-blocks", &[]);
+    for block in &lexical.opaque_blocks {
+        push_empty(
+            xml,
+            4,
+            "opaque-block",
+            &[
+                ("prefix-pattern", block.prefix_pattern.clone()),
+                ("open", block.open.clone()),
+                ("close", block.close.clone()),
+            ],
+        );
+    }
+    push_close(xml, 3, "opaque-blocks");
     push_open(xml, 3, "strings", &[]);
     for string in &lexical.strings {
         let mut attributes = vec![
@@ -586,6 +681,16 @@ fn parse_cached_rule(node: roxmltree::Node<'_, '_>) -> Option<OutlineRulePlan> {
         body: parse_body_kind(node.attribute("body")?)?,
         method_containers: parse_cached_node_kinds(node, "method-containers")?,
         declaration_terminator: terminator,
+        name_pattern: node.attribute("name-pattern").map(str::to_owned),
+        reject_previous: parse_cached_values(node, "keyword-reject-previous", "value", "text"),
+        reject_next: parse_cached_values(node, "keyword-reject-next", "value", "text"),
+        require_statement_start: parse_bool(node.attribute("require-statement-start"))?,
+        signature_type_braces: parse_bool(node.attribute("signature-type-braces"))?,
+        signature_brace_prefix_pattern: node
+            .attribute("signature-brace-prefix-pattern")
+            .map(str::to_owned),
+        nextline_body: parse_bool(node.attribute("nextline-body"))?,
+        expression_body: node.attribute("expression-body").map(str::to_owned),
     })
 }
 
@@ -619,6 +724,12 @@ fn parse_cached_callable(node: roxmltree::Node<'_, '_>) -> Option<OutlineCallabl
         container_name_previous: parse_cached_values(
             node,
             "container-name-previous",
+            "value",
+            "text",
+        ),
+        compact_constructor_containers: parse_cached_values(
+            node,
+            "compact-constructor-containers",
             "value",
             "text",
         ),
@@ -667,6 +778,7 @@ fn parse_cached_lexical(node: roxmltree::Node<'_, '_>) -> Option<OutlineLexicalP
 
     Some(OutlineLexicalPlan {
         line_comments: parse_cached_values(node, "line-comments", "comment", "open"),
+        line_skip_patterns: parse_cached_values(node, "line-skip-patterns", "pattern", "value"),
         block_comments,
         strings,
         identifier_prefix: node
@@ -679,6 +791,27 @@ fn parse_cached_lexical(node: roxmltree::Node<'_, '_>) -> Option<OutlineLexicalP
             .children()
             .filter(|child| child.has_tag_name("raw-string"))
             .map(crate::editor::outline::schema::parse_raw_string)
+            .collect(),
+        regex_literals: node
+            .children()
+            .find(|child| child.has_tag_name("regex-literals"))?
+            .children()
+            .filter(|child| child.has_tag_name("regex-literal"))
+            .map(crate::editor::outline::schema::parse_regex_literal)
+            .collect(),
+        heredocs: node
+            .children()
+            .find(|child| child.has_tag_name("heredocs"))?
+            .children()
+            .filter(|child| child.has_tag_name("heredoc"))
+            .map(crate::editor::outline::schema::parse_heredoc)
+            .collect(),
+        opaque_blocks: node
+            .children()
+            .find(|child| child.has_tag_name("opaque-blocks"))?
+            .children()
+            .filter(|child| child.has_tag_name("opaque-block"))
+            .map(crate::editor::outline::schema::parse_opaque_block)
             .collect(),
         word_character_extra: node.attribute("word-character-extra")?.to_owned(),
         unicode_word_characters: parse_bool(node.attribute("unicode-word-characters"))?,

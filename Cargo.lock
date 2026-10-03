@@ -986,6 +986,7 @@ dependencies = [
  "serde_json",
  "tiny-skia",
  "tokio",
+ "unicode-ident",
  "unicode-segmentation",
  "unicode-width",
  "wgpu",

@@ -67,12 +67,39 @@ pub struct RawUseFamily {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RawLexical {
     pub line_comments: Vec<String>,
+    pub line_skip_patterns: Vec<String>,
     pub block_comments: Vec<RawBlockComment>,
     pub strings: Vec<RawString>,
     pub raw_strings: Vec<RawRawString>,
+    pub regex_literals: Vec<RawRegexLiteral>,
+    pub heredocs: Vec<RawHeredoc>,
+    pub opaque_blocks: Vec<RawOpaqueBlock>,
     pub identifier_prefix: Option<String>,
     pub word_character_extra: Option<String>,
     pub unicode_word_characters: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawRegexLiteral {
+    pub open: String,
+    pub close: String,
+    pub escape: Option<String>,
+    pub character_class_open: Option<String>,
+    pub character_class_close: Option<String>,
+    pub prefix_pattern: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawHeredoc {
+    pub prefix_pattern: String,
+    pub indented: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RawOpaqueBlock {
+    pub prefix_pattern: String,
+    pub open: String,
+    pub close: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,11 +137,20 @@ pub struct RawRule {
     pub qualified_separators: Vec<String>,
     pub compound_prefixes: Vec<String>,
     pub container_name_previous: Vec<String>,
+    pub compact_constructor_containers: Vec<String>,
     pub assignment_continuations: Vec<String>,
     pub control_headers: Vec<String>,
     pub assignment_arrow: Option<String>,
     pub method_containers: Vec<String>,
     pub declaration_terminator: Option<String>,
+    pub name_pattern: Option<String>,
+    pub keyword_reject_previous: Vec<String>,
+    pub keyword_reject_next: Vec<String>,
+    pub require_statement_start: bool,
+    pub signature_type_braces: bool,
+    pub signature_brace_prefix_pattern: Option<String>,
+    pub nextline_body: bool,
+    pub expression_body: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -305,6 +341,12 @@ fn parse_lexical(element: roxmltree::Node<'_, '_>) -> RawLexical {
         .find(|node| node.has_tag_name("word-characters"));
 
     RawLexical {
+        line_skip_patterns: element
+            .children()
+            .filter(|node| node.has_tag_name("line-skip-pattern"))
+            .filter_map(|node| node.attribute("value"))
+            .map(str::to_owned)
+            .collect(),
         line_comments: element
             .children()
             .filter(|node| node.has_tag_name("line-comment"))
@@ -327,11 +369,54 @@ fn parse_lexical(element: roxmltree::Node<'_, '_>) -> RawLexical {
             .filter(|node| node.has_tag_name("raw-string"))
             .map(parse_raw_string)
             .collect(),
+        regex_literals: element
+            .children()
+            .filter(|node| node.has_tag_name("regex-literal"))
+            .map(parse_regex_literal)
+            .collect(),
+        heredocs: element
+            .children()
+            .filter(|node| node.has_tag_name("heredoc"))
+            .map(parse_heredoc)
+            .collect(),
+        opaque_blocks: element
+            .children()
+            .filter(|node| node.has_tag_name("opaque-block"))
+            .map(parse_opaque_block)
+            .collect(),
         word_character_extra: word_characters
             .and_then(|node| node.attribute("extra"))
             .map(str::to_owned),
         unicode_word_characters: word_characters
             .is_some_and(|node| node.attribute("unicode") == Some("true")),
+    }
+}
+
+pub(super) fn parse_regex_literal(element: roxmltree::Node<'_, '_>) -> RawRegexLiteral {
+    RawRegexLiteral {
+        open: element.attribute("open").unwrap_or("").to_owned(),
+        close: element.attribute("close").unwrap_or("").to_owned(),
+        escape: element.attribute("escape").map(str::to_owned),
+        character_class_open: element.attribute("character-class-open").map(str::to_owned),
+        character_class_close: element
+            .attribute("character-class-close")
+            .map(str::to_owned),
+        prefix_pattern: element.attribute("prefix-pattern").map(str::to_owned),
+    }
+}
+
+pub(super) fn parse_heredoc(element: roxmltree::Node<'_, '_>) -> RawHeredoc {
+    RawHeredoc {
+        prefix_pattern: element.attribute("prefix-pattern").unwrap_or("").to_owned(),
+        indented: element.attribute("indented") == Some("true"),
+    }
+}
+
+pub(super) fn parse_opaque_block(element: roxmltree::Node<'_, '_>) -> RawOpaqueBlock {
+    RawOpaqueBlock {
+        prefix_pattern: element.attribute("prefix-pattern").unwrap_or("").to_owned(),
+        open: element.attribute("open").unwrap_or("").to_owned(),
+        close: element.attribute("close").unwrap_or("").to_owned(),
     }
 }
 
@@ -394,6 +479,9 @@ fn parse_rule(element: roxmltree::Node<'_, '_>) -> RawRule {
         qualified_separators: parse_csv_attribute(element.attribute("qualified-separators")),
         compound_prefixes: parse_csv_attribute(element.attribute("compound-prefixes")),
         container_name_previous: parse_csv_attribute(element.attribute("container-name-previous")),
+        compact_constructor_containers: parse_csv_attribute(
+            element.attribute("compact-constructor-containers"),
+        ),
         assignment_continuations: parse_csv_attribute(
             element.attribute("assignment-continuations"),
         ),
@@ -406,6 +494,16 @@ fn parse_rule(element: roxmltree::Node<'_, '_>) -> RawRule {
         declaration_terminator: element
             .attribute("declaration-terminator")
             .map(str::to_owned),
+        name_pattern: element.attribute("name-pattern").map(str::to_owned),
+        keyword_reject_previous: parse_csv_attribute(element.attribute("keyword-reject-previous")),
+        keyword_reject_next: parse_csv_attribute(element.attribute("keyword-reject-next")),
+        require_statement_start: element.attribute("require-statement-start") == Some("true"),
+        signature_type_braces: element.attribute("signature-type-braces") == Some("true"),
+        signature_brace_prefix_pattern: element
+            .attribute("signature-brace-prefix-pattern")
+            .map(str::to_owned),
+        nextline_body: element.attribute("nextline-body") == Some("true"),
+        expression_body: element.attribute("expression-body").map(str::to_owned),
     }
 }
 

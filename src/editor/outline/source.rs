@@ -55,6 +55,13 @@ pub(super) struct OutlineSource<'a> {
     // Token indices, so memory scales with tokens, not source bytes.
     pairs: Vec<Option<usize>>,
     delimiters: Vec<super::schema::RawDelimiter>,
+    pub expression_rules: Vec<OutlineExpressionRule<'a>>,
+}
+
+pub(super) struct OutlineExpressionRule<'a> {
+    pub keyword: &'a str,
+    pub marker: &'a str,
+    pub name_pattern: Option<regex::Regex>,
 }
 
 impl<'a> OutlineSource<'a> {
@@ -63,7 +70,7 @@ impl<'a> OutlineSource<'a> {
         let is_word = |ch: char| {
             plan.lexical.word_character_extra.contains(ch)
                 || if plan.lexical.unicode_word_characters {
-                    ch.is_alphanumeric()
+                    unicode_ident::is_xid_continue(ch)
                 } else {
                     ch.is_ascii_alphanumeric()
                 }
@@ -96,7 +103,35 @@ impl<'a> OutlineSource<'a> {
                         && mask.is_code_range(start, start + value.len())
                 })
                 .max_by_key(|value| value.len());
-            if let Some(delimiter) = delimiter {
+            let identifier_prefix = plan.lexical.identifier_prefix.as_deref().filter(|prefix| {
+                !prefix.is_empty()
+                    && text[start..].starts_with(prefix)
+                    && mask.is_code_range(start, start + prefix.len())
+                    && text[start + prefix.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| {
+                            plan.lexical.word_character_extra.contains(ch)
+                                || if plan.lexical.unicode_word_characters {
+                                    unicode_ident::is_xid_start(ch)
+                                } else {
+                                    ch.is_ascii_alphabetic()
+                                }
+                        })
+            });
+            if let Some(prefix) = identifier_prefix {
+                end = start + prefix.len();
+                while chars.peek().is_some_and(|(offset, _)| *offset < end) {
+                    chars.next();
+                }
+                while let Some(&(offset, ch)) = chars.peek() {
+                    if !mask.is_code(offset) || !is_word(ch) {
+                        break;
+                    }
+                    end = offset + ch.len_utf8();
+                    chars.next();
+                }
+            } else if let Some(delimiter) = delimiter {
                 end = start + delimiter.len();
                 while chars.peek().is_some_and(|(offset, _)| *offset < end) {
                     chars.next();
@@ -157,6 +192,20 @@ impl<'a> OutlineSource<'a> {
             tokens,
             pairs,
             delimiters,
+            expression_rules: plan
+                .declarations
+                .iter()
+                .filter_map(|rule| {
+                    Some(OutlineExpressionRule {
+                        keyword: rule.keyword.last()?.as_str(),
+                        marker: rule.expression_body.as_deref()?,
+                        name_pattern: rule
+                            .name_pattern
+                            .as_ref()
+                            .and_then(|pattern| regex::Regex::new(pattern).ok()),
+                    })
+                })
+                .collect(),
         }
     }
 
@@ -196,14 +245,19 @@ impl<'a> OutlineSource<'a> {
     pub(super) fn is_word_char(&self, ch: char) -> bool {
         self.plan.lexical.word_character_extra.contains(ch)
             || if self.plan.lexical.unicode_word_characters {
-                ch.is_alphanumeric()
+                unicode_ident::is_xid_continue(ch)
             } else {
                 ch.is_ascii_alphanumeric()
             }
     }
 
     pub(super) fn is_identifier_start(&self, ch: char) -> bool {
-        self.is_word_char(ch) && !ch.is_numeric()
+        self.plan.lexical.word_character_extra.contains(ch)
+            || if self.plan.lexical.unicode_word_characters {
+                unicode_ident::is_xid_start(ch)
+            } else {
+                ch.is_ascii_alphabetic()
+            }
     }
 
     pub(super) fn is_body_open(&self, text: &str, offset: usize) -> bool {

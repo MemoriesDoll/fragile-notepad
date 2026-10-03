@@ -69,6 +69,7 @@ impl OutlineSnapshotMetadata {
 pub enum OutlineStatus {
     Pending,
     Ready,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +96,16 @@ impl OutlineState {
         Self {
             metadata,
             status: OutlineStatus::Pending,
+            tree: OutlineTree::default(),
+            functions: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    pub fn unavailable_metadata(metadata: OutlineSnapshotMetadata) -> Self {
+        Self {
+            metadata,
+            status: OutlineStatus::Unavailable,
             tree: OutlineTree::default(),
             functions: Vec::new(),
             diagnostics: Vec::new(),

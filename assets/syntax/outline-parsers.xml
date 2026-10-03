@@ -7,6 +7,12 @@
     <syntax-token role="brackets-close" value="]" />
     <syntax-token role="generics-open" value="&lt;" />
     <syntax-token role="generics-close" value="&gt;" />
+    <syntax-token role="type-prefix" value=":" />
+    <syntax-token role="type-prefix" value="|" />
+    <syntax-token role="type-prefix" value="&amp;" />
+    <syntax-token role="type-suffix" value="*" />
+    <syntax-token role="type-suffix" value="&amp;" />
+    <syntax-token role="attribute-prefix" value="#" />
     <syntax-token role="assignment" value="=" />
     <syntax-token role="separator" value="," />
     <syntax-token role="statement-end" value=";" />
@@ -40,7 +46,14 @@
   </family>
 
   <family id="end-keyword">
+    <syntax-token role="parameters-open" value="(" />
+    <syntax-token role="parameters-close" value=")" />
+    <syntax-token role="brackets-open" value="[" />
+    <syntax-token role="brackets-close" value="]" />
+    <syntax-token role="assignment" value="=" />
     <syntax-token role="statement-end" value=";" />
+    <delimiter open="(" close=")" />
+    <delimiter open="[" close="]" />
     <adapter name="ruby" />
     <adapter name="generic-end-keyword" />
     <body kind="end-keyword" end-keyword="end" block-openers="def,class,module,if,unless,case,begin,while,until,for,do" conditional-openers="if,unless,while,until" loop-openers="while,until,for" loop-body-keyword="do" statement-boundaries=";,=,(,[,then,else,do" member-prefixes=".,:" />
@@ -56,11 +69,17 @@
       <string open="&quot;" close="&quot;" escape="\" />
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" single-quote-literals="true" />
       <raw-string prefixes="r,br,cr" repeat="#" open="&quot;" close="&quot;" />
+      <opaque-block prefix-pattern="\bmacro_rules\s*!\s+(?:r#)?[\p{L}_][\p{L}\p{N}\p{M}_]*\s*" open="{" close="}" />
+      <opaque-block prefix-pattern="\bmacro_rules\s*!\s+(?:r#)?[\p{L}_][\p{L}\p{N}\p{M}_]*\s*" open="(" close=")" />
+      <opaque-block prefix-pattern="\bmacro_rules\s*!\s+(?:r#)?[\p{L}_][\p{L}\p{N}\p{M}_]*\s*" open="[" close="]" />
     </lexical>
-    <container kind="module" keyword="mod" name="after-keyword" body="brace" />
+    <container kind="module" keyword="mod" name="after-keyword" body="brace" declaration-terminator=";" />
+    <container kind="class" keyword="struct" name="after-keyword" body="brace" declaration-terminator=";" />
+    <container kind="class" keyword="union" name="after-keyword" body="brace" declaration-terminator=";" />
     <container kind="enum" keyword="enum" name="after-keyword" body="brace" />
     <container kind="trait" keyword="trait" name="after-keyword" body="brace" />
-    <container kind="impl" keyword="impl" name="after-keyword" body="brace" />
+    <container kind="impl" keyword="impl" name="after-keyword" body="brace" require-statement-start="true"
+               name-pattern="\s*(?P&lt;name&gt;[^{};]+?)(?:\s+where\b[^{};]*)?\s*\{" />
     <declaration kind="function" keyword="fn" name="after-keyword" body="brace" method-containers="impl,trait" declaration-terminator=";" />
     <members kind="enum-member" within="enum" separator="," terminator=";" prefix-pattern="#\s*!?"
              generic-open-pattern="::\s*&lt;" generic-suffix-pattern="[^\p{L}\p{N}_\s]|as\b" />
@@ -98,11 +117,14 @@
       <string open="&quot;" close="&quot;" escape="\" />
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
       <string open="`" close="`" escape="\" />
+      <regex-literal open="/" close="/" escape="\" character-class-open="[" character-class-close="]"
+                     prefix-pattern="^(?:[=({\[,:;!?~]|[+*%&amp;|^&lt;&gt;-]|=&gt;|&amp;&amp;|\|\||\?\?|return|throw|case|yield|await|typeof|void|delete|in|of|else|do|instanceof|(?:if|while|for|with|switch|catch)\(\)|(?:[\p{L}_$][\p{L}\p{N}\p{M}_$]*\(\)|else|do|try|finally)?\{\})?$" />
     </lexical>
     <container kind="enum" keyword="enum" name="after-keyword" body="brace" />
-    <container kind="class" keyword="class" name="after-keyword" body="brace" />
-    <declaration kind="function" keyword="function" name="after-keyword" body="brace" method-containers="class" />
-    <declaration kind="function" scan="callable" assignment-arrow="=&gt;" name="before-parameters" body="brace" method-containers="class" reject-names="if,for,while,switch,catch,function,return,throw,new" reject-previous=".,=,return,throw,new,function" control-headers="for,if,else if,while,switch,catch" />
+    <container kind="class" keyword="class" name="after-keyword" body="brace" keyword-reject-previous="." keyword-reject-next=":" />
+    <declaration kind="function" keyword="function" name="after-keyword" body="brace" method-containers="class" signature-type-braces="true" />
+    <declaration kind="function" scan="callable" assignment-arrow="=&gt;" name="before-parameters" body="brace" method-containers="class" reject-names="if,for,while,switch,catch,function,return,throw,new" reject-previous=".,=,return,throw,new,function" control-headers="for,if,else if,while,switch,catch" signature-type-braces="true"
+                 name-pattern="&quot;(?P&lt;name_double&gt;(?:\\.|[^&quot;\\\r\n])*)&quot;|&apos;(?P&lt;name_single&gt;(?:\\.|[^&apos;\\\r\n])*)&apos;|\[(?P&lt;name_computed&gt;[^\]\r\n]+)\]" />
     <members kind="enum-member" within="enum" separator="," terminator=";"
              name-pattern="&quot;(?P&lt;name&gt;(?:\\.|[^&quot;\\\r\n])*)&quot;|&apos;(?P&lt;name_single&gt;(?:\\.|[^&apos;\\\r\n])*)&apos;" />
   </language>
@@ -119,10 +141,10 @@
       <string open="&quot;&quot;&quot;" close="&quot;&quot;&quot;" escape="\" />
     </lexical>
     <container kind="enum" keyword="enum" name="after-keyword" body="brace" />
-    <container kind="class" keyword="class" name="after-keyword" body="brace" />
+    <container kind="class" keyword="class" name="after-keyword" body="brace" keyword-reject-previous="." />
     <container kind="interface" keyword="interface" name="after-keyword" body="brace" />
     <container kind="class" keyword="record" name="after-keyword" body="brace" />
-    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class,interface,enum" declaration-terminator=";" reject-names="if,for,while,switch,catch,new,return,throw,super,this" reject-previous=".,:,=,return,throw,new,record" reject-prefixes="-&gt;" start-boundaries="{,},;,:" container-name-previous="class,interface,record,enum" qualified-separators="." require-non-container-previous-kind="qualified-identifier,template-type-tail,array-type-tail" assignment-continuations="default" control-headers="for,if,else if,while,switch,catch" />
+    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class,interface,enum" declaration-terminator=";" reject-names="if,for,while,switch,catch,new,return,throw,super,this" reject-previous=".,:,=,return,throw,new,record" reject-prefixes="-&gt;" start-boundaries="{,},;,:" container-name-previous="class,interface,record,enum" qualified-separators="." require-non-container-previous-kind="qualified-identifier,template-type-tail,array-type-tail" assignment-continuations="default" control-headers="for,if,else if,while,switch,catch" signature-brace-prefix-pattern="\bdefault\s*$" compact-constructor-containers="record" />
     <members kind="enum-member" within="enum" separator="," terminator=";" prefix-pattern="@[\p{L}_$][\p{L}\p{N}_$.]*" />
   </language>
 
@@ -143,7 +165,8 @@
     <container kind="class" keyword="class" name="after-keyword" body="brace" />
     <container kind="interface" keyword="interface" name="after-keyword" body="brace" />
     <container kind="impl" keyword="object" name="after-keyword" body="brace" />
-    <declaration kind="function" keyword="fun" name="after-keyword" body="brace" method-containers="class,interface,impl,enum" declaration-terminator="line" />
+    <declaration kind="function" keyword="fun" name="after-keyword" body="brace" method-containers="class,interface,impl,enum" declaration-terminator="line" nextline-body="true"
+                 name-pattern="\s*(?:[^()\r\n]*\.)?(?:`(?P&lt;name_quoted&gt;[^`\r\n]+)`|(?P&lt;name&gt;[\p{L}_$][\p{L}\p{N}\p{M}_$]*))\s*\(" />
     <members kind="enum-member" within="enum" separator="," terminator=";" prefix-pattern="@[\p{L}_$][\p{L}\p{N}_$.]*"
              name-pattern="`(?P&lt;name&gt;[^`\r\n]+)`" />
   </language>
@@ -164,14 +187,15 @@
       <string open="&quot;" close="&quot;" escape="\" />
       <string open="&apos;" close="&apos;" escape="\" requires-closing-on-line="true" />
       <raw-string prefixes="R&quot;,u8R&quot;,uR&quot;,UR&quot;,LR&quot;" open="(" close=")" suffix="&quot;" max-delimiter-length="16" forbidden-delimiter-characters=")\" />
+      <line-skip-pattern value="#(?:\\(?:\r\n|\n|\r)|[^\r\n])*" />
     </lexical>
     <container kind="enum" keyword="enum class" name="after-keyword" body="brace" declaration-terminator=";" />
     <container kind="enum" keyword="enum struct" name="after-keyword" body="brace" declaration-terminator=";" />
     <container kind="enum" keyword="enum" name="after-keyword" body="brace" declaration-terminator=";" />
     <container kind="namespace" keyword="namespace" name="after-keyword" body="brace" declaration-terminator=";" />
-    <container kind="class" keyword="class" name="after-keyword" body="brace" declaration-terminator=";" />
-    <container kind="class" keyword="struct" name="after-keyword" body="brace" declaration-terminator=";" />
-    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class" declaration-terminator=";" reject-names="if,for,while,switch,catch,sizeof,alignof,decltype,return,throw,new,delete,static_cast,dynamic_cast,reinterpret_cast,const_cast" reject-previous=".,=,return,throw,new,delete" reject-prefixes="-&gt;" require-non-container-previous="const,static,inline,virtual,explicit,operator" require-non-container-previous-kind="qualified-identifier,template-type-tail" start-boundaries="{,},;,:" operator-tokens="(),[],&lt;,&gt;,=,!,+,-,*,/,%,&amp;,|,^,~" name-prefixes="~" qualified-separators="::" compound-prefixes="operator" container-name-previous="class,struct" assignment-continuations="default,delete,0" control-headers="for,if,else if,while,switch,catch" />
+    <container kind="class" keyword="class" name="after-keyword" body="brace" declaration-terminator=";" keyword-reject-previous="@generics-open,@separator" />
+    <container kind="class" keyword="struct" name="after-keyword" body="brace" declaration-terminator=";" keyword-reject-previous="@generics-open,@separator" />
+    <declaration kind="function" scan="callable" name="before-parameters" body="brace" method-containers="class" declaration-terminator=";" reject-names="if,for,while,switch,catch,sizeof,alignof,decltype,return,throw,new,delete,static_cast,dynamic_cast,reinterpret_cast,const_cast" reject-previous=".,=,return,throw,new,delete" reject-prefixes="-&gt;" require-non-container-previous="const,static,inline,virtual,explicit,operator" require-non-container-previous-kind="qualified-identifier,template-type-tail,pointer-type-tail" start-boundaries="{,},;,:" operator-tokens="(),[],&lt;,&gt;,=,!,+,-,*,/,%,&amp;,|,^,~" name-prefixes="~" qualified-separators="::" compound-prefixes="operator" container-name-previous="class,struct" assignment-continuations="default,delete,0" control-headers="for,if,else if,while,switch,catch" signature-brace-prefix-pattern="(?s)\)\s*:\s*[^;]*[\p{L}_$][\p{L}\p{N}\p{M}_$]*\s*$" />
     <members kind="enum-member" within="enum" separator="," terminator=";"
              line-skip-pattern="#(?:\\(?:\r\n|\n|\r)|[^\r\n])*"
              generic-open-pattern="[\p{L}_$][\p{L}\p{N}_$]*\s*&lt;" generic-suffix-pattern="[^\p{L}\p{N}_$\s]" />
@@ -183,12 +207,14 @@
     <use-family id="end-keyword" adapter="ruby" />
     <lexical>
       <word-characters extra="_@!?" unicode="true" />
+      <heredoc prefix-pattern="&lt;&lt;(?P&lt;indent&gt;[-~])?(?:&apos;(?P&lt;delimiter_single&gt;[^&apos;\r\n]+)&apos;|&quot;(?P&lt;delimiter_double&gt;[^&quot;\r\n]+)&quot;|`(?P&lt;delimiter_command&gt;[^`\r\n]+)`|(?P&lt;delimiter&gt;[A-Za-z_][A-Za-z0-9_]*))" indented="true" />
       <line-comment open="#" />
       <string open="&quot;" close="&quot;" escape="\" />
       <string open="&apos;" close="&apos;" escape="\" />
     </lexical>
     <container kind="class" keyword="class" name="after-keyword" body="end-keyword" />
     <container kind="module" keyword="module" name="after-keyword" body="end-keyword" />
-    <declaration kind="function" keyword="def" name="after-keyword" body="end-keyword" method-containers="class,module" />
+    <declaration kind="function" keyword="def" name="after-keyword" body="end-keyword" method-containers="class,module" expression-body="="
+                 name-pattern="\s*(?P&lt;name&gt;(?:[\p{L}_@][\p{L}\p{N}\p{M}_@!?]*\s*\.\s*)?(?:[\p{L}_@][\p{L}\p{N}\p{M}_@!?]*=?|\[\]=?|&lt;=&gt;|===|==|!=|=~|!~|&lt;=|&gt;=|&lt;&lt;|&gt;&gt;|\*\*|[+\-~]@|[+\-*/%&amp;|^~!&lt;&gt;]))" />
   </language>
 </outline-parsers>

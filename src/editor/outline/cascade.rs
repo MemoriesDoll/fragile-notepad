@@ -46,7 +46,13 @@ pub(super) fn cascade(
             }
         }
     }
-    let mut roots = container_nodes(text, containers, &positions, &container_intervals);
+    let mut nodes = container_nodes(
+        text,
+        containers,
+        &positions,
+        &container_intervals,
+        &declaration_intervals,
+    );
     let mut functions = Vec::new();
     let mut function_nodes = Vec::new();
 
@@ -90,10 +96,14 @@ pub(super) fn cascade(
             .body_range
             .and_then(|range| indexed_range(&positions, range));
 
-        let node_kind = match kind {
-            FunctionKind::Function => OutlineNodeKind::Function,
-            FunctionKind::Method => OutlineNodeKind::Method,
-            FunctionKind::Declaration => OutlineNodeKind::Declaration,
+        let node_kind = if declaration.rule.node_kind == OutlineNodeKind::Constructor {
+            OutlineNodeKind::Constructor
+        } else {
+            match kind {
+                FunctionKind::Function => OutlineNodeKind::Function,
+                FunctionKind::Method => OutlineNodeKind::Method,
+                FunctionKind::Declaration => OutlineNodeKind::Declaration,
+            }
         };
         let function = CascadedFunction {
             name: declaration.name.clone(),
@@ -118,8 +128,13 @@ pub(super) fn cascade(
     deduplicate_functions(&mut functions);
     deduplicate_function_nodes(&mut function_nodes);
 
-    let mut attachments = AttachmentIndex::from_nodes(&roots);
-    for (_, node) in function_nodes {
+    nodes.extend(function_nodes.into_iter().map(|(_, node)| node));
+    // Containers may be declared inside functions. Attach every kind in source
+    // order so each enclosing declaration exists before its descendants.
+    nodes.sort_by_key(|node| (node.range.start, Reverse(node.range.end), node.depth));
+    let mut roots = Vec::new();
+    let mut attachments = AttachmentIndex::default();
+    for node in nodes {
         attachments.attach(&mut roots, node);
     }
 
@@ -162,11 +177,11 @@ fn container_nodes(
     containers: &[StructuralEvent],
     positions: &TextPositions<'_>,
     intervals: &IntervalCounts,
+    declaration_intervals: &IntervalCounts,
 ) -> Vec<OutlineNode> {
-    let mut roots = Vec::new();
+    let mut nodes = Vec::new();
     let mut sorted = containers.to_vec();
     sorted.sort_by_key(|event| (event.signature_range.start, event.signature_range.end));
-    let mut attachments = AttachmentIndex::default();
 
     for event in &sorted {
         let Some(range) = indexed_range(positions, event.signature_range) else {
@@ -193,17 +208,18 @@ fn container_nodes(
             .count();
         let depth = intervals
             .count(event.signature_range.start)
-            .saturating_sub(excluded);
+            .saturating_sub(excluded)
+            + declaration_intervals.count(event.signature_range.start);
         let name = text
             .get(event.name_range.start..event.name_range.end)
             .unwrap_or("")
             .to_owned();
         let node = OutlineNode::new(name, owner_kind, range, body_range, depth);
 
-        attachments.attach(&mut roots, node);
+        nodes.push(node);
     }
 
-    roots
+    nodes
 }
 
 fn indexed_range(buffer: &TextPositions<'_>, range: ByteRange) -> Option<super::EditorRange> {
@@ -301,32 +317,6 @@ struct AttachmentIndex {
 }
 
 impl AttachmentIndex {
-    fn from_nodes(nodes: &[OutlineNode]) -> Self {
-        let mut index = Self::default();
-        index.collect(nodes, &[], None);
-        index
-    }
-
-    fn collect(
-        &mut self,
-        nodes: &[OutlineNode],
-        prefix: &[usize],
-        parent_range: Option<super::EditorRange>,
-    ) {
-        for (child, node) in nodes.iter().enumerate() {
-            let mut path = prefix.to_vec();
-            path.push(child);
-            let mut range = node.body_range.unwrap_or(node.range);
-            if let Some(parent) = parent_range {
-                range.start = range.start.max(parent.start);
-                range.end = range.end.min(parent.end);
-            }
-            self.pending
-                .push(Reverse((range.start, range.end, path.clone(), node.depth)));
-            self.collect(&node.children, &path, Some(range));
-        }
-    }
-
     fn attach(&mut self, nodes: &mut Vec<OutlineNode>, node: OutlineNode) {
         let position = node.range.start;
         while self
@@ -472,13 +462,25 @@ mod tests {
                 "rb",
                 "module Outer\n  class Inner\n    def one\n      1\n    end\n  end\nend\n",
             ),
+            (
+                "rs",
+                "fn outer() { mod local { fn leaf() {} } fn sibling() {} }",
+            ),
+            (
+                "py",
+                "def outer():\n    class Local:\n        def leaf(self):\n            pass\n    def sibling():\n        pass\n",
+            ),
+            (
+                "js",
+                "function outer() { class Local { leaf() {} } function sibling() {} }",
+            ),
         ];
         for (token, text) in cases {
             let registry = OutlineRegistry::shared();
             let plan = registry.plan_for_syntax(token).unwrap();
             let structure = discover_structure(text, &OutlineSource::new(text, plan), plan);
             let actual = cascade(text, &structure.containers, structure.declarations.clone());
-            let mut reference = Vec::new();
+            let mut reference_nodes = Vec::new();
             for event in &structure.containers {
                 let range =
                     super::super::structure_support::editor_range(text, event.signature_range)
@@ -496,18 +498,19 @@ mod tests {
                                     && event.signature_range.start < range.end
                             })
                     })
-                    .count();
+                    .count()
+                    + super::super::structure_support::declaration_depth(
+                        &structure.declarations,
+                        event.signature_range.start,
+                    );
                 let StructuralEventKind::Body { owner_kind, .. } = event.kind;
-                old_attach(
-                    &mut reference,
-                    OutlineNode::new(
-                        &text[event.name_range.start..event.name_range.end],
-                        owner_kind,
-                        range,
-                        body,
-                        depth,
-                    ),
-                );
+                reference_nodes.push(OutlineNode::new(
+                    &text[event.name_range.start..event.name_range.end],
+                    owner_kind,
+                    range,
+                    body,
+                    depth,
+                ));
             }
             for function in &actual.functions {
                 let declaration = structure
@@ -553,16 +556,19 @@ mod tests {
                     FunctionKind::Method => OutlineNodeKind::Method,
                     FunctionKind::Declaration => OutlineNodeKind::Declaration,
                 };
-                old_attach(
-                    &mut reference,
-                    OutlineNode::new(
-                        &function.name,
-                        kind,
-                        function.range,
-                        function.body_range,
-                        function.depth,
-                    ),
-                );
+                reference_nodes.push(OutlineNode::new(
+                    &function.name,
+                    kind,
+                    function.range,
+                    function.body_range,
+                    function.depth,
+                ));
+            }
+            reference_nodes
+                .sort_by_key(|node| (node.range.start, Reverse(node.range.end), node.depth));
+            let mut reference = Vec::new();
+            for node in reference_nodes {
+                old_attach(&mut reference, node);
             }
             assert_eq!(actual.tree.roots, reference, "{token}");
         }

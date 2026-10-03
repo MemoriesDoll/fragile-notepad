@@ -1,15 +1,41 @@
 use super::callable_statements::{
-    CallableStatement, CallableStatementTerminator, callable_statements,
+    CallableStatement, CallableStatementTerminator, callable_statements, signature_brace_is_group,
 };
 use super::fsm::{ByteRange, DeclarationEvent, StructuralEvent, StructuralEventKind};
 use super::scan::*;
 use super::source::{CodeToken, OutlineSource, SyntaxSymbol};
 use super::{OutlineBodyKind, OutlineNameCapture, OutlinePlan, OutlineRulePlan, OutlineScanMode};
+use regex::Regex;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct StructurePassOutput {
     pub containers: Vec<StructuralEvent>,
     pub declarations: Vec<DeclarationEvent>,
+}
+
+struct RulePatterns {
+    name: Option<Regex>,
+    callable_name: Option<Regex>,
+    brace_prefix: Option<Regex>,
+}
+
+impl RulePatterns {
+    fn new(rule: &OutlineRulePlan) -> Self {
+        Self {
+            name: rule
+                .name_pattern
+                .as_ref()
+                .and_then(|pattern| Regex::new(&format!("\\A(?:{pattern})")).ok()),
+            callable_name: rule
+                .name_pattern
+                .as_ref()
+                .and_then(|pattern| Regex::new(&format!("(?:{pattern})\\z")).ok()),
+            brace_prefix: rule
+                .signature_brace_prefix_pattern
+                .as_ref()
+                .and_then(|pattern| Regex::new(&format!("(?:{pattern})\\z")).ok()),
+        }
+    }
 }
 
 pub(super) fn discover_structure(
@@ -79,9 +105,10 @@ fn container_events_for_rule(
 ) -> Vec<StructuralEvent> {
     let mut events = Vec::new();
     let mut cursor = 0;
+    let patterns = RulePatterns::new(rule);
 
     while let Some(keyword_offset) = find_keyword_sequence(text, source, cursor, &rule.keyword) {
-        if let Some(event) = container_at(text, source, rule, keyword_offset) {
+        if let Some(event) = container_at(text, source, rule, &patterns, keyword_offset) {
             events.push(event);
         }
         cursor = keyword_offset + rule.keyword[0].len();
@@ -96,15 +123,17 @@ fn declaration_events_for_rule(
     rule: &OutlineRulePlan,
     containers: &ContainerNames,
 ) -> Vec<DeclarationEvent> {
+    let patterns = RulePatterns::new(rule);
     if rule.scan == OutlineScanMode::Callable {
-        let statements = callable_statements(
+        let statements = callable_statements(text, source, rule, patterns.brace_prefix.as_ref());
+        let mut events = callable_declaration_events_for_rule(
             text,
             source,
-            &rule.callable.operator_tokens,
-            &rule.callable.control_headers,
+            rule,
+            &patterns,
+            containers,
+            &statements,
         );
-        let mut events =
-            callable_declaration_events_for_rule(text, source, rule, containers, &statements);
         if rule.callable.assignment_arrow.is_some() {
             events.extend(arrow_function_declaration_events_for_rule(
                 text,
@@ -122,7 +151,7 @@ fn declaration_events_for_rule(
     let mut cursor = 0;
 
     while let Some(keyword_offset) = find_keyword_sequence(text, source, cursor, &rule.keyword) {
-        if let Some(event) = declaration_at(text, source, rule, keyword_offset) {
+        if let Some(event) = declaration_at(text, source, rule, &patterns, keyword_offset) {
             events.push(event);
         }
         cursor = keyword_offset + rule.keyword[0].len();
@@ -135,6 +164,7 @@ fn callable_declaration_events_for_rule(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
+    patterns: &RulePatterns,
     containers: &ContainerNames,
     statements: &[CallableStatement],
 ) -> Vec<DeclarationEvent> {
@@ -163,14 +193,84 @@ fn callable_declaration_events_for_rule(
             continue;
         }
 
-        if let Some(event) =
-            callable_declaration_at(text, source, rule, containers, statement, open_paren)
-        {
+        if let Some(event) = callable_declaration_at(
+            text, source, rule, patterns, containers, statement, open_paren,
+        ) {
             events.push(event);
         }
         cursor = open_paren + parameters_open.len_utf8();
     }
 
+    if !rule.callable.compact_constructor_containers.is_empty() {
+        events.extend(compact_constructor_events(
+            text, source, rule, containers, statements,
+        ));
+    }
+
+    events
+}
+
+fn compact_constructor_events(
+    text: &str,
+    source: &OutlineSource,
+    rule: &OutlineRulePlan,
+    containers: &ContainerNames,
+    statements: &[CallableStatement],
+) -> Vec<DeclarationEvent> {
+    let mut events = Vec::new();
+    for statement in statements.iter().filter(|statement| {
+        !statement.is_expression_context
+            && statement.terminator == CallableStatementTerminator::Body
+    }) {
+        let Some(open) = previous_code_token(text, source, statement.range.end)
+            .filter(|token| source.is_body_open(text, token.start))
+        else {
+            continue;
+        };
+        let Some(name) = previous_code_token(text, source, open.start).filter(|name| {
+            name.start >= statement.range.start && is_qualified_identifier(name.text(text), source)
+        }) else {
+            continue;
+        };
+        if !containers.compact.iter().any(|container| {
+            container.name == name.text(text)
+                && container.start < name.start
+                && name.start < container.end
+                && rule
+                    .callable
+                    .compact_constructor_containers
+                    .iter()
+                    .any(|keyword| keyword == &container.keyword)
+        }) || source
+            .tokens_from(statement.range.start)
+            .iter()
+            .take_while(|token| token.start < name.start)
+            .any(|token| {
+                matches!(
+                    source.symbol_text(token.text(text)),
+                    SyntaxSymbol::ParametersOpen | SyntaxSymbol::ParametersClose
+                )
+            })
+        {
+            continue;
+        }
+        let Some(close) = source
+            .matching_delimiter(open.start)
+            .and_then(|close| source.next_token(close))
+        else {
+            continue;
+        };
+        let mut constructor_rule = rule.clone();
+        constructor_rule.node_kind = super::OutlineNodeKind::Constructor;
+        events.push(DeclarationEvent {
+            rule: constructor_rule,
+            name: name.text(text).to_owned(),
+            name_range: ByteRange::new(name.start, name.end),
+            signature_range: ByteRange::new(statement.range.start, close.end),
+            body_range: Some(ByteRange::new(open.start, close.end)),
+            terminated: false,
+        });
+    }
     events
 }
 
@@ -208,12 +308,16 @@ fn container_at(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
+    patterns: &RulePatterns,
     keyword_offset: usize,
 ) -> Option<StructuralEvent> {
     let keyword_end = keyword_sequence_end(text, source, keyword_offset, &rule.keyword)?;
-    let name_range = name_range_after(text, source, rule, keyword_end)
+    if !keyword_has_declaration_context(text, source, rule, keyword_offset, keyword_end) {
+        return None;
+    }
+    let name_range = name_range_after(text, source, rule, patterns, keyword_end)
         .unwrap_or(ByteRange::new(keyword_end, keyword_end));
-    let terminator = signature_terminator(text, source, rule, name_range.end)?;
+    let terminator = signature_terminator(text, source, rule, patterns, name_range.end)?;
     let (body_range, signature_end) = match terminator {
         RuleTerminator::Body { open, end } => (Some(ByteRange::new(open, end)), end),
         RuleTerminator::Line { end } if rule.body == OutlineBodyKind::Indent => {
@@ -240,20 +344,16 @@ fn declaration_at(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
+    patterns: &RulePatterns,
     keyword_offset: usize,
 ) -> Option<DeclarationEvent> {
     let keyword_end = keyword_sequence_end(text, source, keyword_offset, &rule.keyword)?;
-    let name_range = name_range_after(text, source, rule, keyword_end)?;
-    if previous_code_token(text, source, keyword_offset).is_some_and(|token| {
-        matches!(
-            source.symbol_text(token.text(text)),
-            SyntaxSymbol::ParametersOpen | SyntaxSymbol::Separator
-        )
-    }) {
+    if !keyword_has_declaration_context(text, source, rule, keyword_offset, keyword_end) {
         return None;
     }
+    let name_range = name_range_after(text, source, rule, patterns, keyword_end)?;
     let signature_start = signature_start(text, source, keyword_offset);
-    let terminator = signature_terminator(text, source, rule, name_range.end)?;
+    let terminator = signature_terminator(text, source, rule, patterns, name_range.end)?;
     let (body_range, signature_end, terminated) = match terminator {
         RuleTerminator::Body { open, end } => (Some(ByteRange::new(open, end)), end, false),
         RuleTerminator::Line { end } if rule.body == OutlineBodyKind::Indent => {
@@ -278,11 +378,27 @@ fn callable_declaration_at(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
+    patterns: &RulePatterns,
     containers: &ContainerNames,
     statement: &CallableStatement,
     open_paren: usize,
 ) -> Option<DeclarationEvent> {
-    let name_range = callable_name_before_parameters(text, source, rule, open_paren)?;
+    let name_range = patterns
+        .callable_name
+        .as_ref()
+        .and_then(|pattern| {
+            let captures = pattern.captures(&text[statement.range.start..open_paren].trim_end())?;
+            let found = pattern
+                .capture_names()
+                .flatten()
+                .filter(|name| *name == "name" || name.starts_with("name_"))
+                .find_map(|name| captures.name(name))?;
+            Some(ByteRange::new(
+                statement.range.start + found.start(),
+                statement.range.start + found.end(),
+            ))
+        })
+        .or_else(|| callable_name_before_parameters(text, source, rule, open_paren))?;
     let name = text.get(name_range.start..name_range.end)?;
     if rule
         .callable
@@ -312,6 +428,7 @@ fn callable_declaration_at(
         text,
         source,
         rule,
+        patterns,
         statement,
         source.next_token(close_paren)?.end,
     )?;
@@ -390,8 +507,40 @@ fn name_range_after(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
+    patterns: &RulePatterns,
     after_keyword: usize,
 ) -> Option<ByteRange> {
+    if let Some(pattern) = &patterns.name {
+        // Unlike ordinary identifiers, an XML pattern can capture an escaped
+        // name whose spelling is also shielded as a quoted literal.
+        let mut pattern_start = name_pattern_start(text, source, after_keyword);
+        let first = skip_non_code_whitespace(text, source, pattern_start);
+        if text[first..]
+            .chars()
+            .next()
+            .is_some_and(|ch| source.symbol(ch) == SyntaxSymbol::GenericsOpen)
+        {
+            let close = matching_code_angle_after(text, source, first)?;
+            pattern_start = name_pattern_start(
+                text,
+                source,
+                close + text[close..].chars().next()?.len_utf8(),
+            );
+        }
+        let captures = pattern.captures(text.get(pattern_start..)?)?;
+        let found = pattern
+            .capture_names()
+            .flatten()
+            .filter(|name| *name == "name" || name.starts_with("name_"))
+            .find_map(|name| captures.name(name))?;
+        let captured = found.as_str();
+        let leading = captured.len() - captured.trim_start().len();
+        let trailing = captured.trim_end().len();
+        return Some(ByteRange::new(
+            pattern_start + found.start() + leading,
+            pattern_start + found.start() + trailing,
+        ));
+    }
     match rule.name {
         OutlineNameCapture::AfterKeyword => {
             let start = skip_non_code_whitespace(text, source, after_keyword);
@@ -401,17 +550,96 @@ fn name_range_after(
     }
 }
 
+fn name_pattern_start(text: &str, source: &OutlineSource, mut cursor: usize) -> usize {
+    while let Some(ch) = text.get(cursor..).and_then(|tail| tail.chars().next()) {
+        if source.is_literal_start(cursor) || (source.is_code(cursor) && !ch.is_whitespace()) {
+            break;
+        }
+        cursor += ch.len_utf8();
+    }
+    cursor
+}
+
+fn keyword_has_declaration_context(
+    text: &str,
+    source: &OutlineSource,
+    rule: &OutlineRulePlan,
+    keyword_start: usize,
+    keyword_end: usize,
+) -> bool {
+    if rule.reject_previous.iter().any(|prefix| {
+        if let Some(role) = prefix.strip_prefix('@') {
+            previous_code_char(text, source, keyword_start)
+                .and_then(|offset| text[offset..].chars().next())
+                .is_some_and(|ch| source.has_token_role(ch, role))
+        } else {
+            code_before_ends_with(text, source, keyword_start, prefix)
+        }
+    }) || next_code_token(text, source, keyword_end).is_some_and(|next| {
+        rule.reject_next
+            .iter()
+            .any(|reject| reject == next.text(text))
+    }) {
+        return false;
+    }
+    if !rule.require_statement_start {
+        return true;
+    }
+    let mut cursor = keyword_start;
+    while let Some(previous) = previous_code_token(text, source, cursor) {
+        if source
+            .plan
+            .signature_modifiers
+            .iter()
+            .any(|modifier| modifier == previous.text(text))
+        {
+            cursor = previous.start;
+            continue;
+        }
+        if source.symbol_text(previous.text(text)) == SyntaxSymbol::BracketsClose {
+            if let Some(open) = source.matching_delimiter(previous.start) {
+                if let Some(attribute) = previous_code_token(text, source, open).filter(|token| {
+                    token
+                        .text(text)
+                        .chars()
+                        .all(|ch| source.has_token_role(ch, "attribute-prefix"))
+                }) {
+                    cursor = attribute.start;
+                    continue;
+                }
+            }
+        }
+        return source.is_body_open(text, previous.start)
+            || source.is_body_close(text, previous.start)
+            || source.symbol_text(previous.text(text)) == SyntaxSymbol::StatementEnd;
+    }
+    true
+}
+
 fn callable_name_before_parameters(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
     open_paren: usize,
 ) -> Option<ByteRange> {
+    if let Some(name) = callable_conversion_name_before_parameters(text, source, rule, open_paren) {
+        return Some(name);
+    }
     if let Some(name) = callable_compound_name_before_parameters(text, source, rule, open_paren) {
         return Some(name);
     }
 
-    let token = previous_contiguous_code_token(text, source, open_paren)?;
+    let mut token = previous_contiguous_code_token(text, source, open_paren)?;
+    if token
+        .text(text)
+        .chars()
+        .next_back()
+        .is_some_and(|ch| source.symbol(ch) == SyntaxSymbol::GenericsClose)
+    {
+        let close = token.end - token.text(text).chars().next_back()?.len_utf8();
+        let open = matching_code_angle_before(text, source, close)?;
+        token = previous_contiguous_code_token(text, source, open)?;
+    }
     let token_text = token.text(text);
     if rule
         .callable
@@ -445,6 +673,62 @@ fn callable_name_before_parameters(
         return None;
     }
     Some(name)
+}
+
+fn callable_conversion_name_before_parameters(
+    text: &str,
+    source: &OutlineSource,
+    rule: &OutlineRulePlan,
+    open_paren: usize,
+) -> Option<ByteRange> {
+    if rule.callable.compound_prefixes.is_empty() {
+        return None;
+    }
+    let mut cursor = open_paren;
+    let end = previous_code_token(text, source, open_paren)?.end;
+    let mut has_type = false;
+    while let Some(token) = previous_code_token(text, source, cursor) {
+        let value = token.text(text);
+        if rule
+            .callable
+            .compound_prefixes
+            .iter()
+            .any(|prefix| prefix == value)
+        {
+            return has_type.then_some(ByteRange::new(token.start, end));
+        }
+        if source.is_body_open(text, token.start)
+            || source.is_body_close(text, token.start)
+            || matches!(
+                source.symbol_text(value),
+                SyntaxSymbol::StatementEnd
+                    | SyntaxSymbol::ParametersOpen
+                    | SyntaxSymbol::ParametersClose
+            )
+        {
+            return None;
+        }
+        if value.chars().all(|ch| source.is_word_char(ch)) {
+            has_type = true;
+        } else if !value.chars().all(|ch| {
+            source.has_token_role(ch, "type-suffix")
+                || matches!(
+                    source.symbol(ch),
+                    SyntaxSymbol::GenericsOpen
+                        | SyntaxSymbol::GenericsClose
+                        | SyntaxSymbol::Separator
+                )
+                || rule
+                    .callable
+                    .qualified_separators
+                    .iter()
+                    .any(|separator| separator.contains(ch))
+        }) {
+            return None;
+        }
+        cursor = token.start;
+    }
+    None
 }
 
 fn callable_compound_name_before_parameters(
@@ -815,6 +1099,15 @@ fn callable_has_required_non_container_previous_token(
         || callable_has_container_name_previous_token(text, source, rule, name_range.start)
         || callable_name_matches_containing_container(text, containers, rule, name_range)
         || callable_name_has_qualified_separator(text, source, rule, name_range.start)
+        || rule.callable.compound_prefixes.iter().any(|prefix| {
+            text[name_range.start..name_range.end]
+                .strip_prefix(prefix)
+                .is_some_and(|tail| {
+                    tail.chars()
+                        .next()
+                        .is_none_or(|ch| !source.is_word_char(ch))
+                })
+        })
     {
         return true;
     }
@@ -875,6 +1168,30 @@ fn token_matches_required_kind(
                     || token_matches_required_kind(text, source, prefix, "template-type-tail")
                     || token_matches_required_kind(text, source, prefix, "array-type-tail")
             })
+        }
+        "pointer-type-tail" => {
+            let mut cursor = token.end;
+            let mut has_suffix = false;
+            while let Some(previous) = previous_code_token(text, source, cursor) {
+                if previous
+                    .text(text)
+                    .chars()
+                    .all(|ch| source.has_token_role(ch, "type-suffix"))
+                {
+                    has_suffix = true;
+                    cursor = previous.start;
+                    continue;
+                }
+                return has_suffix
+                    && (is_qualified_identifier(previous.text(text), source)
+                        || token_matches_required_kind(
+                            text,
+                            source,
+                            previous,
+                            "template-type-tail",
+                        ));
+            }
+            false
         }
         _ => false,
     }
@@ -957,12 +1274,23 @@ fn callable_name_matches_containing_container(
     containers.contains(unprefixed_name, name_range.start)
 }
 
-struct ContainerNames(std::collections::HashMap<String, (Vec<usize>, Vec<usize>)>);
+struct ContainerNames {
+    names: std::collections::HashMap<String, (Vec<usize>, Vec<usize>)>,
+    compact: Vec<CompactContainer>,
+}
+
+struct CompactContainer {
+    name: String,
+    keyword: String,
+    start: usize,
+    end: usize,
+}
 
 impl ContainerNames {
     fn new(text: &str, containers: &[StructuralEvent]) -> Self {
         let mut names: std::collections::HashMap<String, (Vec<usize>, Vec<usize>)> =
             std::collections::HashMap::new();
+        let mut compact = Vec::new();
         for container in containers {
             let Some(body) = container.body_range.filter(|range| range.start < range.end) else {
                 continue;
@@ -973,16 +1301,23 @@ impl ContainerNames {
             let (starts, ends) = names.entry(name.to_owned()).or_default();
             starts.push(body.start);
             ends.push(body.end);
+            compact.push(CompactContainer {
+                name: name.to_owned(),
+                keyword: text[container.keyword_range.start..container.keyword_range.end]
+                    .to_owned(),
+                start: body.start,
+                end: body.end,
+            });
         }
         for (starts, ends) in names.values_mut() {
             starts.sort_unstable();
             ends.sort_unstable();
         }
-        Self(names)
+        Self { names, compact }
     }
 
     fn contains(&self, name: &str, offset: usize) -> bool {
-        self.0.get(name).is_some_and(|(starts, ends)| {
+        self.names.get(name).is_some_and(|(starts, ends)| {
             starts.partition_point(|start| *start <= offset)
                 > ends.partition_point(|end| *end <= offset)
         })
@@ -1079,6 +1414,7 @@ fn callable_signature_terminator(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
+    patterns: &RulePatterns,
     statement: &CallableStatement,
     after_parameters: usize,
 ) -> Option<RuleTerminator> {
@@ -1097,6 +1433,11 @@ fn callable_signature_terminator(
         }
         let ch = text[cursor..].chars().next()?;
         match source.symbol(ch) {
+            SyntaxSymbol::ParametersOpen | SyntaxSymbol::BracketsOpen => {
+                let close = source.matching_delimiter(cursor)?;
+                cursor = source.next_token(close)?.end;
+                continue;
+            }
             SyntaxSymbol::GenericsOpen => angle_depth += 1,
             SyntaxSymbol::GenericsClose => angle_depth = angle_depth.saturating_sub(1),
             SyntaxSymbol::StatementEnd
@@ -1113,6 +1454,18 @@ fn callable_signature_terminator(
                     });
             }
             _ if source.is_body_open(text, cursor) && angle_depth == 0 => {
+                if signature_brace_is_group(
+                    text,
+                    source,
+                    rule,
+                    patterns.brace_prefix.as_ref(),
+                    statement.range.start,
+                    cursor,
+                ) {
+                    let close = source.matching_delimiter(cursor)?;
+                    cursor = source.next_token(close)?.end;
+                    continue;
+                }
                 if !matches!(statement.terminator, CallableStatementTerminator::Body) {
                     return None;
                 }
@@ -1166,12 +1519,17 @@ fn signature_terminator(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
+    patterns: &RulePatterns,
     after_name: usize,
 ) -> Option<RuleTerminator> {
     match rule.body {
-        OutlineBodyKind::Brace => delimited_signature_terminator(text, source, rule, after_name),
+        OutlineBodyKind::Brace => {
+            delimited_signature_terminator(text, source, rule, patterns, after_name)
+        }
         OutlineBodyKind::Indent => indent_signature_terminator(text, source, after_name),
-        OutlineBodyKind::EndKeyword => end_keyword_signature_terminator(text, source, after_name),
+        OutlineBodyKind::EndKeyword => {
+            end_keyword_signature_terminator(text, source, rule, after_name)
+        }
         OutlineBodyKind::None => Some(RuleTerminator::Line {
             end: line_end_offset(text, after_name),
         }),
@@ -1182,10 +1540,9 @@ fn delimited_signature_terminator(
     text: &str,
     source: &OutlineSource,
     rule: &OutlineRulePlan,
+    patterns: &RulePatterns,
     after_name: usize,
 ) -> Option<RuleTerminator> {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
     let mut angle_depth = 0usize;
     let mut cursor = after_name;
 
@@ -1197,16 +1554,15 @@ fn delimited_signature_terminator(
 
         let ch = text[cursor..].chars().next()?;
         match source.symbol(ch) {
-            SyntaxSymbol::ParametersOpen => paren_depth += 1,
-            SyntaxSymbol::ParametersClose => paren_depth = paren_depth.saturating_sub(1),
-            SyntaxSymbol::BracketsOpen => bracket_depth += 1,
-            SyntaxSymbol::BracketsClose => bracket_depth = bracket_depth.saturating_sub(1),
+            SyntaxSymbol::ParametersOpen | SyntaxSymbol::BracketsOpen => {
+                let close = source.matching_delimiter(cursor)?;
+                cursor = source.next_token(close)?.end;
+                continue;
+            }
             SyntaxSymbol::GenericsOpen => angle_depth += 1,
             SyntaxSymbol::GenericsClose => angle_depth = angle_depth.saturating_sub(1),
             SyntaxSymbol::StatementEnd
-                if paren_depth == 0
-                    && bracket_depth == 0
-                    && angle_depth == 0
+                if angle_depth == 0
                     && rule
                         .declaration_terminator
                         .as_deref()
@@ -1217,18 +1573,31 @@ fn delimited_signature_terminator(
                 });
             }
             _ if matches!(ch, '\r' | '\n')
-                && paren_depth == 0
-                && bracket_depth == 0
                 && angle_depth == 0
                 && rule.declaration_terminator.as_deref() == Some("line") =>
             {
+                if rule.nextline_body
+                    && next_code_token(text, source, cursor)
+                        .is_some_and(|token| source.is_body_open(text, token.start))
+                {
+                    cursor += ch.len_utf8();
+                    continue;
+                }
                 return Some(RuleTerminator::Declaration { end: cursor });
             }
-            _ if source.is_body_open(text, cursor)
-                && paren_depth == 0
-                && bracket_depth == 0
-                && angle_depth == 0 =>
-            {
+            _ if source.is_body_open(text, cursor) && angle_depth == 0 => {
+                if signature_brace_is_group(
+                    text,
+                    source,
+                    rule,
+                    patterns.brace_prefix.as_ref(),
+                    after_name,
+                    cursor,
+                ) {
+                    let close = source.matching_delimiter(cursor)?;
+                    cursor = source.next_token(close)?.end;
+                    continue;
+                }
                 let close = matching_code_brace(text, source, cursor)?;
                 return Some(RuleTerminator::Body {
                     open: cursor,
@@ -1265,9 +1634,22 @@ fn indent_signature_terminator(
                     .as_deref()
                     .is_some_and(|end| text[cursor..].starts_with(end)) =>
                 {
-                    return Some(RuleTerminator::Line {
-                        end: line_end_offset(text, cursor),
-                    });
+                    let header_end = cursor + body.header_end.as_ref()?.len();
+                    let line_end = line_end_offset(text, cursor);
+                    if text[header_end..line_end]
+                        .char_indices()
+                        .any(|(offset, ch)| {
+                            !ch.is_whitespace()
+                                && (source.is_code(header_end + offset)
+                                    || source.is_literal_start(header_end + offset))
+                        })
+                    {
+                        return Some(RuleTerminator::Body {
+                            open: header_end,
+                            end: line_end,
+                        });
+                    }
+                    return Some(RuleTerminator::Line { end: line_end });
                 }
                 _ if matches!(ch, '\r' | '\n') => return None,
                 _ if body
@@ -1333,8 +1715,32 @@ fn indent_body_end(
 fn end_keyword_signature_terminator(
     text: &str,
     source: &OutlineSource,
+    rule: &OutlineRulePlan,
     after_name: usize,
 ) -> Option<RuleTerminator> {
+    if let Some(marker) = rule.expression_body.as_deref() {
+        let mut cursor = after_name;
+        let line_end = line_end_offset(text, after_name);
+        if let Some(token) =
+            next_code_token(text, source, cursor).filter(|token| token.start < line_end)
+        {
+            if source.is_delimiter_open(text, token.start) {
+                let close = source.matching_delimiter(token.start)?;
+                cursor = source.next_token(close)?.end;
+            }
+        }
+        if let Some(token) =
+            next_code_token(text, source, cursor).filter(|token| token.start < line_end)
+        {
+            if token.text(text) == marker {
+                // A setter's '=' is part of its name and excluded by after_name.
+                return Some(RuleTerminator::Body {
+                    open: token.end,
+                    end: line_end,
+                });
+            }
+        }
+    }
     let end = matching_end_keyword(text, source, after_name).unwrap_or(text.len());
 
     Some(RuleTerminator::Body {

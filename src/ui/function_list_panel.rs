@@ -1,7 +1,7 @@
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input, tooltip};
 use iced::{Center, Element, Fill, Font};
 
-use crate::core::Document;
+use crate::core::{Document, DocumentLoadState};
 use crate::editor::outline::{OutlineNode, OutlineNodeKind};
 use crate::editor::{EditorRange, FunctionKind, OutlineState, OutlineStatus};
 use crate::message::Message;
@@ -13,6 +13,7 @@ pub const FUNCTION_LIST_PANEL_WIDTH: f32 = 280.0;
 pub const FUNCTION_LIST_PANEL_TITLE: &str = "Function List";
 pub const FUNCTION_LIST_EMPTY_MESSAGE: &str = "No symbols found";
 pub const FUNCTION_LIST_PENDING_MESSAGE: &str = "Scanning symbols…";
+pub const FUNCTION_LIST_UNAVAILABLE_MESSAGE: &str = "Symbols unavailable";
 pub const SCROLL_ID: &str = "function-list-scroll";
 pub const INPUT_ID: &str = "function-list-filter";
 
@@ -108,10 +109,8 @@ pub fn view<'a>(
     }
 
     let body = if ready.is_none() {
-        empty_state(
-            FUNCTION_LIST_PENDING_MESSAGE,
-            "The list updates as you edit.",
-        )
+        let (title, detail) = unavailable_or_pending_message(document, outline_state);
+        empty_state(title, detail)
     } else if total == 0 {
         empty_state(
             FUNCTION_LIST_EMPTY_MESSAGE,
@@ -149,6 +148,35 @@ pub fn view<'a>(
     .height(Fill)
     .style(styles::function_list_panel)
     .into()
+}
+
+fn unavailable_or_pending_message(
+    document: &Document,
+    outline_state: Option<&OutlineState>,
+) -> (&'static str, &'static str) {
+    if outline_state.is_some_and(|state| state.status == OutlineStatus::Unavailable) {
+        if matches!(document.load_state, DocumentLoadState::Failed { .. }) {
+            (
+                FUNCTION_LIST_UNAVAILABLE_MESSAGE,
+                "Reload this file to build its symbol list.",
+            )
+        } else {
+            (
+                FUNCTION_LIST_UNAVAILABLE_MESSAGE,
+                "Symbol scanning is available for files up to 1 MiB.",
+            )
+        }
+    } else if !document.has_complete_text_index() {
+        (
+            "Waiting for file contents…",
+            "Symbols will be scanned when the file finishes loading.",
+        )
+    } else {
+        (
+            FUNCTION_LIST_PENDING_MESSAGE,
+            "The list updates as you edit.",
+        )
+    }
 }
 
 fn symbol_count(nodes: &[OutlineNode]) -> usize {
@@ -200,8 +228,7 @@ fn append_nodes<'a>(
     parent_matches: bool,
     rows: &mut Vec<SymbolRow<'a>>,
 ) {
-    // The parser attaches functions after containers; sibling storage order is
-    // therefore not necessarily source order.
+    // Caller-provided snapshots may store siblings in a different order.
     let mut ordered = nodes.iter().collect::<Vec<_>>();
     ordered.sort_by_key(|node| node.range.start);
     for node in ordered {
@@ -426,5 +453,75 @@ mod tests {
             ["App", "outer", "leaf"]
         );
         assert!(visible_rows(&state, "missing").is_empty());
+    }
+
+    #[test]
+    fn filtering_preserves_containers_declared_inside_functions() {
+        for (syntax, source, expected) in [
+            (
+                "rs",
+                "fn outer() { mod local { fn leaf() {} } fn sibling() {} }",
+                vec!["outer", "local", "leaf"],
+            ),
+            (
+                "py",
+                "def outer():\n    class Local:\n        def leaf(self):\n            pass\n    def sibling():\n        pass\n",
+                vec!["outer", "Local", "leaf"],
+            ),
+            (
+                "js",
+                "function outer() { class Local { leaf() {} } function sibling() {} }",
+                vec!["outer", "Local", "leaf"],
+            ),
+        ] {
+            let state = parse(source, syntax);
+            let filtered = visible_rows(&state, "leaf");
+            assert_eq!(
+                filtered.iter().map(|row| row.name).collect::<Vec<_>>(),
+                expected,
+                "{syntax}"
+            );
+            assert_eq!(
+                filtered.iter().map(|row| row.depth).collect::<Vec<_>>(),
+                [0, 1, 2],
+                "{syntax}"
+            );
+            assert!(!filtered[0].matched);
+            assert!(!filtered[1].matched);
+            assert!(filtered[2].matched);
+        }
+    }
+
+    #[test]
+    fn empty_messages_distinguish_loading_scanning_and_unavailable_files() {
+        let mut document = Document::from_path(crate::core::DocumentId::new(1), "app.rs", "");
+        let metadata = crate::editor::OutlineSnapshotMetadata::from_document(&document, 0);
+        let pending = OutlineState::pending_metadata(metadata.clone());
+        let unavailable = OutlineState::unavailable_metadata(metadata);
+        assert_eq!(
+            unavailable_or_pending_message(&document, Some(&pending)).0,
+            FUNCTION_LIST_PENDING_MESSAGE
+        );
+        let (title, detail) = unavailable_or_pending_message(&document, Some(&unavailable));
+        assert_eq!(title, FUNCTION_LIST_UNAVAILABLE_MESSAGE);
+        assert!(detail.contains("1 MiB"));
+
+        document.load_state = DocumentLoadState::Loading {
+            generation: crate::core::DocumentLoadGeneration::next(),
+            bytes_read: 0,
+            total_bytes: None,
+        };
+        assert_eq!(
+            unavailable_or_pending_message(&document, Some(&pending)).0,
+            "Waiting for file contents…"
+        );
+        document.load_state = DocumentLoadState::Failed {
+            generation: crate::core::DocumentLoadGeneration::next(),
+        };
+        assert!(
+            unavailable_or_pending_message(&document, Some(&unavailable))
+                .1
+                .starts_with("Reload")
+        );
     }
 }
