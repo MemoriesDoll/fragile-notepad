@@ -512,33 +512,27 @@ mod tests {
     use iced::{Border, Color, Rectangle};
 
     #[test]
-    fn tab_file_state_follows_document_dirty_state() {
-        let mut document = Document::untitled(DocumentId::new(1));
-
-        assert_eq!(TabFileState::from_document(&document), TabFileState::Saved);
-
-        document.mark_dirty();
-
-        assert_eq!(
-            TabFileState::from_document(&document),
-            TabFileState::Unsaved
-        );
-
-        document.mark_clean();
-
-        assert_eq!(TabFileState::from_document(&document), TabFileState::Saved);
-    }
-
-    #[test]
-    fn tab_title_uses_document_dirty_marker() {
+    fn tab_state_and_title_follow_edits_and_saves() {
         let mut document = Document::untitled(DocumentId::new(7));
-
-        assert_eq!(tab_title(&document), "Untitled 7");
-
-        document.mark_dirty();
-
-        assert_eq!(document.title(), "*Untitled 7");
-        assert_eq!(tab_title(&document), "*Untitled 7");
+        for dirty in [false, true, false] {
+            if dirty {
+                document.mark_dirty();
+            } else {
+                document.mark_clean();
+            }
+            assert_eq!(
+                TabFileState::from_document(&document),
+                if dirty {
+                    TabFileState::Unsaved
+                } else {
+                    TabFileState::Saved
+                }
+            );
+            assert_eq!(
+                tab_title(&document),
+                if dirty { "*Untitled 7" } else { "Untitled 7" }
+            );
+        }
     }
 
     #[test]

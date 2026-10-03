@@ -5,10 +5,10 @@ use fragile_notepad::core::{
 use fragile_notepad::editor::outline::{OutlineParseRequest, OutlineTree};
 use fragile_notepad::editor::{
     CaretMotion, DecorationSettings, EditTransaction, EditorAction, EditorPosition, EditorRange,
-    EditorSelection, FoldRange, FunctionEntry, FunctionKind, OutlineParseResult, SelectionSet,
+    EditorSelection, FoldRange, FunctionEntry, FunctionKind, OutlineParseResult,
     outline_registry_hash, parse_outline_snapshot, position_after_text,
 };
-use fragile_notepad::message::{ClipboardMode, Menu, Message, PasteRequest};
+use fragile_notepad::message::{Menu, Message};
 use fragile_notepad::services::types::OpenedFile;
 use iced::widget::text_editor::LineEnding;
 use std::sync::Arc;
@@ -781,56 +781,6 @@ fn decoration_settings_refresh_line_numbers_whitespace_guides_and_folding_contro
 }
 
 #[test]
-fn editor_action_variants_cover_document_level_flow_contract() {
-    assert_eq!(
-        EditorAction::ReplaceSelection("text".to_owned()),
-        EditorAction::ReplaceSelection("text".to_owned())
-    );
-    assert_eq!(
-        EditorAction::ToggleFold(FoldRange::new(0, 2)),
-        EditorAction::ToggleFold(FoldRange::new(0, 2))
-    );
-    assert_eq!(EditorAction::ScrollToRow(7), EditorAction::ScrollToRow(7));
-    assert_eq!(
-        EditorAction::SelectRegion(selection(position(0, 1), position(1, 2))),
-        EditorAction::SelectRegion(selection(position(0, 1), position(1, 2)))
-    );
-    assert_eq!(EditorAction::SelectAll, EditorAction::SelectAll);
-    assert_eq!(
-        EditorAction::SelectMatchingDelimiterInPlace,
-        EditorAction::SelectMatchingDelimiterInPlace
-    );
-    assert_eq!(
-        EditorAction::SelectWordAt(position(0, 3)),
-        EditorAction::SelectWordAt(position(0, 3))
-    );
-    assert_eq!(EditorAction::DuplicateLine, EditorAction::DuplicateLine);
-    assert_eq!(EditorAction::DeleteLine, EditorAction::DeleteLine);
-    assert_eq!(EditorAction::CopyLine, EditorAction::CopyLine);
-    assert_eq!(EditorAction::CutLine, EditorAction::CutLine);
-    assert_eq!(EditorAction::Uppercase, EditorAction::Uppercase);
-    assert_eq!(EditorAction::Lowercase, EditorAction::Lowercase);
-    assert_eq!(
-        EditorAction::TrimTrailingSpaces,
-        EditorAction::TrimTrailingSpaces
-    );
-    assert_eq!(EditorAction::JoinLines, EditorAction::JoinLines);
-    assert_eq!(EditorAction::NextFunction, EditorAction::NextFunction);
-    assert_eq!(
-        EditorAction::PreviousFunction,
-        EditorAction::PreviousFunction
-    );
-    assert_eq!(
-        EditorAction::SelectCurrentFunction,
-        EditorAction::SelectCurrentFunction
-    );
-    assert_eq!(
-        EditorAction::SelectCurrentFunctionBody,
-        EditorAction::SelectCurrentFunctionBody
-    );
-}
-
-#[test]
 fn function_shortcut_catalog_entries_are_search_commands_without_defaults() {
     let shortcuts = ShortcutMap::default();
 
@@ -1230,33 +1180,6 @@ fn paragraph_selection_preserves_anchor() {
             },
         }",
     );
-}
-
-#[test]
-fn clipboard_message_variants_cover_read_and_write_results() {
-    let document_id = DocumentId::new(4);
-    let request = PasteRequest {
-        document_id,
-        revision: 0,
-        selection: caret(0, 0),
-        selection_set: SelectionSet::single(caret(0, 0)),
-        clipboard_mode: ClipboardMode::Linear,
-    };
-
-    assert!(matches!(
-        Message::ClipboardRead(request, Ok(Arc::new("pasted".to_owned()))),
-        Message::ClipboardRead(paste, Ok(text))
-            if paste.document_id == document_id
-                && paste.revision == 0
-                && paste.selection == caret(0, 0)
-                && paste.selection_set == SelectionSet::single(caret(0, 0))
-                && paste.clipboard_mode == ClipboardMode::Linear
-                && text.as_ref() == "pasted"
-    ));
-    assert!(matches!(
-        Message::ClipboardWritten(Ok(())),
-        Message::ClipboardWritten(Ok(()))
-    ));
 }
 
 #[test]

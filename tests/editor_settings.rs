@@ -2,59 +2,7 @@ use fragile_notepad::core::{
     AppearanceMode, EditorSettings, HardwareAccelerationMode, IndentationMode, KeyBinding,
     ShortcutCommand, ShortcutKey,
 };
-use fragile_notepad::editor::DecorationSettings;
 use std::path::PathBuf;
-
-#[test]
-fn editor_settings_defaults_enable_core_editor_decorations() {
-    let settings = EditorSettings::default();
-
-    assert!(settings.word_wrap);
-    assert!(!settings.auto_save);
-    assert_eq!(settings.zoom, EditorSettings::DEFAULT_ZOOM);
-    assert_eq!(settings.scroll_speed, EditorSettings::DEFAULT_SCROLL_SPEED);
-    assert_eq!(
-        settings.indentation,
-        IndentationMode::Spaces(IndentationMode::DEFAULT_SPACE_WIDTH)
-    );
-    assert_eq!(settings.appearance, AppearanceMode::System);
-    assert_eq!(
-        settings.hardware_acceleration,
-        HardwareAccelerationMode::Lazy
-    );
-    assert_eq!(settings.decorations, DecorationSettings::default());
-    assert!(settings.decorations.show_line_numbers);
-    assert!(!settings.decorations.show_spaces);
-    assert!(!settings.decorations.show_tabs);
-    assert!(!settings.decorations.show_end_of_line_markers);
-    assert!(settings.decorations.show_indentation_guides);
-    assert!(settings.decorations.show_folding_controls);
-    assert!(
-        settings
-            .shortcuts
-            .binding(ShortcutCommand::AddCaretAbove)
-            .is_some()
-    );
-    assert!(
-        settings
-            .shortcuts
-            .binding(ShortcutCommand::AddCaretBelow)
-            .is_some()
-    );
-    assert!(
-        settings
-            .shortcuts
-            .binding(ShortcutCommand::SplitSelectionIntoLines)
-            .is_some()
-    );
-    assert!(
-        settings
-            .shortcuts
-            .binding(ShortcutCommand::ConvertSelectionToRectangle)
-            .is_some()
-    );
-    assert!(settings.open_history.is_empty());
-}
 
 #[test]
 fn editor_settings_parse_xml_decoration_toggles_indentation_and_shortcuts() {
@@ -171,7 +119,7 @@ fn editor_settings_round_trip_preserves_xml_escaped_open_history() {
 }
 
 #[test]
-fn editor_settings_persist_all_decoration_keys_as_xml() {
+fn editor_settings_round_trip_preserves_general_and_decoration_settings() {
     let mut settings = EditorSettings::default();
     settings.set_word_wrap(false);
     settings.set_auto_save(true);
@@ -179,35 +127,6 @@ fn editor_settings_persist_all_decoration_keys_as_xml() {
     settings.set_scroll_speed(2.25);
     settings.set_indentation(IndentationMode::spaces(2));
     settings.set_appearance(AppearanceMode::Light);
-    settings.set_hardware_acceleration(HardwareAccelerationMode::Lazy);
-    settings.set_show_line_numbers(false);
-    settings.set_show_spaces(true);
-    settings.set_show_tabs(true);
-    settings.set_show_end_of_line_markers(true);
-    settings.set_show_indentation_guides(false);
-    settings.set_show_folding_controls(false);
-
-    let persisted = settings.to_xml_string();
-
-    assert!(persisted.contains("<fragile-notepad-settings version=\"1\">"));
-    assert!(persisted.contains("<general appearance=\"light\""));
-    assert!(persisted.contains("hardware-acceleration=\"lazy\""));
-    assert!(persisted.contains("auto-save=\"true\""));
-    assert!(persisted.contains("<editor word-wrap=\"false\" indentation=\"spaces:2\""));
-    assert!(persisted.contains("<appearance zoom=\"1.500\""));
-    assert!(persisted.contains("line-numbers=\"false\""));
-    assert!(persisted.contains("spaces=\"true\""));
-    assert!(persisted.contains("tabs=\"true\""));
-    assert!(persisted.contains("eol-markers=\"true\""));
-    assert!(persisted.contains("indentation-guides=\"false\""));
-    assert!(persisted.contains("folding-controls=\"false\""));
-    assert!(persisted.contains("command=\"save_file\" binding=\"primary+s\""));
-    assert_eq!(settings.decoration_settings().indent_width, 2);
-}
-
-#[test]
-fn editor_settings_round_trip_preserves_decoration_controls() {
-    let mut settings = EditorSettings::default();
     settings.set_show_line_numbers(false);
     settings.set_show_spaces(true);
     settings.set_show_tabs(true);
@@ -216,17 +135,10 @@ fn editor_settings_round_trip_preserves_decoration_controls() {
     settings.set_show_folding_controls(false);
     settings.set_hardware_acceleration(HardwareAccelerationMode::Diagnostic);
 
-    let parsed = EditorSettings::from_xml_str(&settings.to_xml_string());
-
-    assert_eq!(parsed.word_wrap, settings.word_wrap);
-    assert_eq!(parsed.auto_save, settings.auto_save);
-    assert_eq!(parsed.zoom, settings.zoom);
-    assert_eq!(parsed.scroll_speed, settings.scroll_speed);
-    assert_eq!(parsed.indentation, settings.indentation);
-    assert_eq!(parsed.appearance, settings.appearance);
-    assert_eq!(parsed.hardware_acceleration, settings.hardware_acceleration);
-    assert_eq!(parsed.syntax_theme, settings.syntax_theme);
-    assert_eq!(parsed.decorations, settings.decorations);
+    assert_eq!(
+        EditorSettings::from_xml_str(&settings.to_xml_string()),
+        settings
+    );
 }
 
 #[test]

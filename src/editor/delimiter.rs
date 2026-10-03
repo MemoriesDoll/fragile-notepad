@@ -144,70 +144,35 @@ mod tests {
     use super::{DelimiterMatch, matching_delimiter_at, matching_delimiter_near_caret};
 
     #[test]
-    fn matches_nested_pairs_by_delimiter_kind() {
-        assert_eq!(
-            matching_delimiter_at("a({[]})z", 1),
-            Some(DelimiterMatch {
-                delimiter: 1,
-                matching_delimiter: 6,
-            })
-        );
-        assert_eq!(
-            matching_delimiter_at("a({[]})z", 3),
-            Some(DelimiterMatch {
-                delimiter: 3,
-                matching_delimiter: 4,
-            })
-        );
+    fn nested_delimiters_match_in_both_directions() {
+        for (delimiter, matching_delimiter) in [(1, 6), (3, 4), (6, 1)] {
+            assert_eq!(
+                matching_delimiter_at("a({[]})z", delimiter),
+                Some(DelimiterMatch {
+                    delimiter,
+                    matching_delimiter
+                })
+            );
+        }
     }
 
     #[test]
-    fn matches_backward_from_closing_delimiter() {
-        assert_eq!(
-            matching_delimiter_at("a({[]})z", 6),
-            Some(DelimiterMatch {
-                delimiter: 6,
-                matching_delimiter: 1,
-            })
-        );
-    }
-
-    #[test]
-    fn prefers_delimiter_before_caret() {
-        assert_eq!(
-            matching_delimiter_near_caret("()", 1),
-            Some(DelimiterMatch {
-                delimiter: 0,
-                matching_delimiter: 1,
-            })
-        );
-    }
-
-    #[test]
-    fn falls_back_to_delimiter_at_caret() {
-        assert_eq!(
-            matching_delimiter_near_caret("x()", 1),
-            Some(DelimiterMatch {
-                delimiter: 1,
-                matching_delimiter: 2,
-            })
-        );
-    }
-
-    #[test]
-    fn falls_back_to_delimiter_at_caret_when_previous_is_unmatched() {
-        assert_eq!(
-            matching_delimiter_near_caret("{()", 1),
-            Some(DelimiterMatch {
-                delimiter: 1,
-                matching_delimiter: 2,
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_unmatched_or_non_boundary_offsets() {
+    fn caret_prefers_previous_delimiter_and_falls_back_to_current() {
+        for (text, caret, pair) in [
+            ("()", 1, Some((0, 1))),
+            ("x()", 1, Some((1, 2))),
+            ("{()", 1, Some((1, 2))),
+            ("a好()", 2, None),
+        ] {
+            assert_eq!(
+                matching_delimiter_near_caret(text, caret),
+                pair.map(|(delimiter, matching_delimiter)| DelimiterMatch {
+                    delimiter,
+                    matching_delimiter
+                }),
+                "{text:?} at {caret}"
+            );
+        }
         assert_eq!(matching_delimiter_at("(()", 0), None);
-        assert_eq!(matching_delimiter_near_caret("a\u{597d}()", 2), None);
     }
 }

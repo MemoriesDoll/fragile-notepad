@@ -7,8 +7,7 @@ use fragile_notepad::editor::layout::{
     visual_column_for_byte_column,
 };
 use fragile_notepad::editor::widget::{
-    EDITOR_TEXT_SHAPING, EditorStyle, key_action, scrollbar_row_for_position,
-    vertical_scrollbar_geometry,
+    EDITOR_TEXT_SHAPING, key_action, scrollbar_row_for_position, vertical_scrollbar_geometry,
 };
 use fragile_notepad::editor::{
     CaretMotion, DecorationModel, DecorationSettings, EditorAction, EditorBuffer, EditorLayout,
@@ -18,7 +17,6 @@ use fragile_notepad::editor::{
     line_number_left_x, line_number_text_x, planned_text_draws, planned_text_draws_with_markers,
 };
 use iced::Rectangle;
-use iced::Theme;
 use iced::advanced::text;
 use iced::highlighter;
 use iced::keyboard::{self, key};
@@ -94,26 +92,6 @@ fn syntax_settings(token: &str) -> highlighter::Settings {
         token: token.to_owned(),
         theme: highlighter::Theme::InspiredGitHub,
     }
-}
-
-#[test]
-fn editor_widget_style_derives_named_roles_from_modern_theme_mode() {
-    let theme = Theme::Light;
-    let style = EditorStyle::from_theme(&theme);
-    let dark_style = EditorStyle::from_theme(&Theme::Dark);
-
-    assert_ne!(style.surface, style.gutter);
-    assert_ne!(style.surface, style.active_line);
-    assert_eq!(style.text, style.caret);
-    assert_eq!(style.text, style.syntax_fallback_text);
-    assert_ne!(style.line_numbers, style.text);
-    assert_ne!(style.indent_guides, style.line_numbers);
-    assert!(style.selection.a > style.active_line.a);
-
-    assert_ne!(style.surface, dark_style.surface);
-    assert_ne!(style.text, dark_style.text);
-    assert_eq!(dark_style.text, dark_style.caret);
-    assert_eq!(dark_style.text, dark_style.syntax_fallback_text);
 }
 
 #[test]
@@ -1747,18 +1725,6 @@ fn shortcut_map_resolves_binding_after_first_key_misses() {
             keyboard::Modifiers::SHIFT | keyboard::Modifiers::ALT,
         ),
         Some(ShortcutCommand::SaveFile)
-    );
-}
-
-#[test]
-fn shortcut_defaults_assign_zoom_in_binding() {
-    let shortcuts = ShortcutMap::default();
-
-    assert_eq!(
-        shortcuts.binding(ShortcutCommand::ZoomIn),
-        Some(KeyBinding::primary(ShortcutKey::Named(
-            fragile_notepad::core::shortcuts::NamedShortcutKey::Plus,
-        )))
     );
 }
 

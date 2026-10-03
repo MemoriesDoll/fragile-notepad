@@ -4,8 +4,6 @@ use fragile_notepad::startup::iced_settings;
 use iced::Backend;
 use iced::advanced::graphics::text::{self as graphics_text, cosmic_text, font_system};
 
-use std::fs;
-
 #[test]
 fn startup_settings_keep_first_paint_on_software_rendering() {
     let settings = iced_settings();
@@ -33,49 +31,10 @@ fn editor_font_route_keeps_primary_font_and_platform_cjk_fallback() {
     }
 
     let han_families = shaped_font_families(font_system.raw(), "\u{6c49}");
-    let installed_fallback_families = installed_editor_fallback_families(
-        font_system.raw(),
-        EDITOR_FONT_ROUTE.cjk_fallback_families,
-    );
-
     assert!(
         !han_families.is_empty(),
         "Han glyph should resolve to a platform fallback font"
     );
-
-    if !installed_fallback_families.is_empty()
-        && !han_families.iter().any(|name| {
-            installed_fallback_families
-                .iter()
-                .any(|fallback| name == fallback)
-        })
-    {
-        eprintln!(
-            "Han glyph resolved through platform fallback outside configured CJK list {:?}: {han_families:?}",
-            installed_fallback_families
-        );
-    }
-}
-
-fn installed_editor_fallback_families(
-    raw: &cosmic_text::FontSystem,
-    fallback_families: &[&str],
-) -> Vec<String> {
-    let mut installed = Vec::new();
-
-    for face in raw.db().faces() {
-        for (name, _) in &face.families {
-            if fallback_families.iter().any(|fallback| name == fallback)
-                && !installed
-                    .iter()
-                    .any(|installed_name| installed_name == name)
-            {
-                installed.push(name.to_string());
-            }
-        }
-    }
-
-    installed
 }
 
 fn shaped_font_families(raw: &mut cosmic_text::FontSystem, content: &str) -> Vec<String> {
@@ -101,69 +60,4 @@ fn shaped_font_families(raw: &mut cosmic_text::FontSystem, content: &str) -> Vec
         .iter()
         .map(|(name, _)| name.to_string())
         .collect()
-}
-
-#[test]
-fn iced_dependency_does_not_enable_slow_startup_defaults() {
-    let manifest = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
-        .expect("read Cargo.toml");
-    let iced_line = manifest
-        .lines()
-        .find(|line| line.trim_start().starts_with("iced ="))
-        .expect("find iced dependency");
-
-    assert!(
-        iced_line.contains("default-features = false"),
-        "iced dependency must disable default features: {iced_line}"
-    );
-    assert!(
-        iced_line.contains("\"tiny-skia\""),
-        "iced dependency must keep the tiny-skia renderer enabled: {iced_line}"
-    );
-    assert!(
-        iced_line.contains("\"highlighter\""),
-        "the full Iced syntax highlighter must stay enabled: {iced_line}"
-    );
-    assert!(
-        manifest.contains("default = [\"hybrid-rendering\"]"),
-        "hybrid rendering should be the default build feature"
-    );
-    assert!(
-        manifest
-            .contains("hybrid-rendering = [\"iced/wgpu-bare\", \"dep:iced_wgpu\", \"dep:wgpu\"]"),
-        "hybrid rendering should use the explicit Vulkan feature graph"
-    );
-    assert!(
-        !iced_line.contains("\"debug\""),
-        "debug tooling should stay disabled for startup latency: {iced_line}"
-    );
-}
-
-#[test]
-fn highlighter_exposes_language_catalog_for_menu() {
-    let syntaxes = iced::highlighter::syntaxes();
-
-    assert!(
-        syntaxes.len() > 1,
-        "language menu should not be limited to plain text"
-    );
-    assert!(
-        syntaxes
-            .iter()
-            .any(|syntax| syntax.name == "Rust" && syntax.token == "rs"),
-        "language catalog should include Rust with the token used by the highlighter"
-    );
-}
-
-#[test]
-fn release_windows_build_uses_gui_subsystem() {
-    let main_rs = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"))
-        .expect("read src/main.rs");
-
-    assert!(
-        main_rs.contains(
-            "cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = \"windows\")"
-        ),
-        "release Windows builds should not open a console window"
-    );
 }

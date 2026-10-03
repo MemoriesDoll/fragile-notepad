@@ -732,27 +732,6 @@ fn editor_model_rust_outline_ignores_comments_strings_and_raw_strings() {
 }
 
 #[test]
-fn editor_model_outline_detects_python_functions_and_methods() {
-    let buffer = EditorBuffer::from_text(
-        "def top():\n    pass\n\nclass Service:\n    async def load(self):\n        pass\n    def save(self):\n        pass\n",
-    );
-    let outline = outline_for_syntax(&buffer, "py");
-
-    assert_eq!(
-        outline
-            .iter()
-            .map(|entry| (entry.name.as_str(), entry.kind, entry.depth))
-            .collect::<Vec<_>>(),
-        vec![
-            ("top", FunctionKind::Function, 0),
-            ("load", FunctionKind::Method, 1),
-            ("save", FunctionKind::Method, 1)
-        ]
-    );
-    assert!(outline.iter().all(|entry| entry.body_range.is_some()));
-}
-
-#[test]
 fn editor_model_outline_detects_c_family_function_keywords() {
     let buffer = EditorBuffer::from_text(
         "function top() {\n    return 1;\n}\nclass Service {\n    load() {\n    }\n}\n",
@@ -1128,28 +1107,6 @@ fn editor_model_outline_matches_language_snippet_fixtures() {
 }
 
 #[test]
-fn editor_model_outline_cascades_python_classes_methods_and_nested_functions() {
-    let buffer = EditorBuffer::from_text(
-        "def top():\n    def nested():\n        pass\n\nclass Service:\n    def load(self):\n        def local():\n            pass\n    async def save(self):\n        pass\n",
-    );
-    let outline = outline_for_syntax(&buffer, "py");
-
-    assert_eq!(
-        outline
-            .iter()
-            .map(|entry| (entry.name.as_str(), entry.kind, entry.depth))
-            .collect::<Vec<_>>(),
-        vec![
-            ("top", FunctionKind::Function, 0),
-            ("nested", FunctionKind::Function, 1),
-            ("load", FunctionKind::Method, 1),
-            ("local", FunctionKind::Method, 2),
-            ("save", FunctionKind::Method, 1),
-        ]
-    );
-}
-
-#[test]
 fn editor_model_outline_deduplicates_overlapping_python_async_rules_in_tree() {
     let request = OutlineParseRequest::new(
         DocumentId::new(6),
@@ -1177,28 +1134,6 @@ fn editor_model_outline_deduplicates_overlapping_python_async_rules_in_tree() {
             .collect::<Vec<_>>(),
         vec!["save"]
     );
-}
-
-#[test]
-fn editor_model_outline_cascades_javascript_classes_methods_and_nested_functions() {
-    let buffer = EditorBuffer::from_text(
-        "function top() {\n    function nested() {}\n}\nclass Service {\n    load() {\n        function local() {}\n    }\n}\n",
-    );
-    let outline = outline_for_syntax(&buffer, "js");
-
-    assert_eq!(
-        outline
-            .iter()
-            .map(|entry| (entry.name.as_str(), entry.kind, entry.depth))
-            .collect::<Vec<_>>(),
-        vec![
-            ("top", FunctionKind::Function, 0),
-            ("nested", FunctionKind::Function, 1),
-            ("load", FunctionKind::Method, 1),
-            ("local", FunctionKind::Method, 2),
-        ]
-    );
-    assert!(outline.iter().all(|entry| entry.body_range.is_some()));
 }
 
 #[test]

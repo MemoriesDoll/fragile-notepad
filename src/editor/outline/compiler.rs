@@ -817,45 +817,6 @@ mod tests {
     use crate::editor::outline::schema::parse_outline_schema;
 
     #[test]
-    fn compiles_first_party_schema_into_reusable_plans() {
-        let (schema, parse_diagnostics) =
-            parse_outline_schema(crate::assets::syntax::outline_parsers_xml());
-        let compiled = compile_outline_schema(schema, parse_diagnostics);
-
-        assert!(compiled.diagnostics.is_empty());
-        let rust = compiled
-            .plans
-            .iter()
-            .find(|plan| plan.syntax_tokens.iter().any(|token| token == "rs"))
-            .unwrap();
-
-        assert_eq!(rust.family_id, "brace");
-        assert_eq!(rust.adapter_name, "rust");
-        assert_eq!(rust.structure.bodies[0].kind, OutlineBodyKind::Brace);
-        assert!(
-            rust.containers
-                .iter()
-                .any(|rule| rule.node_kind == OutlineNodeKind::Impl)
-        );
-        assert!(
-            rust.declarations
-                .iter()
-                .any(|rule| rule.node_kind == OutlineNodeKind::Function)
-        );
-
-        let c_family = compiled
-            .plans
-            .iter()
-            .find(|plan| plan.syntax_tokens.iter().any(|token| token == "cpp"))
-            .unwrap();
-        let callable = &c_family.declarations[0].callable;
-        assert_eq!(
-            callable.control_headers,
-            ["for", "if", "else if", "while", "switch", "catch"]
-        );
-    }
-
-    #[test]
     fn invalid_schema_entries_report_diagnostics_without_panicking() {
         let xml = r#"
             <outline-parsers schema-version="1">

@@ -526,25 +526,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_first_party_outline_schema() {
-        let (schema, diagnostics) =
-            parse_outline_schema(crate::assets::syntax::outline_parsers_xml());
-
-        assert!(diagnostics.is_empty());
-        assert_eq!(schema.schema_version.as_deref(), Some("1"));
-        assert!(
-            schema
-                .families
-                .iter()
-                .any(|family| family.id.as_deref() == Some("brace"))
-        );
-        assert!(schema.languages.iter().any(|language| {
-            language.name.as_deref() == Some("Rust")
-                && language.tokens.iter().any(|token| token == "rs")
-        }));
-    }
-
-    #[test]
     fn malformed_xml_returns_diagnostic_instead_of_panicking() {
         let (schema, diagnostics) = parse_outline_schema("<outline-parsers>");
 

@@ -750,48 +750,47 @@ mod tests {
     use crate::core::{KeyBinding, ShortcutKey, ShortcutModifiers};
 
     #[test]
-    fn active_flyouts_pin_first_submenu_next_to_parent_row() {
-        let entries = vec![
-            item("Plain", Message::None),
-            submenu(
-                "sets",
+    fn nested_flyouts_follow_parent_width_and_row_offsets() {
+        for root_offset in [false, true] {
+            for label in [
                 "Character sets",
-                vec![item("Western", Message::None)],
-            ),
-        ];
+                "A very long parent submenu label that expands the menu",
+            ] {
+                let children = vec![
+                    item("Arabic", Message::None),
+                    item("Baltic", Message::None),
+                    submenu(
+                        "western",
+                        "Western European",
+                        vec![item("OEM-US", Message::None)],
+                    ),
+                ];
+                let child_width = panel_width(&children, 260.0);
+                let mut entries = Vec::new();
+                if root_offset {
+                    entries.push(item("Root item", Message::None));
+                }
+                entries.push(submenu("sets", label, children));
+                let root_width = panel_width(&entries, 260.0);
+                let flyouts =
+                    active_flyouts(&entries, &["sets".to_owned(), "western".to_owned()], 260.0);
+                let parent_y = 3.0 + if root_offset { ROW_HEIGHT } else { 0.0 };
 
-        let flyouts = active_flyouts(&entries, &["sets".to_owned()], 260.0);
-
-        assert_eq!(flyouts.len(), 1);
-        assert_eq!(flyouts[0].depth, 1);
-        assert_eq!(flyouts[0].x, 260.0);
-        assert_eq!(flyouts[0].y, 3.0 + ROW_HEIGHT);
-    }
-
-    #[test]
-    fn active_flyouts_pin_nested_submenu_relative_to_parent_row() {
-        let entries = vec![submenu(
-            "sets",
-            "Character sets",
-            vec![
-                item("Arabic", Message::None),
-                item("Baltic", Message::None),
-                submenu(
-                    "western",
-                    "Western European",
-                    vec![item("OEM-US", Message::None)],
-                ),
-            ],
-        )];
-
-        let flyouts = active_flyouts(&entries, &["sets".to_owned(), "western".to_owned()], 260.0);
-
-        assert_eq!(flyouts.len(), 2);
-        assert_eq!(flyouts[0].x, 260.0);
-        assert_eq!(flyouts[0].y, 3.0);
-        assert_eq!(flyouts[1].depth, 2);
-        assert_eq!(flyouts[1].x, 520.0);
-        assert_eq!(flyouts[1].y, 6.0 + ROW_HEIGHT * 2.0);
+                assert_eq!(flyouts.len(), 2);
+                assert_eq!(
+                    (flyouts[0].depth, flyouts[0].x, flyouts[0].y),
+                    (1, root_width, parent_y)
+                );
+                assert_eq!(
+                    (flyouts[1].depth, flyouts[1].x, flyouts[1].y),
+                    (
+                        2,
+                        root_width + child_width,
+                        parent_y + 3.0 + ROW_HEIGHT * 2.0
+                    )
+                );
+            }
+        }
     }
 
     #[test]
@@ -825,59 +824,5 @@ mod tests {
         )];
 
         assert_eq!(panel_width(&entries, 202.0), 202.0);
-    }
-
-    #[test]
-    fn nested_flyout_position_uses_actual_parent_width() {
-        let entries = vec![submenu(
-            "sets",
-            "A very long parent submenu label that expands the menu",
-            vec![submenu(
-                "western",
-                "Western European",
-                vec![item("OEM-US", Message::None)],
-            )],
-        )];
-        let root_width = panel_width(&entries, 202.0);
-        let child_width = panel_width(
-            &[submenu(
-                "western",
-                "Western European",
-                vec![item("OEM-US", Message::None)],
-            )],
-            202.0,
-        );
-
-        let flyouts = active_flyouts(&entries, &["sets".to_owned(), "western".to_owned()], 202.0);
-
-        assert_eq!(flyouts.len(), 2);
-        assert_eq!(flyouts[0].x, root_width);
-        assert_eq!(flyouts[1].x, root_width + child_width);
-    }
-
-    #[test]
-    fn nested_flyout_position_includes_parent_flyout_offset() {
-        let entries = vec![
-            item("Root item", Message::None),
-            submenu(
-                "sets",
-                "Character sets",
-                vec![
-                    item("Arabic", Message::None),
-                    item("Baltic", Message::None),
-                    submenu(
-                        "western",
-                        "Western European",
-                        vec![item("OEM-US", Message::None)],
-                    ),
-                ],
-            ),
-        ];
-
-        let flyouts = active_flyouts(&entries, &["sets".to_owned(), "western".to_owned()], 260.0);
-
-        assert_eq!(flyouts.len(), 2);
-        assert_eq!(flyouts[0].y, 3.0 + ROW_HEIGHT);
-        assert_eq!(flyouts[1].y, 6.0 + ROW_HEIGHT * 3.0);
     }
 }

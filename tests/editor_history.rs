@@ -134,18 +134,25 @@ fn editor_history_record_with_selection_sets_restores_full_snapshots() {
 }
 
 #[test]
-fn editor_history_record_after_undo_clears_redo_stack() {
-    let mut buffer = EditorBuffer::from_text("a");
-    let mut history = EditorHistory::new(buffer.text());
-
-    history.record(insert(0, 1, "b", caret(0, 2)));
-    assert_eq!(history.undo(&mut buffer), Some(caret(0, 1)));
-
-    history.record(insert(0, 1, "c", caret(0, 2)));
-
-    assert!(history.can_undo());
-    assert!(!history.can_redo());
-    assert_eq!(history.redo(&mut buffer), None);
+fn new_edits_after_undo_clear_redo_with_or_without_grouping() {
+    for grouped in [false, true] {
+        let mut buffer = EditorBuffer::from_text("a");
+        let mut history = EditorHistory::new("");
+        let record = |history: &mut EditorHistory, text| {
+            let edit = insert(0, 0, text, caret(0, 1));
+            if grouped {
+                history.record_with_grouping(edit);
+            } else {
+                history.record(edit);
+            }
+        };
+        record(&mut history, "a");
+        assert_eq!(history.undo(&mut buffer), Some(caret(0, 0)));
+        record(&mut history, "b");
+        assert!(history.can_undo());
+        assert!(!history.can_redo());
+        assert_eq!(history.redo(&mut buffer), None);
+    }
 }
 
 #[test]
@@ -256,18 +263,4 @@ fn editor_history_selection_replacement_restores_selection_and_dirty_snapshot() 
 
     history.mark_clean(&buffer.text());
     assert!(!history.is_dirty(&buffer.text()));
-}
-
-#[test]
-fn editor_history_new_grouped_edit_after_undo_clears_redo_stack() {
-    let mut buffer = EditorBuffer::from_text("a");
-    let mut history = EditorHistory::new("");
-
-    history.record_with_grouping(insert(0, 0, "a", caret(0, 1)));
-    assert_eq!(history.undo(&mut buffer), Some(caret(0, 0)));
-
-    history.record_with_grouping(insert(0, 0, "b", caret(0, 1)));
-
-    assert!(!history.can_redo());
-    assert_eq!(history.redo(&mut buffer), None);
 }

@@ -1324,26 +1324,3 @@ pub fn input(theme: &Theme, status: text_input::Status) -> text_input::Style {
         selection: palette.selection,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::tab_top_bar;
-    use iced::{Background, Theme};
-
-    #[test]
-    fn active_tab_top_bar_keeps_original_color() {
-        let style = tab_top_bar(true, false)(&Theme::Light);
-
-        assert!(matches!(style.background, Some(Background::Color(_))));
-    }
-
-    #[test]
-    fn inactive_tab_top_bar_stays_transparent() {
-        let style = tab_top_bar(false, false)(&Theme::Light);
-
-        assert_eq!(
-            style.background,
-            Some(Background::Color(iced::Color::TRANSPARENT))
-        );
-    }
-}

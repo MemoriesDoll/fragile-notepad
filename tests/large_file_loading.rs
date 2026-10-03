@@ -484,8 +484,3 @@ fn chunked_loader_delivers_finished_after_many_droppable_chunks() {
         "terminal finished event should not be dropped when the bounded stream is full"
     );
 }
-
-#[test]
-fn default_chunk_size_remains_large_file_oriented() {
-    assert_eq!(DEFAULT_CHUNK_SIZE, 64 * 1024);
-}

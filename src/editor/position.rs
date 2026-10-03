@@ -515,35 +515,20 @@ mod tests {
     use super::{EditorPosition, position_after_text, position_for_byte_offset};
 
     #[test]
-    fn byte_offsets_convert_to_editor_line_and_byte_column() {
-        assert_eq!(
-            position_for_byte_offset("one\ntwo", 5),
-            Some(EditorPosition::new(1, 1))
-        );
-        assert_eq!(
-            position_for_byte_offset("one\r\ntwo", 6),
-            Some(EditorPosition::new(1, 1))
-        );
-    }
-
-    #[test]
-    fn byte_offsets_count_columns_as_utf8_byte_indices() {
-        let text = "\u{00e9}x\n\u{597d}";
-        let prefix = "\u{00e9}x\n";
-
-        assert_eq!(
-            position_for_byte_offset(text, prefix.len()),
-            Some(EditorPosition::new(1, 0))
-        );
-        assert_eq!(
-            position_for_byte_offset("\u{00e9}x", "\u{00e9}".len()),
-            Some(EditorPosition::new(0, 2))
-        );
-    }
-
-    #[test]
-    fn byte_offsets_reject_non_char_boundaries() {
-        assert_eq!(position_for_byte_offset("\u{00e9}", 1), None);
+    fn byte_offsets_handle_line_endings_and_utf8_boundaries() {
+        for (text, offset, expected) in [
+            ("one\ntwo", 5, Some(EditorPosition::new(1, 1))),
+            ("one\r\ntwo", 6, Some(EditorPosition::new(1, 1))),
+            ("éx\n好", "éx\n".len(), Some(EditorPosition::new(1, 0))),
+            ("éx", "é".len(), Some(EditorPosition::new(0, 2))),
+            ("é", 1, None),
+        ] {
+            assert_eq!(
+                position_for_byte_offset(text, offset),
+                expected,
+                "{text:?} at {offset}"
+            );
+        }
     }
 
     #[test]

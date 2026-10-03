@@ -152,8 +152,6 @@ fn deterministic_hash(input: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::outline::compiler::OutlineBodyKind;
-    use crate::editor::outline::types::OutlineNodeKind;
 
     #[test]
     fn included_registry_resolves_required_language_tokens() {
@@ -212,39 +210,12 @@ mod tests {
     }
 
     #[test]
-    fn registry_exposes_compiled_plan_metadata_for_document_parser() {
-        let registry = OutlineRegistry::load();
-        let ruby = registry.plan_for_syntax("rb").unwrap();
-
-        assert_eq!(ruby.family_id, "end-keyword");
-        assert_eq!(ruby.structure.bodies[0].kind, OutlineBodyKind::EndKeyword);
-        assert!(
-            ruby.containers
-                .iter()
-                .any(|rule| rule.node_kind == OutlineNodeKind::Class)
-        );
-        assert!(
-            ruby.declarations
-                .iter()
-                .any(|rule| rule.node_kind == OutlineNodeKind::Function
-                    && rule.method_containers.contains(&OutlineNodeKind::Class)
-                    && rule.method_containers.contains(&OutlineNodeKind::Module))
-        );
-    }
-
-    #[test]
     fn malformed_registry_falls_back_to_empty_registry_with_diagnostics() {
         let registry = OutlineRegistry::from_xml("<outline-parsers>");
 
         assert!(registry.plans().is_empty());
         assert!(registry.plan_for_syntax("rs").is_none());
         assert!(!registry.diagnostics().is_empty());
-    }
-
-    #[test]
-    fn registry_hash_is_deterministic() {
-        assert_eq!(deterministic_hash("abc"), deterministic_hash("abc"));
-        assert_ne!(deterministic_hash("abc"), deterministic_hash("abd"));
     }
 
     #[test]

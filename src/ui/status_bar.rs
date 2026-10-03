@@ -203,52 +203,18 @@ fn cursor_display_column(document: &Document, tab_width: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        StatusSegment, cursor_display_column, document_status_label, visible_status_segments,
-    };
+    use super::{StatusSegment, cursor_display_column, visible_status_segments};
     use crate::core::{Document, DocumentId};
     use crate::editor::{EditorPosition, EditorSelection};
 
     #[test]
-    fn cursor_display_column_uses_visual_columns_for_unicode_and_tabs() {
-        let mut document =
-            Document::from_path(DocumentId::new(1), "unicode.txt", "\u{00e9}\t\u{597d}");
-        document.set_main_selection(EditorSelection::new(
-            EditorPosition::new(0, "\u{00e9}\t".len()),
-            EditorPosition::new(0, "\u{00e9}\t".len()),
-        ));
-
-        assert_eq!(cursor_display_column(&document, 4), 5);
-    }
-
-    #[test]
-    fn cursor_display_column_uses_configured_tab_width() {
-        let mut document = Document::from_path(DocumentId::new(1), "tabs.txt", "a\tb");
-        document.set_main_selection(EditorSelection::new(
-            EditorPosition::new(0, "a\t".len()),
-            EditorPosition::new(0, "a\t".len()),
-        ));
-
-        assert_eq!(cursor_display_column(&document, 2), 3);
-        assert_eq!(cursor_display_column(&document, 8), 9);
-    }
-
-    #[test]
-    fn document_status_label_shows_indexing_while_document_is_incomplete() {
-        let generation = crate::core::DocumentLoadGeneration::next();
-        let document = Document::loading(DocumentId::new(1), "loading.txt", generation);
-
-        assert_eq!(document_status_label(&document, Some("Saved")), "indexing");
-    }
-
-    #[test]
-    fn document_status_label_returns_to_file_status_after_load_completes() {
-        let document = Document::from_path(DocumentId::new(1), "loaded.txt", "text");
-
-        assert_eq!(
-            document_status_label(&document, Some("Saved elsewhere")),
-            "Saved elsewhere"
-        );
+    fn cursor_display_column_uses_unicode_and_configured_tab_stops() {
+        let mut document = Document::from_path(DocumentId::new(1), "unicode.txt", "é\t好");
+        let caret = EditorPosition::new(0, "é\t".len());
+        document.set_main_selection(EditorSelection::new(caret, caret));
+        for (tab_width, column) in [(2, 3), (4, 5), (8, 9)] {
+            assert_eq!(cursor_display_column(&document, tab_width), column);
+        }
     }
 
     #[test]

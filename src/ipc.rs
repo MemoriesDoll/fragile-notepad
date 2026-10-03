@@ -413,7 +413,7 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
-    use super::{SingleInstanceConfig, sanitize_app_id};
+    use super::SingleInstanceConfig;
     use std::path::PathBuf;
 
     #[test]
@@ -497,26 +497,19 @@ mod tests {
     }
 
     #[test]
-    fn app_id_sanitizer_preserves_simple_cross_platform_names() {
-        assert_eq!(
-            sanitize_app_id("fragile-notepad_user-1"),
-            "fragile-notepad_user-1"
-        );
-    }
-
-    #[test]
-    fn app_id_sanitizer_replaces_path_and_namespace_separators() {
-        assert_eq!(
-            sanitize_app_id("Fragile Notepad/org.example\\main"),
-            "Fragile_Notepad_org_example_main"
-        );
-    }
-
-    #[test]
-    fn config_exposes_sanitized_app_id() {
-        let config = SingleInstanceConfig::new("fragile notepad");
-
-        assert_eq!(config.sanitized_app_id(), "fragile_notepad");
+    fn config_sanitizes_app_ids_for_paths_and_namespaces() {
+        for (input, expected) in [
+            ("fragile-notepad_user-1", "fragile-notepad_user-1"),
+            (
+                "Fragile Notepad/org.example\\main",
+                "Fragile_Notepad_org_example_main",
+            ),
+        ] {
+            assert_eq!(
+                SingleInstanceConfig::new(input).sanitized_app_id(),
+                expected
+            );
+        }
     }
 
     #[cfg(unix)]
