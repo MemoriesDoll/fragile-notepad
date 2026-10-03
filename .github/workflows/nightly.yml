@@ -76,10 +76,11 @@ jobs:
             os: ubuntu-latest
             artifact: fragile-notepad-linux-x64
             archive: fragile-notepad-linux-x64.tar.gz
-          - name: macos
-            os: macos-latest
-            artifact: fragile-notepad-macos
-            archive: fragile-notepad-macos.tar.gz
+          # Temporarily disabled:
+          # - name: macos
+          #   os: macos-latest
+          #   artifact: fragile-notepad-macos
+          #   archive: fragile-notepad-macos.tar.gz
 
     steps:
       - name: Checkout
@@ -254,7 +255,6 @@ jobs:
           Artifacts:
           - Windows x64 zip
           - Linux x64 tar.gz
-          - macOS tar.gz
           EOF
           )"
 

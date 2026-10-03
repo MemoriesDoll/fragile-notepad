@@ -3,7 +3,7 @@
 # Fragile Notepad
 
 A desktop text editor for notes and source files. Written in Rust with
-[Iced](https://iced.rs), for Windows, Linux, and macOS.
+[Iced](https://iced.rs), for Windows and Linux.
 
 [Releases](https://github.com/MemoriesDoll/fragile-notepad/releases)
 &nbsp;·&nbsp; [Development](DEVELOPMENT.md)
@@ -31,19 +31,14 @@ Generate assets on fresh checkouts and after SVG changes; outputs are ignored by
 cargo run --release --locked
 ```
 
-**Linux / macOS**
+**Linux**
 
 ```sh
 bash scripts/generate_icon_assets.sh
 cargo run --release --locked
 ```
 
-The default build starts in software and can switch to Vulkan. On macOS:
-
-```bash
-brew install molten-vk vulkan-loader vulkan-tools
-source scripts/setup-macos-vulkan.sh
-```
+The default build starts in software and can switch to Vulkan.
 
 Append `--no-default-features` to Cargo commands for software-only builds.
 Linux dependencies are listed in [CI](.github/workflows/ci.yml).
