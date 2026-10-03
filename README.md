@@ -13,10 +13,8 @@ A desktop text editor for notes and source files. Written in Rust with
 
 ## Build from source
 
-You need Git, a current stable [Rust toolchain](https://rustup.rs), and Python
-3.10 or newer. The repository includes its patched dependencies; no separate
-vendor checkout step is required. After cloning, install the asset tooling and
-use the native build tools for your platform:
+Requires Git, stable [Rust](https://rustup.rs), Python 3.10+, and native build tools.
+Patched dependencies are included.
 
 ```sh
 git clone https://github.com/MemoriesDoll/fragile-notepad.git
@@ -24,9 +22,7 @@ cd fragile-notepad
 python -m pip install -r scripts/requirements-assets.txt
 ```
 
-Generate the raster assets before every fresh build or after changing an SVG.
-The script generates the embedded RGBA files and the Windows ICO / macOS ICNS /
-PNG packaging exports; generated files remain ignored by Git.
+Generate assets on fresh checkouts and after SVG changes; outputs are ignored by Git.
 
 **Windows — PowerShell**
 
@@ -42,26 +38,16 @@ bash scripts/generate_icon_assets.sh
 cargo run --release --locked
 ```
 
-The default build includes the Vulkan renderer and starts with software rendering
-before an optional hardware handoff. On macOS, install the Vulkan runtime before
-building or running the default feature set:
+The default build starts in software and can switch to Vulkan. On macOS:
 
 ```bash
 brew install molten-vk vulkan-loader vulkan-tools
 source scripts/setup-macos-vulkan.sh
 ```
 
-For a software-only build without Vulkan dependencies, append
-`--no-default-features` to both Cargo commands. Linux windowing and Vulkan
-packages are listed in the [CI workflow](.github/workflows/ci.yml). See
-[Packaging](PACKAGING.md) for release archives and the macOS launcher bundle.
-
-After building, launch `target/release/fragile-notepad.exe` on Windows or
-`target/release/fragile-notepad` on Linux/macOS. Windows release builds run
-without a console window; debug builds keep the console for diagnostics.
-
-For local checks, run `.\scripts\ci.ps1` on Windows or `bash scripts/ci.sh`
-on Linux and macOS.
+Append `--no-default-features` to Cargo commands for software-only builds.
+Linux dependencies are listed in [CI](.github/workflows/ci.yml).
+See [checks](DEVELOPMENT.md#checks-and-previews) and [packaging](PACKAGING.md).
 
 ## License
 

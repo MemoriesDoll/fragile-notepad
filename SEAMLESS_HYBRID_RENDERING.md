@@ -1,179 +1,62 @@
-# Hybrid Rendering
+# Hybrid rendering
 
-This document describes the current implementation. It replaces the earlier
-design plan and its illustrative API sketches. Setup and renderer diagnostics
-are in [DEVELOPMENT.md](DEVELOPMENT.md).
+The default `hybrid-rendering` feature adds Vulkan to tiny-skia.
+`--no-default-features` builds only software rendering. Startup always uses
+`Backend::Software` with antialiasing and vsync disabled.
 
-## Startup and policy
+## Policy
 
-The application always starts with `Backend::Software` (tiny-skia),
-antialiasing disabled, and vsync disabled, as configured by
-[src/startup.rs](src/startup.rs). The default Cargo feature `hybrid-rendering`
-adds `iced/wgpu`; `--no-default-features` keeps the software renderer.
+[rendering.rs](src/app/rendering.rs) resolves saved policy and
+`FRAGILE_NOTEPAD_RENDER_BACKEND`:
 
-[src/app/rendering.rs](src/app/rendering.rs) resolves the rendering policy from
-saved settings and the optional `FRAGILE_NOTEPAD_RENDER_BACKEND` override:
-
-| Override | Policy |
+| Value | Behavior |
 | --- | --- |
-| `software` | Suppress hardware-boost requests |
-| `lazy-gpu` | Permit the normal hardware handoff |
-| `hardware-diagnostic` | Permit hardware handoff for diagnostics |
+| `software` | Suppress hardware requests |
+| `lazy-gpu` | Allow hardware handoff |
+| `hardware-diagnostic` | Allow diagnostic handoff |
 
-A recognized environment value takes precedence over saved settings. Invalid
-values are ignored and identified in the About debug information. This policy
-controls boost requests; changing it to software does not switch an already-active
-GPU renderer back to tiny-skia.
+Recognized overrides win; invalid values are ignored and shown in About debug
+information. Loading saved lazy/diagnostic settings requests a boost when the main
+window opens; without saved settings, opening About can trigger it.
+Hardware requests select Vulkan. Keep `WGPU_BACKEND` unset or set to `vulkan`.
+The renderer is shared across windows and remains active after About closes.
 
-When saved settings load, a lazy/diagnostic policy requests a boost once the main
-window is open. With no saved settings, that load-time branch does not request a
-boost. Opening About requests a Vulkan handoff under lazy/diagnostic policy;
-software-only policy and prior failure suppression still apply. All hardware
-handoffs explicitly select `Api::Vulkan`, including startup and settings requests,
-so an earlier boost uses the same renderer as the About animation. The renderer
-is shared across application windows and stays active after About closes.
-Unavailable Vulkan support retains the existing software fallback.
-The low-level `WGPU_BACKEND` diagnostic environment override still takes
-precedence inside wgpu; leave it unset or use `vulkan` for Vulkan rendering.
-Find, inline replace, and function-list visibility use short reveal/fade transitions;
-menus, custom settings dropdowns, and confirmation/window-list popups have brief
-entrance motion. These run on both renderers and request frames only while
-transitioning. The About panel and its backdrop fade in and out. Its header has
-independently floating bunny and paper layers, with soft curved light trails
-flowing toward a macaw quill, on a shared 60fps clock. The effect stops scheduling
-frames while unfocused, clipped out, or closing. Animation ticks never request
-additional handoffs. The small trail texture is generated on the CPU; Vulkan
-handles image sampling, blending, compositing, and presentation after handoff.
+States are Software → PreparingHardware → Hardware, or Failed.
+Duplicate requests are suppressed. Failure retains software and suppresses retries
+for the process. Changing policy to software does not switch an active GPU back.
 
-The app states are `Software`, `PreparingHardware`, `Hardware`, and
-`Failed(RenderFailureCategory)`. Duplicate requests are suppressed while preparing
-or already using hardware. A failure suppresses further attempts for that process;
-there is no timed retry loop.
+## Handoff
 
-## Runtime handoff
+`backend::prepare_warm_and_commit` reports `StrictHandoffOutcome` through
+`Message::BackendBoostConfigured`. The implementation spans vendored Iced's
+winit runtime, wgpu compositor, and fallback renderer.
 
-The app calls `backend::prepare_warm_and_commit` and receives
-`backend::StrictHandoffOutcome` through `Message::BackendBoostConfigured`.
-The older `backend::configure` task remains available for diagnostics, but is not
-the production strict-handoff path.
+1. Prepare a pending GPU compositor asynchronously while software stays active.
+2. Draw each live window into a pending renderer and warm it offscreen.
+   Completion polls use redraw deadlines; warm-up has a three-second timeout.
+3. Retain warmed renderers until a successful software presentation.
+4. Install them and configure visible surfaces, retaining software state for rollback.
+5. Require each live window's first GPU presentation within three seconds.
+   Success releases software resources; failure restores them.
 
-The implementation lives in the
-[local Iced source](vendor/iced/), primarily
-`winit/src/lib.rs`, `wgpu/src/lib.rs`, `graphics/src/compositor.rs`, and
-`renderer/src/fallback.rs` inside the local dependency.
+Software continues drawing during preparation. Warm-up owns recorded primitives
+and resources until submission completes. Closing or resizing windows updates
+handoff participation and dimensions. Prepare, warm, commit, presentation,
+cancellation, unsupported operations, and rollback failures have distinct outcomes.
 
-1. **Prepare:** create the pending GPU compositor asynchronously while the window
-   manager retains the software compositor, renderers, and surfaces. Completion
-   wakes the runtime; preparation does not continuously request redraws just to
-   poll its future.
-2. **Warm:** create a pending renderer for each live window and draw its current
-   UI into that renderer. `begin_warm_up_offscreen` submits the recorded primitives
-   to an offscreen texture. `poll_warm_up_offscreen` polls completion without
-   waiting on the event loop; pending polls schedule a redraw deadline about
-   16 ms later. The GPU warm-up deadline is three seconds.
-3. **Commit pending:** retain the warmed compositor and renderers. Keep software
-   active until the commit boundary, following a successful software presentation.
-4. **Commit:** install the warmed renderers and create/configure their visible
-   surfaces. Retain the old compositor and per-window rendering state for rollback.
-   Request the hardware frame immediately.
-5. **Await first presentation:** require evidence that each required live window
-   presented through wgpu. Missing presentation has its own three-second timeout.
-   On success, release the retained software resources and report completion.
-   On failure, restore the retained renderer state and report the failure/rollback
-   outcome.
+## Software resources
 
-The synchronous `warm_up_offscreen` compatibility method still exists, with a
-bounded wait. The strict runtime path uses the begin/poll methods instead.
+Text scroll matching is bounded to 65,536 comparisons; exhausted searches redraw.
+Damage merging bounds cases above 256 regions with a union. Zero-damage frames
+share layer snapshots; opaque bounded scroll regions copy in place.
 
-## Visual continuity and resource ownership
+Linear-image resampling caches up to 128 entries and 4 Mi pixels.
+Text clipping borrows full-width strips or reuses crop storage; clip masks reuse
+identical bounds. Animated images use fractional bounds with `Image::snap(false)`.
 
-Software can continue producing frames during preparation and warming. The strict
-frame boundary is commit: the final successful pre-commit frame is software, and
-the first successful post-commit frame must be hardware. This does not mean that
-all software frames stop when GPU preparation starts.
+About uses a shared pausable 60 Hz clock. Vulkan draws its trail procedurally;
+software generates the field on the CPU. Closing, clipping, and focus loss stop
+animation scheduling.
 
-The warmed renderers survive into commit, including their renderer-local image
-and text state. Device/pipeline resources shared by the GPU engine are also reused.
-The temporary renderer is no longer empty or discarded before the first real UI
-frame.
-
-Graphics geometry caches can contain backend-specific values. The runtime
-invalidates them around the temporary GPU draw, before returning to software,
-and at commit/rollback. This avoids mixing fallback renderer families while
-retaining renderer-local warm resources.
-
-Visible surface creation/configuration still happens synchronously at commit.
-Driver and OS work can therefore stall that boundary. The implementation does
-not promise zero-millisecond switching or prove that every asynchronously loaded
-image is ready merely because a warm submission completed.
-
-Failure categories distinguish prepare, warm-up, commit, first presentation,
-cancellation, unsupported operation, missing renderer evidence, and rollback
-problems. Historical window closing/resizing and injected-failure captures are
-recorded in [VULKAN_RENDERING.md](VULKAN_RENDERING.md). They describe the tested
-scenarios and machines, not a universal no-flash guarantee.
-
-## Software rendering optimizations
-
-The implementation retains the existing filtering, clipping, and blending rules while
-reducing repeated work:
-
-| Path | Current behavior |
-| --- | --- |
-| Text scroll matching | Skip identical scenes, prune candidates that cannot beat the best match, and limit matching to 65,536 comparisons. Fall back to ordinary damage redraw when the budget is exhausted. Compute each layer's candidate once per presentation. |
-| Fragmented damage | Cache the best merge for each row of the pair matrix while preserving the greedy merge order. Above 256 regions, conservatively redraw their bounding union. |
-| Frame retention | Share layer snapshots through `Arc<[Layer]>` on zero-damage frames. Changed frames still snapshot their layers. |
-| Scroll copy | Copy opaque, fully bounded scroll regions in place. Translucent or clipped cases keep the snapshot/composition path. |
-| Linear images | Cache the exact straight-alpha resampling result by image identity and physical size. The cache is limited to 128 entries and 4 Mi pixels (16 MiB of RGBA); oversized results are transient. |
-| Text clipping | Borrow contiguous full-width row strips; reuse scratch storage for narrower crops. |
-| Clip masks | Reuse identical bounds and clear the previous rectangle's area between changes, using the same rasterizer for fractional coverage. |
-
-These reduce specific costs; they do not make every frame allocation-free.
-Paragraph misses can still rasterize full paragraphs, changed frames still clone
-layer data, and native presentation costs remain platform-dependent.
-
-## Diagnostics
-
-Enable `FRAGILE_PERF_TRACE=1` to collect CSV events and optionally set
-`FRAGILE_PERF_TRACE_DIR`. App, winit, fallback compositor, and tiny-skia events
-share the trace file. Primitive-level software events are buffered until draw or
-presentation boundaries; strict handoff phase evidence is flushed as it occurs.
-Tracing still formats records and performs I/O, so use untraced release builds
-for representative timings.
-
-Useful timing fields in `tiny_skia_present` include `scroll_us`,
-`damage_us`, `snapshot_us`, `grouping_us`, and `os_present_us`.
-`tiny_skia_present_draw` reports damage regions, layer/primitive counts,
-clip-mask reuse/rebuilds, paragraph-raster hits/misses/bypasses, and glyph counts.
-These fields cover different scopes and should not be treated as interchangeable
-whole-frame timings.
-
-Handoff trace events include renderer family, backend/adapter, submission
-completion, dimensions, pass count, and elapsed time. Commit and first-present
-events establish ordering.
-
-## Validation
-
-Run from the application repository root:
-
-```powershell
-cargo test --locked
-cargo check --locked --no-default-features
-cargo test --locked -p iced_graphics --lib
-cargo test --locked -p iced_tiny_skia --lib --features iced_tiny_skia/image
-cargo test --locked -p iced_winit -p iced_wgpu --lib
-```
-
-Icon parity checks compare CPU/GPU output at 100%, 150%, and 200% scale and require
-cached-frame equality within each renderer.
-Vendor tests compare optimized pixel-copy, clipping, resampling, mask, and damage
-behavior against reference paths.
-
-Windows results do not establish Linux/macOS rendering behavior. Previously
-recorded WSL/Linux strict runs were blocked by GPU adapter creation; native macOS
-strict handoff remains unverified. Full IME interaction and manual no-flash checks
-across supported drivers/platforms remain separate validation work.
-
-## Maintaining the vendor changes
-
-See [DEVELOPMENT.md](DEVELOPMENT.md#vendored-dependencies) for vendor updates and validation.
+See [Vulkan resource ownership](VULKAN_RENDERING.md) and
+[diagnostics and checks](DEVELOPMENT.md#renderer-diagnostics).
